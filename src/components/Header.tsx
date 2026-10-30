@@ -36,6 +36,7 @@ export const Header: React.FC<HeaderProps> = ({
   is2FAEnabled,
   onPreviewBridge,
   onOpenSupabase,
+  onOpenVercel,
   onResetAllMetrics,
 }) => {
   const tabs = [
@@ -97,6 +98,17 @@ export const Header: React.FC<HeaderProps> = ({
             <ShieldCheck className="w-3.5 h-3.5" />
             <span>{is2FAEnabled ? '2FA Ativo' : 'Ativar 2FA'}</span>
           </button>
+
+          <a
+            href="https://wa.me/5541998778348"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs transition border bg-emerald-950/60 text-emerald-300 border-emerald-800/60 hover:bg-emerald-900/60"
+            title="Seu WhatsApp oficial de conversão configurado"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="font-medium">WhatsApp: (41) 99877-8348</span>
+          </a>
 
           <button
             onClick={onOpenSupabase}

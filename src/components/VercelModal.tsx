@@ -154,6 +154,31 @@ export const VercelModal: React.FC<VercelModalProps> = ({ isOpen, onClose }) => 
             </div>
           </div>
 
+          {/* White Screen Alert & Direct Solution */}
+          <div className="bg-amber-950/40 border border-amber-600/50 rounded-2xl p-4 space-y-3">
+            <div className="flex items-center gap-2 text-amber-400 font-bold text-xs uppercase tracking-wider">
+              <Zap className="w-4 h-4 text-amber-400" />
+              <span>Por que o seu link do Vercel apareceu em branco e como resolver:</span>
+            </div>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              No seu painel do Vercel, o deploy foi feito a partir do commit inicial <code className="text-amber-300 font-mono">a401303 feat: initialize AutoViral AI project</code> (enviado antes de finalizarmos o código, o WhatsApp <strong className="text-emerald-400">(41) 99877-8348</strong>, a campanha de Milhas e o arquivo <code className="text-amber-300 font-mono">vercel.json</code>).
+            </p>
+            <div className="space-y-2 bg-slate-950/70 p-3 rounded-xl border border-amber-900/40 text-xs">
+              <div className="flex items-start gap-2">
+                <span className="text-emerald-400 font-bold">✓ Passo 1:</span>
+                <span>Suba ou sincronize o código atualizado no seu repositório GitHub (menu superior <strong>GitHub &gt; Export</strong>).</span>
+              </div>
+              <div className="flex items-start gap-2">
+                <span className="text-emerald-400 font-bold">✓ Passo 2:</span>
+                <span>O Vercel vai detectar automaticamente o novo commit e compilar a versão 100% funcional em 30 segundos!</span>
+              </div>
+              <div className="flex items-start gap-2">
+                <span className="text-emerald-400 font-bold">✓ Passo 3:</span>
+                <span>No Vercel, em <strong>Settings &gt; General</strong>, confirme que o <strong>Framework Preset</strong> está como <code className="text-emerald-300 font-mono">Vite</code> e o Output Directory é <code className="text-emerald-300 font-mono">dist</code>.</span>
+              </div>
+            </div>
+          </div>
+
           {/* Vercel.json status */}
           <div className="p-3.5 bg-slate-800/30 rounded-xl border border-slate-800 flex items-center justify-between text-xs">
             <div className="flex items-center gap-2">

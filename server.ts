@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import { GoogleGenAI, Type } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
+import fs from 'fs';
 
 dotenv.config();
 
@@ -86,7 +87,7 @@ let serverCampaigns: ServerCampaign[] = [
     targetAudience: 'Adultos de 24 a 42 anos que travam na fala em reuniões e entrevistas',
     painPointTargeted: 'Medo de passar vergonha ao falar e perder promoções de trabalho',
     checkoutUrl: 'https://pay.exemplo.com/ingles-fluente',
-    whatsappNumber: '5511999998888',
+    whatsappNumber: '5541998778348',
     price: 147.0,
     status: 'active',
     createdAt: new Date().toISOString(),
@@ -105,7 +106,7 @@ let serverCampaigns: ServerCampaign[] = [
     targetAudience: 'Mães e professoras de crianças agitadas com dificuldade de alfabetização',
     painPointTargeted: 'Exaustão materna e falta de tempo para planejar atividades que acalmem a criança',
     checkoutUrl: 'https://pay.exemplo.com/kit-psicopedagogia',
-    whatsappNumber: '5531988887777',
+    whatsappNumber: '5541998778348',
     price: 67.0,
     status: 'active',
     createdAt: new Date().toISOString(),
@@ -124,7 +125,7 @@ let serverCampaigns: ServerCampaign[] = [
     targetAudience: 'Mulheres de 28 a 55 anos que sofrem com efeito sanfona e inchaço',
     painPointTargeted: 'Frustração com dietas malucas e roupas favoritas que não entram mais',
     checkoutUrl: 'https://pay.exemplo.com/protocolo-seca21',
-    whatsappNumber: '5521977776666',
+    whatsappNumber: '5541998778348',
     price: 97.0,
     status: 'active',
     createdAt: new Date().toISOString(),
@@ -143,7 +144,7 @@ let serverCampaigns: ServerCampaign[] = [
     targetAudience: 'Pessoas buscando renda extra imediata sem sair de casa ou aparecer',
     painPointTargeted: 'RENDA EXTRA HOJE',
     checkoutUrl: 'https://pay.exemplo.com/milhas-30',
-    whatsappNumber: '5511988889999',
+    whatsappNumber: '5541998778348',
     price: 385.0,
     status: 'active',
     createdAt: new Date().toISOString(),
@@ -599,7 +600,7 @@ function getSmartSalesBotReply(userMessage: string, productContext: any) {
   // Dúvida 5: WhatsApp / Atendente humano
   if (msg.includes('whatsapp') || msg.includes('humano') || msg.includes('atendente') || msg.includes('falar')) {
     return {
-      reply: `Com certeza! Nosso especialista está disponível para falar com você diretamente no WhatsApp oficial (+${productContext?.whatsapp || '5511999998888'}). Por lá você pode tirar dúvidas pontuais e até solicitar condições especiais no Pix. Quer que eu te redirecione agora?`,
+      reply: `Com certeza! Nosso especialista está disponível para falar com você diretamente no WhatsApp oficial (+${productContext?.whatsapp || '5541998778348'}). Por lá você pode tirar dúvidas pontuais e até solicitar condições especiais no Pix. Quer que eu te redirecione agora?`,
       suggestedQuickReplies: [
         'Sim, abrir no WhatsApp!',
         'Prefiro fechar por aqui mesmo',
@@ -869,11 +870,18 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.resolve(__dirname, 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.resolve(distPath, 'index.html'));
-    });
+    const distPath = path.resolve(process.cwd(), 'dist');
+    if (fs.existsSync(distPath)) {
+      app.use(express.static(distPath));
+      app.get('*', (req, res) => {
+        res.sendFile(path.resolve(distPath, 'index.html'));
+      });
+    } else {
+      // Emergency fallback if dist hasn't finished building
+      app.use((req, res) => {
+        res.status(200).send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>AutoViral AI</title></head><body style="background:#020617;color:#f8fafc;font-family:sans-serif;padding:40px;text-align:center;"><h2>AutoViral AI está inicializando...</h2><p>Recarregue em alguns segundos.</p></body></html>`);
+      });
+    }
   }
 
   app.listen(PORT, '0.0.0.0', () => {

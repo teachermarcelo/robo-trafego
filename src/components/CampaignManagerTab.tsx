@@ -44,7 +44,7 @@ export const CampaignManagerTab: React.FC<CampaignManagerTabProps> = ({
   const [targetAudience, setTargetAudience] = useState('');
   const [painPointTargeted, setPainPointTargeted] = useState('');
   const [checkoutUrl, setCheckoutUrl] = useState('');
-  const [whatsappNumber, setWhatsappNumber] = useState('');
+  const [whatsappNumber, setWhatsappNumber] = useState('5541998778348');
   const [price, setPrice] = useState('97.00');
 
   const handleCreate = (e: React.FormEvent) => {
@@ -59,7 +59,7 @@ export const CampaignManagerTab: React.FC<CampaignManagerTabProps> = ({
       targetAudience: targetAudience || 'Pessoas buscando solução rápida',
       painPointTargeted: painPointTargeted || 'Resolver problema urgente com suporte',
       checkoutUrl: checkoutUrl.trim() || undefined,
-      whatsappNumber: whatsappNumber.trim() || undefined,
+      whatsappNumber: whatsappNumber.trim() || '5541998778348',
       price: parseFloat(price) || 97.0,
       status: 'active',
       createdAt: new Date().toISOString(),
@@ -76,7 +76,7 @@ export const CampaignManagerTab: React.FC<CampaignManagerTabProps> = ({
     // Reset
     setTitle('');
     setCheckoutUrl('');
-    setWhatsappNumber('');
+    setWhatsappNumber('5541998778348');
     setPainPointTargeted('');
   };
 
@@ -238,7 +238,7 @@ export const CampaignManagerTab: React.FC<CampaignManagerTabProps> = ({
                   type="text"
                   value={whatsappNumber}
                   onChange={(e) => setWhatsappNumber(e.target.value)}
-                  placeholder="Ex: 5511999998888"
+                  placeholder="Ex: 5541998778348"
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500"
                 />
               </div>

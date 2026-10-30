@@ -12,6 +12,8 @@ import { SalesBotTab } from './components/SalesBotTab';
 import { RealtimeTrackingTab } from './components/RealtimeTrackingTab';
 import { CampaignManagerTab } from './components/CampaignManagerTab';
 import { AIReportsTab } from './components/AIReportsTab';
+import { LeadFinderTab } from './components/LeadFinderTab';
+import { PublicLeadLanding } from './components/PublicLeadLanding';
 import { BridgePageModal } from './components/BridgePageModal';
 import { Security2FAModal } from './components/Security2FAModal';
 import { NotificationsModal } from './components/NotificationsModal';
@@ -53,6 +55,14 @@ export default function App() {
   const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
   const [isVercelModalOpen, setIsVercelModalOpen] = useState(false);
   const [bridgeModalCampaign, setBridgeModalCampaign] = useState<Campaign | null>(null);
+  const [isPublicLeadMode, setIsPublicLeadMode] = useState<boolean>(() => {
+    try {
+      const search = window.location.search;
+      return search.includes('p=') || search.includes('lead=') || search.includes('camp=');
+    } catch {
+      return false;
+    }
+  });
 
 
   // Selected pain from PainFinder passed to CreativeStudio
@@ -405,6 +415,25 @@ export default function App() {
 
   const unreadNotificationsCount = notifications.filter((n) => !n.read).length;
 
+  if (isPublicLeadMode) {
+    const featuredCampaign = campaigns.find((c) => c.id === 'camp-milhas-3') || campaigns[0];
+    return (
+      <PublicLeadLanding
+        campaign={featuredCampaign}
+        onTrackAction={(type, amount) => {
+          handleAddTrackingEvent({
+            campaignId: featuredCampaign.id,
+            campaignTitle: featuredCampaign.title,
+            niche: featuredCampaign.niche,
+            type,
+            amount: amount || (type === 'conversion' ? featuredCampaign.price : undefined),
+          });
+        }}
+        onGoToDashboard={() => setIsPublicLeadMode(false)}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-slate-950">
       {/* Header */}
@@ -433,6 +462,10 @@ export default function App() {
             onSimulateConversion={handleSimulateQuickConversion}
             onResetAllMetrics={handleResetToRealMode}
           />
+        )}
+
+        {activeTab === 'lead_finder' && (
+          <LeadFinderTab campaigns={campaigns} />
         )}
 
         {activeTab === 'pain_finder' && (

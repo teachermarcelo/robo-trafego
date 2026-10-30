@@ -9,6 +9,7 @@ import {
   Radio,
   ExternalLink,
   Flame,
+  Target,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -25,7 +26,6 @@ interface HeaderProps {
   onResetAllMetrics?: () => void;
 }
 
-
 export const Header: React.FC<HeaderProps> = ({
   activeTab,
   setActiveTab,
@@ -41,6 +41,7 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const tabs = [
     { id: 'dashboard', label: 'Dashboard & Métricas', icon: TrendingUp },
+    { id: 'lead_finder', label: 'Achar Pessoas & Leads', icon: Target, badge: 'Prático' },
     { id: 'pain_finder', label: 'Busca de Dores & Tendências', icon: Sparkles, badge: 'IA' },
     { id: 'creatives', label: 'Estúdio de Criativos IA', icon: Flame, badge: 'Viral' },
     { id: 'sales_bot', label: 'Robô de Vendas 24/7', icon: Radio },

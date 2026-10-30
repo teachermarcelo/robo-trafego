@@ -14,6 +14,7 @@ import {
   Flame,
   Zap,
   RotateCcw,
+  Target,
 } from 'lucide-react';
 import { Campaign, TrackingEvent } from '../types';
 
@@ -88,21 +89,29 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
 
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto">
             <button
+              onClick={() => onNavigateTab('lead_finder')}
+              className="flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-slate-950 font-bold text-xs px-4 py-3 rounded-xl shadow-lg shadow-emerald-600/30 transition transform active:scale-95"
+            >
+              <Target className="w-4 h-4 text-slate-950" />
+              <span>Achar Pessoas Reais (Guia & Ferramentas)</span>
+            </button>
+
+            <button
               onClick={() => onNavigateTab('pain_finder')}
-              className="flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold text-xs px-4 py-3 rounded-xl shadow-lg shadow-indigo-600/30 transition transform active:scale-95"
+              className="flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-indigo-300 font-semibold text-xs px-4 py-3 rounded-xl transition"
             >
               <Sparkles className="w-4 h-4 text-amber-300" />
-              <span>Descobrir Novas Dores com IA</span>
+              <span>Buscar Dores com IA</span>
             </button>
 
             {onResetAllMetrics && (
               <button
                 onClick={onResetAllMetrics}
-                className="flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-amber-400 font-semibold text-xs px-4 py-3 rounded-xl transition"
+                className="flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-amber-400 font-semibold text-xs px-3 py-3 rounded-xl transition"
                 title="Zerar dados de exemplo para acompanhar apenas seus números reais"
               >
                 <RotateCcw className="w-4 h-4" />
-                <span>Modo 100% Real: Zerar para R$ 0,00</span>
+                <span>Zerar (R$ 0,00)</span>
               </button>
             )}
           </div>

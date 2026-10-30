@@ -80,6 +80,25 @@ export interface ServerCampaign {
 
 let serverCampaigns: ServerCampaign[] = [
   {
+    id: 'camp-tarefinhas-autismo',
+    title: '+ 100 Tarefinha Educação Infantil e Também para Criança Autista',
+    niche: 'psicopedagogia',
+    nicheLabel: 'Psicopedagogia, Pedagogia & Autismo (TEA)',
+    targetAudience: 'Pedagogos, psicopedagogos, professoras de educação infantil e mães de crianças autistas (TEA)',
+    painPointTargeted: 'Exaustão de planejar atividades inclusivas do zero e dificuldade de prender a atenção de crianças com TEA ou TDAH',
+    checkoutUrl: 'https://pay.hotmart.com/U95248783T',
+    whatsappNumber: '5541998778348',
+    price: 37.0,
+    status: 'active',
+    createdAt: new Date().toISOString(),
+    antiBanOrganicMode: true,
+    platforms: ['pinterest', 'instagram', 'tiktok', 'whatsapp'],
+    impressions: 0,
+    clicks: 0,
+    conversions: 0,
+    revenue: 0.0,
+  },
+  {
     id: 'camp-1',
     title: 'Inglês Rápido para Reuniões e Trabalho',
     niche: 'ingles',

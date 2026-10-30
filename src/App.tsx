@@ -416,7 +416,13 @@ export default function App() {
   const unreadNotificationsCount = notifications.filter((n) => !n.read).length;
 
   if (isPublicLeadMode) {
-    const featuredCampaign = campaigns.find((c) => c.id === 'camp-milhas-3') || campaigns[0];
+    const search = (typeof window !== 'undefined' ? window.location.search : '').toLowerCase();
+    let featuredCampaign = campaigns.find((c) => c.id === 'camp-tarefinhas-autismo') || campaigns[0];
+    if (search.includes('milha')) {
+      featuredCampaign = campaigns.find((c) => c.id === 'camp-milhas-3') || featuredCampaign;
+    } else if (search.includes('ingles')) {
+      featuredCampaign = campaigns.find((c) => c.id === 'camp-1') || featuredCampaign;
+    }
     return (
       <PublicLeadLanding
         campaign={featuredCampaign}

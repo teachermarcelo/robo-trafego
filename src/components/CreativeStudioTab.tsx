@@ -47,6 +47,38 @@ export const CreativeStudioTab: React.FC<CreativeStudioTabProps> = ({
   const [savedAsCampaign, setSavedAsCampaign] = useState(false);
 
   const [creatives, setCreatives] = useState<CreativePackage>(() => {
+    const isTarefinhas =
+      defaultProduct.toLowerCase().includes('tarefinha') ||
+      defaultProduct.toLowerCase().includes('autista') ||
+      defaultProduct.toLowerCase().includes('psicopedagog');
+
+    if (isTarefinhas) {
+      return {
+        platform: 'all',
+        videoScript: {
+          title: `Roteiro Viral: + 100 Tarefinha Educação Infantil e Autismo`,
+          hook: `"Professora ou mãe atípica: você ainda passa horas do seu final de semana na frente do computador procurando ou criando atividades do zero?"`,
+          retention: `A verdade é que crianças na Educação Infantil e principalmente no espectro autista precisam de pistas visuais claras e sem poluição sensorial para desenvolverem coordenação motora, foco e linguagem sem crises de frustração.`,
+          pitch: `Com o pacote "+ 100 Tarefinhas Educação Infantil e Autismo", você tem um material lúdico e estruturado em PDF de alta resolução, pronto para imprimir quantas vezes quiser para seus alunos ou filhos.`,
+          cta: `Comente "EU QUERO" aqui embaixo que o robô te manda o material completo no direct com desconto especial de R$ 37,00!`,
+        },
+        pinterestPin: {
+          headline: `+ 100 Tarefinhas em PDF para Imprimir: Educação Infantil e Autismo (TEA)`,
+          overlayText: `Coordenação Motora, Foco e Alfabetização • Arquivo em PDF para Imprimir`,
+          callToAction: `Salvar Este Pin & Baixar Atividades Agora`,
+        },
+        instagramCarousel: [
+          { slide: 1, text: `3 erros graves ao planejar atividades para Educação Infantil e crianças com autismo (TEA)` },
+          { slide: 2, text: `Erro 1: Folhas poluídas com desenhos desnecessários que causam sobrecarga sensorial e desatenção.` },
+          { slide: 3, text: `Erro 2: Cobrar escrita antes de trabalhar o fortalecimento da coordenação motora fina e grafomotricidade.` },
+          { slide: 4, text: `A solução: Caderno com + 100 atividades estruturadas e progressivas prontas para imprimir.` },
+          { slide: 5, text: `Quer receber as 100 tarefinhas? Toque no link da bio ou comente EU QUERO!` },
+        ],
+        hashtags: ['#educacaoinfantil', '#pedagogia', '#psicopedagogia', '#atividadesautismo', '#autismobrasil', '#atividadesparaimprimir', '#professora'],
+        imagePrompt: `Cute high resolution illustration of smiling diverse Brazilian children with glasses and school supplies, cartoon 3d style for kids educational workbook cover.`,
+      };
+    }
+
     const isMiles = defaultProduct.toLowerCase().includes('milha');
     if (isMiles) {
       return {

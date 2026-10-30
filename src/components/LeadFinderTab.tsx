@@ -16,6 +16,10 @@ import {
   ArrowRight,
   TrendingUp,
   Share2,
+  BookOpen,
+  Heart,
+  FileText,
+  Pin,
 } from 'lucide-react';
 import { Campaign } from '../types';
 
@@ -24,11 +28,11 @@ interface LeadFinderTabProps {
 }
 
 export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
+  const [activeNicheTab, setActiveNicheTab] = useState<'pedagogia' | 'milhas'>('pedagogia');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [selectedProfileIndex, setSelectedProfileIndex] = useState(0);
 
-  const primaryCampaign = campaigns.find((c) => c.id === 'camp-milhas-3') || campaigns[0];
-  const myWhatsApp = primaryCampaign?.whatsappNumber || '5541998778348';
+  const myWhatsApp = '5541998778348';
 
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
@@ -36,8 +40,57 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
     setTimeout(() => setCopiedId(null), 2500);
   };
 
-  // Target competitor profiles where thousands of eager buyers ask questions daily
-  const targetProfiles = [
+  // Target profiles for Pedagogia / Psicopedagogia / Autismo
+  const targetProfilesPedagogia = [
+    {
+      handle: '@redepedagogica',
+      name: 'Rede Pedagógica',
+      url: 'https://www.instagram.com/redepedagogica/',
+      audience: '1.3M seguidoras',
+      focus: 'Maior comunidade de professoras e pedagogas do Brasil',
+      whatToLook: 'Abra os posts sobre "atividades para sala de aula" e "inclusão escolar". Os comentários estão cheios de professoras cansadas pedindo ideias prontas.',
+      script: `Oi profe! Vi que você comentou lá no post procurando atividades adaptadas... se você quiser economizar tempo, eu tenho um pacote com + 100 tarefinhas lúdicas em PDF prontas para imprimir, inclusive para crianças com autismo/TEA. Deixei a amostra aqui: https://robo-trafego.vercel.app/?p=tarefinhas&src=outreach_direct`,
+    },
+    {
+      handle: '@taiseagostini',
+      name: 'Taise Agostini',
+      url: 'https://www.instagram.com/taiseagostini/',
+      audience: '1.8M seguidoras',
+      focus: 'Educação Infantil, recursos lúdicos e alfabetização',
+      whatToLook: 'Professoras pedindo moldes e atividades de coordenação motora e vogais.',
+      script: `Olá! Vi seu comentário no post da Taise sobre atividades lúdicas. Desenvolvi um kit com mais de 100 tarefinhas em PDF prontas para imprimir para Educação Infantil e crianças atípicas. Dá uma olhada aqui se ajudar: https://robo-trafego.vercel.app/?p=tarefinhas&src=outreach_direct`,
+    },
+    {
+      handle: '@psicopedagogiandope',
+      name: 'Psicopedagogiando PE',
+      url: 'https://www.instagram.com/psicopedagogiandope/',
+      audience: '210k seguidoras',
+      focus: 'Psicopedagogia clínica e institucional, intervenção TEA e TDAH',
+      whatToLook: 'Psicopedagogas e mães atípicas tirando dúvidas sobre materiais de estimulação cognitiva.',
+      script: `Olá! Vi sua dúvida sobre materiais de intervenção para crianças atípicas. Esse material com +100 tarefinhas adaptadas em PDF para autismo e coordenação motora pode te ajudar bastante: https://robo-trafego.vercel.app/?p=tarefinhas&src=outreach_direct`,
+    },
+    {
+      handle: '@autismoerealidade',
+      name: 'Autismo e Realidade',
+      url: 'https://www.instagram.com/autismoerealidade/',
+      audience: '190k seguidores',
+      focus: 'Famílias atípicas, mães de crianças com TEA e terapeutas',
+      whatToLook: 'Mães desabafando sobre a dificuldade de fazer a criança fazer lição de casa ou prestar atenção.',
+      script: `Olá, mamãe! Sei o quanto pode ser desafiador encontrar atividades que prendam a atenção dos nossos pequenos atípicos. Esse caderno com 100 tarefinhas com pistas visuais para imprimir me ajudou demais: https://robo-trafego.vercel.app/?p=tarefinhas&src=outreach_direct`,
+    },
+    {
+      handle: '@mamae_educadora',
+      name: 'Mamãe Educadora',
+      url: 'https://www.instagram.com/mamae_educadora/',
+      audience: '350k seguidoras',
+      focus: 'Atividades infantis para imprimir e fazer em casa',
+      whatToLook: 'Mães e professoras pedindo o arquivo em PDF para imprimir.',
+      script: `Oi! Vi seu comentário no post querendo atividades em PDF. Esse material com 100 atividades lúdicas para imprimir tá com promoção hoje: https://robo-trafego.vercel.app/?p=tarefinhas&src=outreach_direct`,
+    },
+  ];
+
+  // Target competitor profiles for Milhas
+  const targetProfilesMilhas = [
     {
       handle: '@passageirodeprimeira',
       name: 'Passageiro de Primeira',
@@ -45,6 +98,7 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
       audience: '680k seguidores',
       focus: 'Cartões Black, Salas VIP e Emissões de Passagens com Milhas',
       whatToLook: 'Abra os posts sobre "Promoção Livelo/Esfera" e olhe os comentários de pessoas perguntando como funciona ou se vale a pena.',
+      script: `Oi! Vi que você comentou lá no post sobre as milhas da Livelo... se você ainda tiver com dúvida, eu tenho um resumo prático mostrando como acumular sem pagar anuidade: https://robo-trafego.vercel.app/?p=milhas&src=outreach_direct`,
     },
     {
       handle: '@melhoresdestinos',
@@ -53,6 +107,7 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
       audience: '3.1M seguidores',
       focus: 'Promoções de passagens e dicas de viagem econômica',
       whatToLook: 'Pessoas reclamando nos comentários que passagens aéreas estão caras. Elas são leads perfeitos para a Comunidade de Milhas!',
+      script: `Oi! Vi seu comentário no post falando sobre o preço da passagem. Dá para viajar pagando quase nada se usar milhas de gastos do dia a dia: https://robo-trafego.vercel.app/?p=milhas&src=outreach_direct`,
     },
     {
       handle: '@pontos_e_milhas',
@@ -61,54 +116,61 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
       audience: '420k seguidores',
       focus: 'Dicas práticas de cartões e acúmulo no dia a dia',
       whatToLook: 'Pessoas perguntando qual cartão pedir ou como não pagar anuidade.',
-    },
-    {
-      handle: '@estevaopelomundo',
-      name: 'Estêvão Pelo Mundo',
-      url: 'https://www.instagram.com/estevaopelomundo/',
-      audience: '1.4M seguidores',
-      focus: 'Estilo de vida, viagens de classe executiva com milhas',
-      whatToLook: 'Seguidores maravilhados querendo saber como viajar pagando quase nada de passagem.',
-    },
-    {
-      handle: '@kartao.black',
-      name: 'Cartões & Benefícios',
-      url: 'https://www.instagram.com/kartao.black/',
-      audience: '290k seguidores',
-      focus: 'Comparativos de pontuação de cartões de bancos',
-      whatToLook: 'Gente com faturas altas querendo transformar pontos em dinheiro.',
+      script: `Fala! Se tiver procurando como pontuar com os gastos da sua fatura sem pagar anuidade, criei esse resumo: https://robo-trafego.vercel.app/?p=milhas&src=outreach_direct`,
     },
   ];
 
-  // Hot tracking links
-  const trackedLinks = [
+  const currentProfiles =
+    activeNicheTab === 'pedagogia' ? targetProfilesPedagogia : targetProfilesMilhas;
+
+  // Tracked Links for Pedagogia
+  const trackedLinksPedagogia = [
     {
-      id: 'link-replyrush',
+      id: 'link-tarefas-replyrush',
       label: 'Link para o ReplyRush (Direct Automático do Instagram)',
-      url: 'https://robo-trafego.vercel.app/?p=milhas&src=replyrush',
-      desc: 'Coloque esta URL dentro da mensagem do ReplyRush que dispara para quem comentar seu post.',
+      url: 'https://robo-trafego.vercel.app/?p=tarefinhas&src=replyrush',
+      desc: 'Use esta URL na mensagem automática do ReplyRush para quem comentar "EU QUERO" no seu post.',
     },
     {
-      id: 'link-bio',
-      label: 'Link para a Bio do seu Instagram / TikTok',
-      url: 'https://robo-trafego.vercel.app/?p=milhas&src=instagram_bio',
-      desc: 'Coloque no campo "Site" do seu perfil para quem visitar o seu feed.',
+      id: 'link-tarefas-pinterest',
+      label: 'Link para Pins do Pinterest (Tráfego Orgânico Passivo)',
+      url: 'https://robo-trafego.vercel.app/?p=tarefinhas&src=pinterest',
+      desc: 'O Pinterest é a maior fonte de pedagogas buscando "atividades autismo para imprimir" do Brasil!',
     },
     {
-      id: 'link-whatsapp-direct',
-      label: 'Link Direto do seu WhatsApp com Mensagem Pronta',
+      id: 'link-tarefas-hotmart',
+      label: 'Link Direto de Pagamento Hotmart (R$ 37,00)',
+      url: 'https://pay.hotmart.com/U95248783T',
+      desc: 'Link seguro do checkout da Hotmart para o cliente passar o Pix ou cartão com download imediato.',
+    },
+    {
+      id: 'link-tarefas-whatsapp',
+      label: 'Link do seu WhatsApp com Mensagem de Tarefinhas',
       url: `https://wa.me/${myWhatsApp}?text=${encodeURIComponent(
-        'Olá! Vi seu conteúdo sobre milhas e renda extra e quero entender como funciona a Comunidade Milhas 3.0!'
+        'Olá! Vi o material de 100 Tarefinhas de Educação Infantil e Autismo e gostaria de tirar uma dúvida pedagógica!'
       )}`,
-      desc: 'O cliente clica e já abre a conversa no seu telefone (41) 99877-8348 com a mensagem digitada.',
-    },
-    {
-      id: 'link-checkout-eduzz',
-      label: 'Link de Checkout Eduzz Direto (R$ 385,00)',
-      url: 'https://chk.eduzz.com/39ZEGY8198',
-      desc: 'Link de pagamento seguro da Eduzz para quem já está pronto para passar o cartão ou Pix.',
+      desc: 'Abre a conversa direto no seu WhatsApp (41) 99877-8348.',
     },
   ];
+
+  // Tracked Links for Milhas
+  const trackedLinksMilhas = [
+    {
+      id: 'link-milhas-replyrush',
+      label: 'Link para o ReplyRush (Milhas)',
+      url: 'https://robo-trafego.vercel.app/?p=milhas&src=replyrush',
+      desc: 'Dispara no direct para quem comentar "MILHAS" no seu post.',
+    },
+    {
+      id: 'link-milhas-eduzz',
+      label: 'Checkout Eduzz Milhas (R$ 385,00)',
+      url: 'https://chk.eduzz.com/39ZEGY8198',
+      desc: 'Página de pagamento oficial da Eduzz.',
+    },
+  ];
+
+  const currentTrackedLinks =
+    activeNicheTab === 'pedagogia' ? trackedLinksPedagogia : trackedLinksMilhas;
 
   return (
     <div className="space-y-8 animate-in fade-in duration-300">
@@ -123,47 +185,74 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
           </div>
 
           <h1 className="text-2xl sm:text-4xl font-black text-white tracking-tight">
-            Como Achar Pessoas Reais e Vender Todos os Dias
+            Como Achar Pessoas Reais e Fazer Suas Primeiras Vendas
           </h1>
 
           <p className="text-sm sm:text-base text-slate-300 leading-relaxed">
-            Você não precisa de seguidores para começar. O segredo do tráfego orgânico é ir exatamente onde as pessoas já estão tirando dúvidas sobre milhas e viagens, e usar o <strong className="text-emerald-400">ReplyRush</strong> (Auto-DM) para mandar o seu link no automático!
+            Selecione a campanha abaixo para ver exatamente onde os compradores estão reunidos agora no Instagram e Pinterest, e use o <strong className="text-emerald-400">ReplyRush</strong> para vender no piloto automático!
           </p>
+
+          {/* Niche Selector Tabs */}
+          <div className="pt-2 flex flex-wrap gap-2">
+            <button
+              onClick={() => {
+                setActiveNicheTab('pedagogia');
+                setSelectedProfileIndex(0);
+              }}
+              className={`px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 transition ${
+                activeNicheTab === 'pedagogia'
+                  ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/30'
+                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+              }`}
+            >
+              <Heart className="w-4 h-4 fill-current" />
+              <span>+ 100 Tarefinhas Educação Infantil & Autismo (Hotmart)</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setActiveNicheTab('milhas');
+                setSelectedProfileIndex(0);
+              }}
+              className={`px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 transition ${
+                activeNicheTab === 'milhas'
+                  ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/30'
+                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+              }`}
+            >
+              <Zap className="w-4 h-4" />
+              <span>Comunidade Milhas 3.0 (Eduzz)</span>
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* 3 Step Workflow Overview */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl space-y-3">
-          <div className="w-8 h-8 rounded-lg bg-emerald-950 text-emerald-400 font-bold flex items-center justify-center text-sm border border-emerald-800/50">
-            1
+      {/* Special Box for Tarefinhas Autismo */}
+      {activeNicheTab === 'pedagogia' && (
+        <div className="bg-gradient-to-r from-emerald-950/70 to-slate-900 border border-emerald-700/50 rounded-3xl p-6 flex flex-col md:flex-row items-center gap-6 shadow-xl">
+          <div className="w-32 shrink-0 rounded-2xl overflow-hidden border border-emerald-500/40 shadow-lg">
+            <img
+              src="/assets/aistudio/image_e9e67204.png"
+              alt="Capa do eBook Tarefinhas"
+              className="w-full h-auto"
+            />
           </div>
-          <h3 className="font-bold text-white text-base">Postar o Gancho Viral</h3>
-          <p className="text-xs text-slate-400 leading-relaxed">
-            Pegue um roteiro pronto na aba <strong className="text-emerald-400">Estúdio de Criativos IA</strong> e poste no Reels/TikTok. Termine sempre com: <em>"Comente 'MILHAS' para receber o passo a passo no seu direct"</em>.
-          </p>
-        </div>
-
-        <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl space-y-3">
-          <div className="w-8 h-8 rounded-lg bg-indigo-950 text-indigo-400 font-bold flex items-center justify-center text-sm border border-indigo-800/50">
-            2
+          <div className="space-y-2 flex-1">
+            <div className="flex items-center gap-2">
+              <span className="px-2.5 py-0.5 rounded-full bg-emerald-500 text-slate-950 text-[10px] font-black uppercase">
+                Validação Imediata
+              </span>
+              <span className="text-xs text-slate-400">ID Hotmart: 4464330</span>
+            </div>
+            <h3 className="text-lg font-bold text-white">
+              Por que esse produto é o mais fácil de vender para validar o robô hoje?
+            </h3>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              O produto custa apenas <strong className="text-emerald-400">R$ 37,00</strong>. É uma compra por impulso! Professoras e mães de crianças com autismo gastam horas no fim de semana criando atividades; pagar R$ 37 para receber 100 tarefinhas prontas em PDF para imprimir é um alívio imediato.
+            </p>
           </div>
-          <h3 className="font-bold text-white text-base">ReplyRush Envia a DM</h3>
-          <p className="text-xs text-slate-400 leading-relaxed">
-            A ferramenta <strong className="text-indigo-400">ReplyRush</strong> (que você favoritou) detecta o comentário e envia imediatamente a sua mensagem com o link da sua página no direct da pessoa.
-          </p>
         </div>
-
-        <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl space-y-3">
-          <div className="w-8 h-8 rounded-lg bg-amber-950 text-amber-400 font-bold flex items-center justify-center text-sm border border-amber-800/50">
-            3
-          </div>
-          <h3 className="font-bold text-white text-base">Conversão no WhatsApp</h3>
-          <p className="text-xs text-slate-400 leading-relaxed">
-            A pessoa acessa a página, tira dúvidas no seu WhatsApp <strong className="text-amber-400">(41) 99877-8348</strong> e você fecha a venda de R$ 385,00 na Eduzz com o roteiro do Robô de Vendas!
-          </p>
-        </div>
-      </div>
+      )}
 
       {/* SECTION 1: Configuração do ReplyRush (Copy & Paste Ready) */}
       <div className="bg-slate-900 border border-indigo-900/60 rounded-3xl p-6 sm:p-8 space-y-6">
@@ -174,10 +263,10 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
               <span>INTEGRAÇÃO COM REPLYRUSH (AUTO DM)</span>
             </div>
             <h2 className="text-xl sm:text-2xl font-bold text-white">
-              Sua Mensagem Automática para o ReplyRush
+              Sua Mensagem Pronta para o ReplyRush (Auto-DM)
             </h2>
             <p className="text-xs text-slate-400">
-              Copie este texto e cole no campo de resposta automática no seu painel do ReplyRush:
+              Cole essa mensagem no campo de resposta automática no seu painel do ReplyRush:
             </p>
           </div>
 
@@ -196,15 +285,18 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
         <div className="p-5 bg-slate-950 border border-slate-800 rounded-2xl space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-300">
-              Mensagem que o ReplyRush vai mandar no Direct do cliente:
+              {activeNicheTab === 'pedagogia'
+                ? 'Mensagem que o robô vai enviar para quem comentar "EU QUERO" no post de Tarefinhas:'
+                : 'Mensagem que o robô vai enviar para quem comentar "MILHAS":'}
             </span>
             <button
-              onClick={() =>
-                copyToClipboard(
-                  `Opa! Vi que você comentou no meu post querendo aprender sobre milhas e renda extra. 🚀\n\nCriei uma página explicando o passo a passo exato para você começar sem precisar gastar nada a mais:\n👉 https://robo-trafego.vercel.app/?p=milhas&src=replyrush\n\nSe você tiver qualquer dúvida ou quiser falar comigo, pode me chamar direto no meu WhatsApp oficial:\n📲 https://wa.me/5541998778348?text=Oi!%20Vim%20pelo%20Instagram%20e%20quero%20começar%20na%20Comunidade%20Milhas!`,
-                  'copy-replyrush-msg'
-                )
-              }
+              onClick={() => {
+                const text =
+                  activeNicheTab === 'pedagogia'
+                    ? `Olá, profe/mamãe! 🎨📚 Vi que você comentou querendo as tarefinhas inclusivas para Educação Infantil e Autismo (TEA).\n\nPreparei a página com o material completo pronto para imprimir (mais de 100 atividades lúdicas):\n👉 https://robo-trafego.vercel.app/?p=tarefinhas&src=replyrush\n\nSe tiver qualquer dúvida pedagógica ou sobre os arquivos, pode me chamar direto no meu WhatsApp oficial:\n📲 https://wa.me/5541998778348?text=Oi!%20Vim%20pelo%20Instagram%20das%20tarefinhas%20de%20autismo!`
+                    : `Opa! Vi que você comentou no meu post querendo aprender sobre milhas e renda extra. 🚀\n\nCriei uma página explicando o passo a passo exato para você começar:\n👉 https://robo-trafego.vercel.app/?p=milhas&src=replyrush\n\nSe você tiver qualquer dúvida ou quiser falar comigo, pode me chamar direto no meu WhatsApp:\n📲 https://wa.me/5541998778348?text=Oi!%20Vim%20pelo%20Instagram%20e%20quero%20começar%20na%20Comunidade%20Milhas!`;
+                copyToClipboard(text, 'copy-replyrush-msg');
+              }}
               className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold text-xs rounded-lg flex items-center gap-1.5 transition"
             >
               {copiedId === 'copy-replyrush-msg' ? (
@@ -222,7 +314,15 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
           </div>
 
           <pre className="text-xs text-slate-300 font-mono bg-slate-900/90 p-4 rounded-xl border border-slate-800 whitespace-pre-wrap leading-relaxed">
-{`Opa! Vi que você comentou no meu post querendo aprender sobre milhas e renda extra. 🚀
+            {activeNicheTab === 'pedagogia'
+              ? `Olá, profe/mamãe! 🎨📚 Vi que você comentou querendo as tarefinhas inclusivas para Educação Infantil e Autismo (TEA).
+
+Preparei a página com o material completo pronto para imprimir (mais de 100 atividades lúdicas):
+👉 https://robo-trafego.vercel.app/?p=tarefinhas&src=replyrush
+
+Se tiver qualquer dúvida pedagógica ou sobre os arquivos, pode me chamar direto no meu WhatsApp oficial:
+📲 https://wa.me/5541998778348?text=Oi!%20Vim%20pelo%20Instagram%20das%20tarefinhas%20de%20autismo!`
+              : `Opa! Vi que você comentou no meu post querendo aprender sobre milhas e renda extra. 🚀
 
 Criei uma página explicando o passo a passo exato para você começar sem precisar gastar nada a mais:
 👉 https://robo-trafego.vercel.app/?p=milhas&src=replyrush
@@ -233,25 +333,27 @@ Se você tiver qualquer dúvida ou quiser falar comigo, pode me chamar direto no
         </div>
       </div>
 
-      {/* SECTION 2: Onde os Compradores de Milhas Estão AGORA (Radar de Mineração) */}
+      {/* SECTION 2: Perfis Alvo onde as Pedagogas e Psicopedagogas estão AGORA */}
       <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6">
         <div className="space-y-1">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-950 text-emerald-300 text-xs font-semibold border border-emerald-800/60">
             <Target className="w-3.5 h-3.5 text-emerald-400" />
-            <span>RADAR DE MINERAÇÃO ATIVA</span>
+            <span>RADAR DE MINERAÇÃO ATIVA NO INSTAGRAM</span>
           </div>
           <h2 className="text-xl sm:text-2xl font-bold text-white">
-            Perfis Onde Estão Pessoas com Dúvidas Reais de Milhas
+            {activeNicheTab === 'pedagogia'
+              ? 'Perfis Onde Estão Pedagogas, Psicopedagogas e Mães Atípicas'
+              : 'Perfis de Milhas com Comentários Quentes'}
           </h2>
           <p className="text-xs text-slate-400">
-            Clique nos perfis abaixo, olhe os comentários dos últimos posts e encontre pessoas perguntando sobre cartões e viagens:
+            Abra os perfis abaixo, olhe os comentários dos últimos posts e encontre pessoas com dúvidas:
           </p>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Profiles List */}
           <div className="space-y-3">
-            {targetProfiles.map((p, idx) => (
+            {currentProfiles.map((p, idx) => (
               <button
                 key={p.handle}
                 onClick={() => setSelectedProfileIndex(idx)}
@@ -279,7 +381,7 @@ Se você tiver qualquer dúvida ou quiser falar comigo, pode me chamar direto no
           {/* Selected Profile Detailed Prospecting Guide */}
           <div className="lg:col-span-2 bg-slate-950 border border-slate-800 rounded-2xl p-6 space-y-4">
             {(() => {
-              const current = targetProfiles[selectedProfileIndex];
+              const current = currentProfiles[selectedProfileIndex] || currentProfiles[0];
               return (
                 <>
                   <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
@@ -321,15 +423,10 @@ Se você tiver qualquer dúvida ou quiser falar comigo, pode me chamar direto no
                           💬 Script de Abordagem Amigável (Anti-Bloqueio / Sem Venda Agressiva):
                         </h4>
                         <button
-                          onClick={() =>
-                            copyToClipboard(
-                              `Oi! Vi que você comentou lá no post sobre as milhas da Livelo... se você ainda tiver com dúvida, eu tenho um resumo prático de 3 passos mostrando como acumular sem pagar anuidade no cartão. Se você quiser dar uma olhada, tá aqui: https://robo-trafego.vercel.app/?p=milhas&src=outreach_direct`,
-                              'copy-script-outreach'
-                            )
-                          }
+                          onClick={() => copyToClipboard(current.script, `copy-script-${selectedProfileIndex}`)}
                           className="text-[11px] text-emerald-400 hover:text-emerald-300 underline font-semibold flex items-center gap-1"
                         >
-                          {copiedId === 'copy-script-outreach' ? (
+                          {copiedId === `copy-script-${selectedProfileIndex}` ? (
                             <span>✅ Copiado!</span>
                           ) : (
                             <span>Copiar Script</span>
@@ -337,7 +434,7 @@ Se você tiver qualquer dúvida ou quiser falar comigo, pode me chamar direto no
                         </button>
                       </div>
                       <p className="text-xs text-slate-300 italic bg-slate-950 p-3 rounded-lg border border-slate-800 leading-relaxed">
-                        "Oi! Vi que você comentou lá no post sobre as milhas da Livelo... se você ainda tiver com dúvida, eu tenho um resumo prático de 3 passos mostrando como acumular sem pagar anuidade no cartão. Se você quiser dar uma olhada, tá aqui: https://robo-trafego.vercel.app/?p=milhas&src=outreach_direct"
+                        "{current.script}"
                       </p>
                     </div>
                   </div>
@@ -348,23 +445,60 @@ Se você tiver qualquer dúvida ou quiser falar comigo, pode me chamar direto no
         </div>
       </div>
 
-      {/* SECTION 3: Gerador de Links Rastreados UTM */}
+      {/* SECTION 3: Pinterest Estratégia de Ouro (Pedagogia) */}
+      {activeNicheTab === 'pedagogia' && (
+        <div className="bg-gradient-to-r from-red-950/40 via-slate-900 to-slate-950 border border-red-900/50 rounded-3xl p-6 sm:p-8 space-y-4 shadow-xl">
+          <div className="flex items-center gap-2 text-red-400 font-bold text-sm">
+            <Pin className="w-4 h-4" />
+            <span>ESTRATÉGIA DE OURO: PINTEREST ORGÂNICO (ONDE AS PEDAGOGAS BUSCAM)</span>
+          </div>
+          <h3 className="text-xl font-bold text-white">
+            Como Vender Todo Santo Dia no Pinterest Sem Gastar 1 Centavo
+          </h3>
+          <p className="text-xs text-slate-300 leading-relaxed">
+            O Pinterest não é só rede social, é um buscador. Todos os dias, milhares de professoras pesquisam termos para baixar atividades.
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 text-xs">
+            <div className="p-3.5 bg-slate-900 rounded-xl border border-slate-800 space-y-1">
+              <span className="font-bold text-red-300">1. Termos mais buscados:</span>
+              <p className="text-slate-400 font-mono text-[11px]">
+                #atividadesautismo #educacaoinfantil #pedagogia #atividadesimprimir #alfabetizacao
+              </p>
+            </div>
+            <div className="p-3.5 bg-slate-900 rounded-xl border border-slate-800 space-y-1">
+              <span className="font-bold text-red-300">2. Imagem do Pin:</span>
+              <p className="text-slate-400">
+                Use a própria imagem do eBook <code>image_e9e67204.png</code> como capa do seu Pin.
+              </p>
+            </div>
+            <div className="p-3.5 bg-slate-900 rounded-xl border border-slate-800 space-y-1">
+              <span className="font-bold text-red-300">3. Link de Destino:</span>
+              <p className="text-slate-400 break-all font-mono text-[11px]">
+                https://robo-trafego.vercel.app/?p=tarefinhas&src=pinterest
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SECTION 4: Links Rastreados UTM */}
       <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6">
         <div className="space-y-1">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-purple-950 text-purple-300 text-xs font-semibold border border-purple-800/60">
             <Share2 className="w-3.5 h-3.5 text-purple-400" />
-            <span>LINKS RASTREADOS EM TEMPO REAL</span>
+            <span>SEUS LINKS RASTREADOS EM TEMPO REAL</span>
           </div>
           <h2 className="text-xl sm:text-2xl font-bold text-white">
-            Seus Links Prontos para Usar em Qualquer Lugar
+            Links Prontos para Usar nos Seus Canais
           </h2>
           <p className="text-xs text-slate-400">
-            Cada link abaixo tem uma tag para que você veja no <strong className="text-emerald-400">Radar de Rastreio</strong> exatamente de onde a pessoa veio!
+            Cada link abaixo tem uma tag para você ver no Radar de Rastreio exatamente de onde o visitante veio:
           </p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {trackedLinks.map((item) => (
+          {currentTrackedLinks.map((item) => (
             <div
               key={item.id}
               className="p-5 bg-slate-950 border border-slate-800 rounded-2xl space-y-3 flex flex-col justify-between"
@@ -407,37 +541,6 @@ Se você tiver qualquer dúvida ou quiser falar comigo, pode me chamar direto no
               </div>
             </div>
           ))}
-        </div>
-      </div>
-
-      {/* SECTION 4: Plano de Ação dos Próximos 3 Dias */}
-      <div className="bg-gradient-to-br from-emerald-950/40 via-slate-900 to-slate-950 border border-emerald-900/50 rounded-3xl p-6 sm:p-8 space-y-4">
-        <h3 className="text-lg font-bold text-white flex items-center gap-2">
-          <Flame className="w-5 h-5 text-amber-400" />
-          <span>Plano de 30 Minutos Diários para Fazer Suas Primeiras Vendas</span>
-        </h3>
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs text-slate-300">
-          <div className="p-4 bg-slate-900/80 border border-slate-800 rounded-xl space-y-2">
-            <span className="font-bold text-emerald-400 text-sm">📅 Dia 1: Ativação</span>
-            <p>
-              Abra a aba <strong>Estúdio de Criativos</strong>, copie o Roteiro #1 de Milhas e poste no seu Instagram ou TikTok. Ative o ReplyRush para mandar a DM automática com o seu link quando alguém comentar.
-            </p>
-          </div>
-
-          <div className="p-4 bg-slate-900/80 border border-slate-800 rounded-xl space-y-2">
-            <span className="font-bold text-emerald-400 text-sm">📅 Dia 2: Mineração</span>
-            <p>
-              Abra o perfil <code>@passageirodeprimeira</code> ou <code>@melhoresdestinos</code>, encontre 5 pessoas com dúvidas em comentários recentes e envie uma mensagem prestativa com o script anti-bloqueio.
-            </p>
-          </div>
-
-          <div className="p-4 bg-slate-900/80 border border-slate-800 rounded-xl space-y-2">
-            <span className="font-bold text-emerald-400 text-sm">📅 Dia 3: Fechamento</span>
-            <p>
-              Quando a pessoa chamar no seu WhatsApp <code>(41) 99877-8348</code>, use a aba <strong>Robô de Vendas 24/7</strong> para responder as objeções e enviar o link da Eduzz para fechar os R$ 385,00!
-            </p>
-          </div>
         </div>
       </div>
     </div>

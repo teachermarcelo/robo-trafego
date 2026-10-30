@@ -1,0 +1,8 @@
+{
+  "name": "AutoViral AI - Robô de Vendas & Tráfego Orgânico Autônomo",
+  "description": "Plataforma completa e gratuita para quem precisa de renda familiar vender produtos online no automático sem bloqueios, com busca de dores, criativos com IA, rastreamento em tempo real e robô de vendas.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -39,5 +39,12 @@ service cloud.firestore {
       allow create, update, delete: if isValidId(profileId)
         && request.resource.data.handle is string;
     }
+
+    // Customers and leads with WhatsApp and Hotmart purchase details
+    match /autoviral_customers/{customerId} {
+      allow read: if isValidId(customerId);
+      allow create, update, delete: if isValidId(customerId)
+        && request.resource.data.name is string;
+    }
   }
 }

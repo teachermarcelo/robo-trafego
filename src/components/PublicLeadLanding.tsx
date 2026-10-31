@@ -145,6 +145,22 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
 
   const handleWhatsAppClick = () => {
     onTrackAction('whatsapp_click');
+    try {
+      fetch('/api/customers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          campaignId: campaign.id,
+          campaignTitle: campaign.title,
+          name: 'Visitante Real (Dúvidas no WhatsApp)',
+          phone: effectiveWhatsappNumber,
+          status: 'duvida_whatsapp',
+          source: 'landing_page_whatsapp',
+          notes: 'Visitante clicou no botão da página para falar direto no WhatsApp',
+        }),
+      }).catch(() => {});
+    } catch {}
+
     const text = encodeURIComponent(
       isTarefinhas
         ? `Olá! Vi o material de 100 Tarefinhas de Educação Infantil e Autismo e gostaria de tirar uma dúvida!`

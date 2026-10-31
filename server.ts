@@ -54,6 +54,9 @@ interface TrackingEvent {
   amount?: number;
   leadScore?: number;
   durationSeconds?: number;
+  customerName?: string;
+  customerPhone?: string;
+  customerEmail?: string;
 }
 
 let trackingEvents: TrackingEvent[] = [];
@@ -807,6 +810,259 @@ app.post('/api/campaigns/reset-metrics', (req, res) => {
     revenue: 0,
   }));
   return res.json({ success: true, campaigns: serverCampaigns });
+});
+
+// ===========================================================================
+// Hotmart Webhook & Customer Leads Management (WhatsApp & Buyer Contacts)
+// ===========================================================================
+
+interface ServerCustomerLead {
+  id: string;
+  campaignId: string;
+  campaignTitle: string;
+  name: string;
+  phone: string;
+  email?: string;
+  instagramHandle?: string;
+  status: 'comprador_aprovado' | 'pix_gerado' | 'carrinho_abandonado' | 'duvida_whatsapp' | 'amostra_gratis';
+  amount?: number;
+  source: 'hotmart_webhook' | 'landing_page_whatsapp' | 'landing_sample' | 'direct_chat';
+  createdAt: string;
+  notes?: string;
+}
+
+let serverCustomerLeads: ServerCustomerLead[] = [
+  {
+    id: 'lead-hotmart-exemplo-1',
+    campaignId: 'camp-tarefinhas-autismo',
+    campaignTitle: '+ 100 Tarefinha Educação Infantil e Também para Criança Autista',
+    name: 'Patrícia Alves (Mãe & Educadora)',
+    phone: '5541998778348',
+    email: 'patricia.pedagogia.tea@gmail.com',
+    instagramHandle: '@profa.patricia.tea',
+    status: 'comprador_aprovado',
+    amount: 9.90,
+    source: 'hotmart_webhook',
+    createdAt: new Date(Date.now() - 1000 * 60 * 45).toISOString(),
+    notes: 'Compra Aprovada na Hotmart (Pix) • Material baixado com sucesso',
+  },
+  {
+    id: 'lead-hotmart-exemplo-2',
+    campaignId: 'camp-tarefinhas-autismo',
+    campaignTitle: '+ 100 Tarefinha Educação Infantil e Também para Criança Autista',
+    name: 'Carla Silveira (Psicopedagoga SP)',
+    phone: '5511985421099',
+    email: 'carla.silveira.clinica@gmail.com',
+    instagramHandle: '@psico.carlasilveira',
+    status: 'duvida_whatsapp',
+    amount: 9.90,
+    source: 'landing_page_whatsapp',
+    createdAt: new Date(Date.now() - 1000 * 60 * 120).toISOString(),
+    notes: 'Chamou no WhatsApp para perguntar se as atividades têm gabarito e BNCC',
+  },
+];
+
+// GET: List all captured customer leads & buyers
+app.get('/api/customers', (req, res) => {
+  return res.json({ customers: serverCustomerLeads });
+});
+
+// POST: Add new customer lead (e.g. from landing page sample modal or WhatsApp click)
+app.post('/api/customers', (req, res) => {
+  try {
+    const { name, phone, email, instagramHandle, campaignId, campaignTitle, status, amount, source, notes } = req.body;
+    if (!name || !phone) {
+      return res.status(400).json({ error: 'Nome e telefone/WhatsApp são obrigatórios' });
+    }
+
+    const cleanPhone = String(phone).replace(/\D/g, '');
+    const newLead: ServerCustomerLead = {
+      id: `lead-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      campaignId: campaignId || 'camp-tarefinhas-autismo',
+      campaignTitle: campaignTitle || '+ 100 Tarefinha Educação Infantil e Autismo',
+      name: name.trim(),
+      phone: cleanPhone.startsWith('55') ? cleanPhone : `55${cleanPhone}`,
+      email: email?.trim(),
+      instagramHandle: instagramHandle?.trim(),
+      status: status || 'duvida_whatsapp',
+      amount: amount ? Number(amount) : undefined,
+      source: source || 'landing_page_whatsapp',
+      createdAt: new Date().toISOString(),
+      notes: notes || 'Lead capturado na landing page do produto',
+    };
+
+    serverCustomerLeads.unshift(newLead);
+    if (serverCustomerLeads.length > 300) {
+      serverCustomerLeads = serverCustomerLeads.slice(0, 300);
+    }
+
+    return res.json({ success: true, lead: newLead });
+  } catch (err: any) {
+    console.error('Error creating customer lead:', err);
+    return res.status(500).json({ error: 'Erro ao salvar contato' });
+  }
+});
+
+// DELETE: Remove a customer lead
+app.delete('/api/customers/:id', (req, res) => {
+  const { id } = req.params;
+  serverCustomerLeads = serverCustomerLeads.filter((c) => c.id !== id);
+  return res.json({ success: true, deletedId: id });
+});
+
+// POST: Hotmart Official Webhook Listener
+// Supports Hotmart Webhook 2.0 (event, data) and legacy structures
+app.post('/api/hotmart/webhook', (req, res) => {
+  try {
+    const body = req.body || {};
+    console.log('Hotmart Webhook Received:', JSON.stringify(body));
+
+    // Hotmart Webhook 2.0 structure: body.event, body.data.buyer, body.data.purchase
+    // Legacy structure: body.first_name, body.phone, body.email, body.status
+    const eventType = body.event || body.status || 'PURCHASE_APPROVED';
+    const buyerData = body.data?.buyer || body.buyer || {};
+    const purchaseData = body.data?.purchase || body.purchase || {};
+    const productData = body.data?.product || body.product || {};
+
+    const buyerName =
+      buyerData.name ||
+      `${body.first_name || ''} ${body.last_name || ''}`.trim() ||
+      'Comprador Hotmart';
+
+    const rawPhone =
+      buyerData.checkout_phone ||
+      buyerData.phone ||
+      body.phone_number ||
+      body.phone ||
+      '';
+
+    let cleanPhone = String(rawPhone).replace(/\D/g, '');
+    if (cleanPhone && !cleanPhone.startsWith('55') && cleanPhone.length <= 11) {
+      cleanPhone = `55${cleanPhone}`;
+    }
+
+    const price =
+      purchaseData.price?.value ||
+      body.cms_marketplace_price ||
+      body.price ||
+      9.90;
+
+    const isApproved =
+      eventType.toUpperCase().includes('APPROVED') ||
+      eventType.toUpperCase().includes('COMPLETE') ||
+      eventType.toUpperCase().includes('COMPRA_APROVADA');
+
+    const leadStatus: ServerCustomerLead['status'] = isApproved
+      ? 'comprador_aprovado'
+      : eventType.toUpperCase().includes('WAITING') || eventType.toUpperCase().includes('PIX')
+      ? 'pix_gerado'
+      : 'carrinho_abandonado';
+
+    const newLead: ServerCustomerLead = {
+      id: `hotmart-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      campaignId: 'camp-tarefinhas-autismo',
+      campaignTitle: productData.name || '+ 100 Tarefinha Educação Infantil e Também para Criança Autista',
+      name: buyerName,
+      phone: cleanPhone || '5541998778348',
+      email: buyerData.email || body.email,
+      status: leadStatus,
+      amount: Number(price),
+      source: 'hotmart_webhook',
+      createdAt: new Date().toISOString(),
+      notes: `Venda registrada pela Hotmart • Evento: ${eventType} • Transação: ${purchaseData.transaction || body.transaction || 'HP' + Date.now().toString().slice(-8)}`,
+    };
+
+    serverCustomerLeads.unshift(newLead);
+
+    // Also register conversion tracking event for live radar
+    const conversionEvent: TrackingEvent = {
+      id: `evt-conv-${Date.now()}`,
+      campaignId: 'camp-tarefinhas-autismo',
+      campaignTitle: newLead.campaignTitle,
+      niche: 'psicopedagogia',
+      type: 'conversion',
+      timestamp: new Date().toISOString(),
+      geo: {
+        state: 'SP',
+        city: 'Visitante Real (Comprador)',
+        country: 'Brasil',
+      },
+      device: 'mobile',
+      ageBracket: '25-34',
+      source: 'instagram',
+      amount: Number(price),
+      leadScore: 100,
+      durationSeconds: 120,
+      customerName: newLead.name,
+      customerPhone: newLead.phone,
+      customerEmail: newLead.email,
+    };
+    trackingEvents.unshift(conversionEvent);
+
+    return res.status(200).json({
+      status: 200,
+      received: true,
+      message: 'Notificação Hotmart processada com sucesso!',
+      leadId: newLead.id,
+    });
+  } catch (err: any) {
+    console.error('Error processing Hotmart webhook:', err);
+    return res.status(500).json({ error: 'Erro ao processar webhook da Hotmart' });
+  }
+});
+
+// POST: Simulate Hotmart Sale (for live demonstration & testing)
+app.post('/api/hotmart/simulate-sale', (req, res) => {
+  const sampleBuyers = [
+    { name: 'Ana Paula Ferreira (Pedagoga)', phone: '5541998778348', email: 'anapaula.prof.tea@gmail.com', city: 'Curitiba, PR' },
+    { name: 'Mariana Castro (Mãe do Theo - Autismo Nível 1)', phone: '5511976543210', email: 'mariana.castro.sp@hotmail.com', city: 'Campinas, SP' },
+    { name: 'Renata Albuquerque (Psicopedagoga Clínica)', phone: '5521991234567', email: 'renata.psico.rj@gmail.com', city: 'Rio de Janeiro, RJ' },
+    { name: 'Camila Mendonça (Professora Ed. Especial)', phone: '5531988776655', email: 'camila.prof.especial@gmail.com', city: 'Belo Horizonte, MG' },
+  ];
+  const buyer = sampleBuyers[Math.floor(Math.random() * sampleBuyers.length)];
+
+  const newLead: ServerCustomerLead = {
+    id: `hotmart-sim-${Date.now()}`,
+    campaignId: 'camp-tarefinhas-autismo',
+    campaignTitle: '+ 100 Tarefinha Educação Infantil e Também para Criança Autista',
+    name: buyer.name,
+    phone: buyer.phone,
+    email: buyer.email,
+    status: 'comprador_aprovado',
+    amount: 9.90,
+    source: 'hotmart_webhook',
+    createdAt: new Date().toISOString(),
+    notes: 'Simulação de Compra Aprovada Hotmart (Pix) • Teste do Webhook',
+  };
+
+  serverCustomerLeads.unshift(newLead);
+
+  // Conversion event on radar
+  const convEvent: TrackingEvent = {
+    id: `evt-conv-${Date.now()}`,
+    campaignId: 'camp-tarefinhas-autismo',
+    campaignTitle: newLead.campaignTitle,
+    niche: 'psicopedagogia',
+    type: 'conversion',
+    timestamp: new Date().toISOString(),
+    geo: {
+      state: buyer.city.split(', ')[1] || 'SP',
+      city: buyer.city.split(', ')[0] || 'São Paulo',
+      country: 'Brasil',
+    },
+    device: 'mobile',
+    ageBracket: '25-34',
+    source: 'instagram',
+    amount: 9.90,
+    leadScore: 99,
+    durationSeconds: 95,
+    customerName: newLead.name,
+    customerPhone: newLead.phone,
+    customerEmail: newLead.email,
+  };
+  trackingEvents.unshift(convEvent);
+
+  return res.json({ success: true, lead: newLead, event: convEvent });
 });
 
 // API: Health check

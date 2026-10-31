@@ -69,12 +69,18 @@ export const BridgePageModal: React.FC<BridgePageModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="hidden sm:inline-block px-2.5 py-1 rounded-full bg-emerald-950 text-emerald-400 text-xs font-semibold border border-emerald-800/50">
-              Rastreamento Ativo
-            </span>
+            <a
+              href={`/?p=${campaign.id === 'camp-tarefinhas-autismo' ? 'tarefinhas' : campaign.id.replace('camp-', '')}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl flex items-center gap-1 transition cursor-pointer"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span>Abrir Página Real ↗</span>
+            </a>
             <button
               onClick={onClose}
-              className="p-1.5 rounded-lg bg-slate-700/60 hover:bg-slate-700 text-slate-300 hover:text-white transition"
+              className="p-1.5 rounded-lg bg-slate-700/60 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>

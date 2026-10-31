@@ -92,6 +92,25 @@ export interface TrackingEvent {
   leadScore?: number;
   durationSeconds?: number;
   isSimulation?: boolean;
+  customerName?: string;
+  customerPhone?: string;
+  customerEmail?: string;
+  customerHandle?: string;
+}
+
+export interface CustomerLead {
+  id: string;
+  campaignId: string;
+  campaignTitle: string;
+  name: string;
+  phone: string;
+  email?: string;
+  instagramHandle?: string;
+  status: 'comprador_aprovado' | 'pix_gerado' | 'carrinho_abandonado' | 'duvida_whatsapp' | 'amostra_gratis';
+  amount?: number;
+  source: 'hotmart_webhook' | 'landing_page_whatsapp' | 'landing_sample' | 'direct_chat';
+  createdAt: string;
+  notes?: string;
 }
 
 export interface AIReport {

@@ -15,7 +15,7 @@ import {
   getDocFromServer,
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { Campaign, TrackingEvent } from '../types';
+import { Campaign, TrackingEvent, CustomerLead } from '../types';
 import { INITIAL_CAMPAIGNS } from '../data/defaultCampaigns';
 
 // Initialize Firebase App
@@ -365,6 +365,58 @@ export function subscribeInstagramOriginAccount(onUpdate: (account: InstagramOri
     },
     (err) => {
       console.warn('Instagram origin profile subscription error:', err);
+    }
+  );
+}
+
+/**
+ * Customers and Leads with WhatsApp and Purchase Details
+ */
+const CUSTOMERS_COLLECTION = 'autoviral_customers';
+
+export async function saveCustomerLeadToFirebase(customer: CustomerLead): Promise<void> {
+  const cleanId = (customer.id || `lead-${Date.now()}`).replace(/\//g, '_');
+  const path = `${CUSTOMERS_COLLECTION}/${cleanId}`;
+  try {
+    await setDoc(doc(db, CUSTOMERS_COLLECTION, cleanId), {
+      ...customer,
+      id: cleanId,
+      updatedAt: new Date().toISOString(),
+    }, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function deleteCustomerLeadFromFirebase(customerId: string): Promise<void> {
+  const cleanId = customerId.replace(/\//g, '_');
+  const path = `${CUSTOMERS_COLLECTION}/${cleanId}`;
+  try {
+    await deleteDoc(doc(db, CUSTOMERS_COLLECTION, cleanId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export function subscribeCustomerLeads(
+  onUpdate: (customers: CustomerLead[]) => void,
+  onError?: (err: any) => void
+): () => void {
+  const colRef = collection(db, CUSTOMERS_COLLECTION);
+  return onSnapshot(
+    colRef,
+    (snapshot) => {
+      const list: CustomerLead[] = [];
+      snapshot.forEach((d) => {
+        list.push(d.data() as CustomerLead);
+      });
+      // Sort newest first
+      list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      onUpdate(list);
+    },
+    (err) => {
+      console.warn('Customer leads subscription error:', err);
+      if (onError) onError(err);
     }
   );
 }

@@ -15,19 +15,28 @@ import {
   MousePointerClick,
   Clock,
   ArrowUpRight,
+  MessageSquare,
+  Phone,
+  Sparkles,
 } from 'lucide-react';
-import { TrackingEvent, Campaign } from '../types';
+import { TrackingEvent, Campaign, CustomerLead } from '../types';
 
 interface RealtimeTrackingTabProps {
   trackingEvents: TrackingEvent[];
   campaigns: Campaign[];
+  customers?: CustomerLead[];
   onAddTrackingEvent: (event: Partial<TrackingEvent>) => void;
+  onOpenCustomerModal?: () => void;
+  onSimulateSale?: () => void;
 }
 
 export const RealtimeTrackingTab: React.FC<RealtimeTrackingTabProps> = ({
   trackingEvents,
   campaigns,
+  customers = [],
   onAddTrackingEvent,
+  onOpenCustomerModal,
+  onSimulateSale,
 }) => {
   const [selectedNiche, setSelectedNiche] = useState<string>('all');
   const [isSimulatingLive, setIsSimulatingLive] = useState<boolean>(false);
@@ -300,6 +309,108 @@ export const RealtimeTrackingTab: React.FC<RealtimeTrackingTabProps> = ({
             </p>
           </div>
         </div>
+      </div>
+
+      {/* Buyers and WhatsApp Leads Grid */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+              <MessageSquare className="w-4 h-4" />
+            </div>
+            <div>
+              <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+                <span>Compradores & Leads com WhatsApp</span>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-700/60 font-bold">
+                  {customers.length} contatos
+                </span>
+              </h3>
+              <p className="text-xs text-slate-400">
+                Pessoas reais que compraram na Hotmart ou pediram contato no WhatsApp
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            {onSimulateSale && (
+              <button
+                onClick={onSimulateSale}
+                className="px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500 text-emerald-300 hover:text-slate-950 text-xs font-bold rounded-xl border border-emerald-500/40 transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>+ Testar Venda</span>
+              </button>
+            )}
+            {onOpenCustomerModal && (
+              <button
+                onClick={onOpenCustomerModal}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <span>Configurar Webhook Hotmart ⚙️</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {customers.length === 0 ? (
+          <div className="p-6 bg-slate-950/60 rounded-xl border border-dashed border-slate-800 text-center space-y-2">
+            <p className="text-xs text-slate-400">
+              Nenhum contato recebido ainda. Quando alguém comprar na Hotmart ou chamar no WhatsApp, o número e nome aparecem aqui com botão direto para conversar!
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {customers.map((cust) => (
+              <div
+                key={cust.id}
+                className="p-3.5 bg-slate-950 border border-emerald-900/50 hover:border-emerald-600/70 rounded-2xl transition space-y-2 flex flex-col justify-between"
+              >
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-white text-sm">{cust.name}</span>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-700/60">
+                      {cust.status === 'comprador_aprovado' ? 'Compra Aprovada' : 'Lead WhatsApp'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3 text-xs text-slate-300 flex-wrap">
+                    <span className="text-emerald-400 font-mono font-bold flex items-center gap-1">
+                      <Phone className="w-3 h-3" />
+                      +{cust.phone}
+                    </span>
+                    {cust.amount && (
+                      <span className="text-emerald-300 font-bold">
+                        R$ {cust.amount.toFixed(2)}
+                      </span>
+                    )}
+                    <span className="text-slate-500 text-[11px]">
+                      {new Date(cust.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                  {cust.notes && (
+                    <p className="text-[11px] text-slate-400 italic">{cust.notes}</p>
+                  )}
+                </div>
+
+                <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between">
+                  <span className="text-[11px] text-slate-400">
+                    Origem: <strong className="text-slate-300 capitalize">{cust.source.replace('_', ' ')}</strong>
+                  </span>
+                  <a
+                    href={`https://wa.me/${cust.phone.replace(/\D/g, '')}?text=${encodeURIComponent(
+                      `Olá ${cust.name.split(' ')[0]}! Tudo bem? Vi que você garantiu as 100 Tarefinhas de Educação Infantil e Autismo na Hotmart! O acesso já está no seu e-mail. Se precisar de qualquer suporte, estou por aqui no WhatsApp!`
+                    )}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-1.5 bg-gradient-to-r from-emerald-500 to-green-500 hover:from-emerald-400 hover:to-green-400 text-slate-950 font-black text-xs rounded-xl shadow transition flex items-center gap-1.5"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5" />
+                    <span>Chamar no WhatsApp</span>
+                  </a>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Real-Time Live Feed Table */}

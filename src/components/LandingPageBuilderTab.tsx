@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { Campaign } from '../types';
 import { saveLandingPageSettingsToFirebase } from '../lib/firebase';
+import { getCampaignSlug } from '../utils/campaignSlug';
 
 interface LandingPageBuilderTabProps {
   campaigns: Campaign[];
@@ -244,9 +245,8 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
     setTimeout(() => setSavedSuccess(false), 3000);
   };
 
-  const publicLandingUrl = `${window.location.origin}/?p=${
-    activeCamp?.id === 'camp-tarefinhas-autismo' ? 'tarefinhas' : activeCamp?.id
-  }`;
+  const currentSlug = activeCamp ? getCampaignSlug(activeCamp) : 'tarefinhas';
+  const publicLandingUrl = `${window.location.origin}/?p=${currentSlug}`;
 
   const copyLandingLink = () => {
     navigator.clipboard.writeText(publicLandingUrl);
@@ -341,6 +341,49 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
                   )}
                 </button>
               ))}
+            </div>
+
+            {/* Box: Link Individual do Produto Selecionado */}
+            <div className="mt-3 p-3.5 bg-slate-950 border border-emerald-900/60 rounded-xl space-y-2">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <ExternalLink className="w-3.5 h-3.5 text-emerald-400" />
+                  Link Individual da sua Página ({activeCamp?.title}):
+                </span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-700/60 font-mono font-bold">
+                  /?p={currentSlug}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={publicLandingUrl}
+                  className="flex-1 px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-emerald-400 font-mono text-xs focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={copyLandingLink}
+                  className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-lg transition flex items-center gap-1 cursor-pointer shrink-0"
+                >
+                  {copiedLink ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedLink ? 'Copiado!' : 'Copiar Link'}</span>
+                </button>
+                <a
+                  href={publicLandingUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-semibold transition flex items-center gap-1 shrink-0"
+                  title="Abrir página individual em nova aba"
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Ver Página</span>
+                </a>
+              </div>
+              <p className="text-[11px] text-slate-400">
+                🚀 Cada criação tem seu próprio link exclusivo. Quem abrir esse link verá exatamente <strong>{title || activeCamp?.title}</strong>, a capa do produto que você enviou do seu computador e o preço de <strong>R$ {parsedCurrentPrice.toFixed(2).replace('.', ',')}</strong>!
+              </p>
             </div>
           </div>
 
@@ -758,7 +801,7 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
               <span className="w-2.5 h-2.5 rounded-full bg-yellow-500/80"></span>
               <span className="w-2.5 h-2.5 rounded-full bg-green-500/80"></span>
               <div className="ml-2 flex-1 bg-slate-950 px-2 py-0.5 rounded text-[10px] text-slate-300 truncate font-mono">
-                robo-trafego.vercel.app/?p=tarefinhas
+                robo-trafego.vercel.app/?p={currentSlug}
               </div>
             </div>
 

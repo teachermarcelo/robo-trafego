@@ -20,8 +20,10 @@ import { Security2FAModal } from './components/Security2FAModal';
 import { NotificationsModal } from './components/NotificationsModal';
 import { SupabaseModal } from './components/SupabaseModal';
 import { VercelModal } from './components/VercelModal';
+import { CustomerLeadsModal } from './components/CustomerLeadsModal';
+import { getCampaignSlug } from './utils/campaignSlug';
 import { INITIAL_CAMPAIGNS } from './data/defaultCampaigns';
-import { Campaign, TrackingEvent, PainPointData, PushNotification } from './types';
+import { Campaign, TrackingEvent, PainPointData, PushNotification, CustomerLead } from './types';
 import {
   fetchSupabaseCampaigns,
   saveCampaignToSupabase,
@@ -35,6 +37,9 @@ import {
   subscribeDeletedCampaignIds,
   saveTrackingEventToFirebase,
   subscribeTrackingEvents,
+  subscribeCustomerLeads,
+  saveCustomerLeadToFirebase,
+  deleteCustomerLeadFromFirebase,
 } from './lib/firebase';
 
 export default function App() {
@@ -90,6 +95,8 @@ export default function App() {
     } catch {}
     return [];
   });
+  const [customerLeads, setCustomerLeads] = useState<CustomerLead[]>([]);
+  const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
   const [is2FAEnabled, setIs2FAEnabled] = useState(false);
   const [is2FAModalOpen, setIs2FAModalOpen] = useState(false);
   const [isNotificationsModalOpen, setIsNotificationsModalOpen] = useState(false);
@@ -194,7 +201,36 @@ export default function App() {
     return () => unsubTracking();
   }, []);
 
-  // 4. Secondary fallback fetch from server backend and Supabase
+  // 4. Real-time Firebase Firestore customer leads & WhatsApp buyers listener
+  useEffect(() => {
+    const unsubCustomers = subscribeCustomerLeads(
+      (cloudCustomers) => {
+        if (cloudCustomers && cloudCustomers.length > 0) {
+          setCustomerLeads(cloudCustomers);
+        }
+      },
+      (err) => console.warn('Customer leads sync notice:', err)
+    );
+
+    // Initial load from backend API
+    fetch('/api/customers')
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.customers && Array.isArray(data.customers)) {
+          setCustomerLeads((prev) => {
+            if (prev.length === 0) return data.customers;
+            const existingIds = new Set(prev.map((c) => c.id));
+            const fresh = data.customers.filter((c: CustomerLead) => !existingIds.has(c.id));
+            return [...prev, ...fresh];
+          });
+        }
+      })
+      .catch(() => {});
+
+    return () => unsubCustomers();
+  }, []);
+
+  // 5. Secondary fallback fetch from server backend and Supabase
   useEffect(() => {
     let isMounted = true;
 
@@ -370,16 +406,54 @@ export default function App() {
     } catch {}
   };
 
-  // Simulate a quick manual conversion for instant live feedback
-  const handleSimulateQuickConversion = () => {
+  // Simulate a quick manual conversion with buyer WhatsApp for instant live demonstration
+  const handleSimulateQuickConversion = async () => {
+    try {
+      const res = await fetch('/api/hotmart/simulate-sale', { method: 'POST' });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.lead) {
+          saveCustomerLeadToFirebase(json.lead).catch(console.warn);
+          setCustomerLeads((prev) => [json.lead, ...prev.filter((p) => p.id !== json.lead.id)]);
+        }
+        if (json.event) {
+          setTrackingEvents((prev) => [json.event, ...prev]);
+        }
+        const notif: PushNotification = {
+          id: `notif-${Date.now()}`,
+          title: '🎉 Nova Venda Hotmart Aprovada!',
+          message: `Comprador: ${json.lead?.name} • WhatsApp: +${json.lead?.phone}. Clique para conversar no WhatsApp.`,
+          time: 'Agora mesmo',
+          type: 'sale',
+          read: false,
+        };
+        setNotifications((prev) => [notif, ...prev]);
+        return;
+      }
+    } catch {}
+
+    // Fallback simulation
     const targetCampaign = campaigns[Math.floor(Math.random() * campaigns.length)] || campaigns[0];
-    const brazilianCities = [
-      { city: 'São Paulo', state: 'SP' },
-      { city: 'Rio de Janeiro', state: 'RJ' },
-      { city: 'Belo Horizonte', state: 'MG' },
-      { city: 'Curitiba', state: 'PR' },
+    const sampleBuyers = [
+      { name: 'Patrícia Alves (Mãe & Pedagoga)', phone: '5541998778348' },
+      { name: 'Mariana Castro (Mãe Atípica SP)', phone: '5511976543210' },
+      { name: 'Renata Albuquerque (Psicopedagoga)', phone: '5521991234567' },
     ];
-    const loc = brazilianCities[Math.floor(Math.random() * brazilianCities.length)];
+    const b = sampleBuyers[Math.floor(Math.random() * sampleBuyers.length)];
+    const newLead: CustomerLead = {
+      id: `lead-sim-${Date.now()}`,
+      campaignId: targetCampaign.id,
+      campaignTitle: targetCampaign.title,
+      name: b.name,
+      phone: b.phone,
+      status: 'comprador_aprovado',
+      amount: targetCampaign.price,
+      source: 'hotmart_webhook',
+      createdAt: new Date().toISOString(),
+      notes: 'Compra Aprovada na Hotmart (Pix) • Teste do Webhook',
+    };
+    saveCustomerLeadToFirebase(newLead).catch(console.warn);
+    setCustomerLeads((prev) => [newLead, ...prev]);
 
     handleAddTrackingEvent({
       campaignId: targetCampaign.id,
@@ -387,14 +461,22 @@ export default function App() {
       niche: targetCampaign.niche,
       type: 'conversion',
       amount: targetCampaign.price,
-      geo: { city: loc.city, state: loc.state, country: 'Brasil' },
+      geo: { city: 'São Paulo', state: 'SP', country: 'Brasil' },
       device: 'mobile',
       ageBracket: '25-34',
-      source: 'tiktok',
-      leadScore: 98,
-      durationSeconds: 154,
+      source: 'instagram',
+      leadScore: 99,
+      durationSeconds: 120,
       isSimulation: true,
+      customerName: b.name,
+      customerPhone: b.phone,
     });
+  };
+
+  const handleDeleteCustomer = (id: string) => {
+    deleteCustomerLeadFromFirebase(id).catch(console.warn);
+    setCustomerLeads((prev) => prev.filter((c) => c.id !== id));
+    fetch(`/api/customers/${id}`, { method: 'DELETE' }).catch(() => {});
   };
 
   // Bridge from Pain Finder to Creative Studio
@@ -626,13 +708,28 @@ export default function App() {
   const unreadNotificationsCount = notifications.filter((n) => !n.read).length;
 
   if (isPublicLeadMode) {
-    const search = (typeof window !== 'undefined' ? window.location.search : '').toLowerCase();
-    let featuredCampaign = campaigns.find((c) => c.id === 'camp-tarefinhas-autismo') || campaigns[0];
-    if (search.includes('milha')) {
-      featuredCampaign = campaigns.find((c) => c.id === 'camp-milhas-3') || featuredCampaign;
-    } else if (search.includes('ingles')) {
-      featuredCampaign = campaigns.find((c) => c.id === 'camp-1') || featuredCampaign;
-    }
+    const params = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
+    const pParam = (params.get('p') || params.get('camp') || params.get('prod') || '').trim().toLowerCase();
+
+    // Dynamically match individual campaign by ID, slug, or title keyword
+    let featuredCampaign = campaigns.find((c) => {
+      if (!pParam) return false;
+      const cSlug = getCampaignSlug(c).toLowerCase();
+      const cId = c.id.toLowerCase();
+      const normTitle = c.title.toLowerCase();
+      return (
+        cId === pParam ||
+        cSlug === pParam ||
+        cSlug.includes(pParam) ||
+        pParam.includes(cSlug) ||
+        normTitle.includes(pParam) ||
+        (pParam === 'tarefinhas' && cId.includes('tarefinha')) ||
+        (pParam.includes('cognitiv') && (cId.includes('cognitiv') || normTitle.includes('cognitiv'))) ||
+        (pParam.includes('milha') && cId.includes('milha')) ||
+        (pParam.includes('ingles') && cId.includes('ingles'))
+      );
+    }) || campaigns[0];
+
     return (
       <PublicLeadLanding
         campaign={featuredCampaign}
@@ -674,9 +771,11 @@ export default function App() {
           <DashboardOverview
             campaigns={campaigns}
             trackingEvents={trackingEvents}
+            customers={customerLeads}
             onNavigateTab={(tab) => setActiveTab(tab)}
             onSimulateConversion={handleSimulateQuickConversion}
             onResetAllMetrics={handleResetToRealMode}
+            onOpenCustomerModal={() => setIsCustomerModalOpen(true)}
           />
         )}
 
@@ -716,7 +815,10 @@ export default function App() {
           <RealtimeTrackingTab
             trackingEvents={trackingEvents}
             campaigns={campaigns}
+            customers={customerLeads}
             onAddTrackingEvent={handleAddTrackingEvent}
+            onOpenCustomerModal={() => setIsCustomerModalOpen(true)}
+            onSimulateSale={handleSimulateQuickConversion}
           />
         )}
 
@@ -832,6 +934,14 @@ export default function App() {
       <VercelModal
         isOpen={isVercelModalOpen}
         onClose={() => setIsVercelModalOpen(false)}
+      />
+
+      <CustomerLeadsModal
+        isOpen={isCustomerModalOpen}
+        onClose={() => setIsCustomerModalOpen(false)}
+        customers={customerLeads}
+        onSimulateSale={handleSimulateQuickConversion}
+        onDeleteCustomer={handleDeleteCustomer}
       />
     </div>
   );

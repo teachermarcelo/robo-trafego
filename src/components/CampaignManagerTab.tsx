@@ -14,12 +14,16 @@ import {
   TrendingUp,
   Trash2,
   RotateCcw,
+  Edit3,
+  Save,
+  X,
 } from 'lucide-react';
 import { Campaign, NicheType } from '../types';
 
 interface CampaignManagerTabProps {
   campaigns: Campaign[];
   onAddCampaign: (newCampaign: Campaign) => void;
+  onUpdateCampaign?: (updatedCampaign: Campaign) => void;
   onToggleStatus: (id: string) => void;
   onPreviewBridge: (campaign: Campaign) => void;
   onDeleteCampaign?: (id: string) => void;
@@ -29,6 +33,7 @@ interface CampaignManagerTabProps {
 export const CampaignManagerTab: React.FC<CampaignManagerTabProps> = ({
   campaigns,
   onAddCampaign,
+  onUpdateCampaign,
   onToggleStatus,
   onPreviewBridge,
   onDeleteCampaign,
@@ -37,7 +42,47 @@ export const CampaignManagerTab: React.FC<CampaignManagerTabProps> = ({
   const [isCreating, setIsCreating] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  // Form states
+  // Editing state for modal
+  const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editPrice, setEditPrice] = useState('');
+  const [editCheckoutUrl, setEditCheckoutUrl] = useState('');
+  const [editWhatsapp, setEditWhatsapp] = useState('');
+  const [editPainPoint, setEditPainPoint] = useState('');
+  const [editNicheLabel, setEditNicheLabel] = useState('');
+
+  const openEditModal = (camp: Campaign) => {
+    setEditingCampaign(camp);
+    setEditTitle(camp.title);
+    setEditPrice(camp.price.toString());
+    setEditCheckoutUrl(camp.checkoutUrl || '');
+    setEditWhatsapp(camp.whatsappNumber || '5541998778348');
+    setEditPainPoint(camp.painPointTargeted);
+    setEditNicheLabel(camp.nicheLabel || '');
+  };
+
+  const handleSaveEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingCampaign) return;
+
+    const parsedPrice = parseFloat(editPrice) || editingCampaign.price;
+    const updated: Campaign = {
+      ...editingCampaign,
+      title: editTitle.trim() || editingCampaign.title,
+      price: parsedPrice,
+      checkoutUrl: editCheckoutUrl.trim() || undefined,
+      whatsappNumber: editWhatsapp.trim() || undefined,
+      painPointTargeted: editPainPoint.trim() || editingCampaign.painPointTargeted,
+      nicheLabel: editNicheLabel.trim() || editingCampaign.nicheLabel,
+    };
+
+    if (onUpdateCampaign) {
+      onUpdateCampaign(updated);
+    }
+    setEditingCampaign(null);
+  };
+
+  // Form states for creation
   const [title, setTitle] = useState('');
   const [niche, setNiche] = useState<NicheType>('psicopedagogia');
   const [nicheLabel, setNicheLabel] = useState('Psicopedagogia & TDAH');
@@ -364,7 +409,7 @@ export const CampaignManagerTab: React.FC<CampaignManagerTabProps> = ({
                 </button>
               </div>
 
-              <div className="flex items-center justify-between pt-1">
+              <div className="flex items-center justify-between pt-1 gap-2">
                 <button
                   onClick={() => onToggleStatus(camp.id)}
                   className="py-1 text-[11px] text-slate-400 hover:text-slate-200 transition flex items-center gap-1"
@@ -380,21 +425,160 @@ export const CampaignManagerTab: React.FC<CampaignManagerTabProps> = ({
                   )}
                 </button>
 
-                {onDeleteCampaign && (
+                <div className="flex items-center gap-2">
                   <button
-                    onClick={() => onDeleteCampaign(camp.id)}
-                    className="py-1 text-[11px] text-rose-400/80 hover:text-rose-300 transition flex items-center gap-1"
-                    title="Excluir esta campanha de demonstração"
+                    onClick={() => openEditModal(camp)}
+                    className="py-1 px-2.5 rounded-lg bg-amber-950/60 border border-amber-800/50 text-[11px] text-amber-300 hover:text-amber-200 hover:bg-amber-900/60 transition flex items-center gap-1.5 font-bold shadow"
+                    title="Editar valores, escrita e links desta campanha"
                   >
-                    <Trash2 className="w-3 h-3" />
-                    <span>Excluir</span>
+                    <Edit3 className="w-3 h-3 text-amber-400" />
+                    <span>Editar (R$)</span>
                   </button>
-                )}
+
+                  {onDeleteCampaign && (
+                    <button
+                      onClick={() => onDeleteCampaign(camp.id)}
+                      className="py-1 text-[11px] text-rose-400/80 hover:text-rose-300 transition flex items-center gap-1"
+                      title="Excluir esta campanha"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      <span>Excluir</span>
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </div>
         ))}
       </div>
+
+      {/* Edit Campaign Modal */}
+      {editingCampaign && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-xl w-full p-6 space-y-5 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-amber-950/80 border border-amber-700/50 text-amber-400">
+                  <Edit3 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Editar Campanha & Valores</h3>
+                  <p className="text-xs text-slate-400">Altere o preço, escrita e links de checkout</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setEditingCampaign(null)}
+                className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEdit} className="space-y-4">
+              {/* Product Title */}
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-300">Título do Produto / Escrita:</label>
+                <input
+                  type="text"
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500"
+                  required
+                />
+              </div>
+
+              {/* Price & Niche Label */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-amber-400 flex items-center gap-1">
+                    <DollarSign className="w-3.5 h-3.5" />
+                    <span>Valor / Preço de Venda (R$):</span>
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editPrice}
+                    onChange={(e) => setEditPrice(e.target.value)}
+                    placeholder="9.90"
+                    className="w-full bg-slate-950 border border-amber-800/60 rounded-xl px-3.5 py-2.5 text-xs text-amber-300 font-bold focus:outline-none focus:border-amber-400"
+                    required
+                  />
+                  <span className="text-[10px] text-slate-400">Ex: 9.90 para R$ 9,90</span>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-300">Etiqueta do Nicho / Categoria:</label>
+                  <input
+                    type="text"
+                    value={editNicheLabel}
+                    onChange={(e) => setEditNicheLabel(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              {/* Pain Point Target */}
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-300">Dor Tratada / Subtítulo Promocional:</label>
+                <textarea
+                  value={editPainPoint}
+                  onChange={(e) => setEditPainPoint(e.target.value)}
+                  rows={2}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              {/* Checkout URL */}
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-indigo-300 flex items-center gap-1">
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Link da Página de Pagamento (Hotmart ou Eduzz):</span>
+                </label>
+                <input
+                  type="url"
+                  value={editCheckoutUrl}
+                  onChange={(e) => setEditCheckoutUrl(e.target.value)}
+                  placeholder="https://pay.hotmart.com/..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-400"
+                />
+              </div>
+
+              {/* WhatsApp */}
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-emerald-400 flex items-center gap-1">
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  <span>WhatsApp de Suporte (com DDI e DDD):</span>
+                </label>
+                <input
+                  type="text"
+                  value={editWhatsapp}
+                  onChange={(e) => setEditWhatsapp(e.target.value)}
+                  placeholder="5541998778348"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              {/* Actions */}
+              <div className="pt-3 flex items-center justify-end gap-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setEditingCampaign(null)}
+                  className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-slate-950 font-bold text-xs flex items-center gap-2 shadow-lg shadow-emerald-500/25 transition cursor-pointer"
+                >
+                  <Save className="w-4 h-4 text-slate-950" />
+                  <span>Salvar Alterações</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

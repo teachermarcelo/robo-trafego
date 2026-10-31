@@ -88,7 +88,7 @@ let serverCampaigns: ServerCampaign[] = [
     painPointTargeted: 'Exaustão de planejar atividades inclusivas do zero e dificuldade de prender a atenção de crianças com TEA ou TDAH',
     checkoutUrl: 'https://pay.hotmart.com/U95248783T',
     whatsappNumber: '5541998778348',
-    price: 37.0,
+    price: 9.90,
     status: 'active',
     createdAt: new Date().toISOString(),
     antiBanOrganicMode: true,

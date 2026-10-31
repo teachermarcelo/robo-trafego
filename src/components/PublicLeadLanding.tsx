@@ -60,7 +60,7 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
       } else if (question.includes('garantia')) {
         reply = 'Você tem 7 dias de garantia incondicional assegurada pela Hotmart. Se não amar as atividades, devolvemos 100% do seu dinheiro!';
       } else {
-        reply = 'O material com mais de 100 tarefinhas está com valor promocional liberado na Hotmart por apenas R$ 37,00. Clique no botão verde para garantir o seu!';
+        reply = `O material com mais de 100 tarefinhas está com valor promocional liberado na Hotmart por apenas R$ ${campaign.price.toFixed(2).replace('.', ',')}. Clique no botão verde para garantir o seu!`;
       }
     } else {
       if (question.includes('cartão Black')) {
@@ -221,14 +221,14 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
         <div className="p-6 bg-slate-900/90 border border-emerald-900/60 rounded-3xl shadow-2xl space-y-4 max-w-xl mx-auto">
           <div className="space-y-1">
             <span className="text-xs text-slate-400 line-through">
-              {isTarefinhas ? 'De R$ 97,00' : 'De R$ 697,00'}
+              {isTarefinhas ? 'De R$ 47,00' : 'De R$ 697,00'}
             </span>
             <div className="text-4xl font-black text-emerald-400">
-              {isTarefinhas ? 'R$ 37,00' : 'R$ 385,00'}
+              R$ {campaign.price.toFixed(2).replace('.', ',')}
             </div>
             <span className="text-xs text-slate-300">
               {isTarefinhas
-                ? 'Pagamento único • Acesso imediato aos arquivos para imprimir'
+                ? 'Pagamento único via Pix ou Cartão • Acesso imediato no e-mail'
                 : 'ou em até 12x no cartão de crédito / Pix com liberação imediata'}
             </span>
           </div>
@@ -357,7 +357,7 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
             <Download className="w-5 h-5 text-slate-950" />
             <span>
               {isTarefinhas
-                ? 'BAIXAR TAREFINHAS POR APENAS R$ 37,00'
+                ? `BAIXAR TAREFINHAS POR APENAS R$ ${campaign.price.toFixed(2).replace('.', ',')}`
                 : 'ENTRAR NA COMUNIDADE AGORA'}
             </span>
           </button>
@@ -448,7 +448,9 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
                 onClick={handleCheckoutClick}
                 className="flex-1 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl transition text-center shadow-md shadow-emerald-500/20"
               >
-                {isTarefinhas ? 'Baixar Agora (R$ 37)' : 'Garantir Vaga (R$ 385)'}
+                {isTarefinhas
+                  ? `Baixar Agora (R$ ${campaign.price.toFixed(2).replace('.', ',')})`
+                  : `Garantir Vaga (R$ ${campaign.price.toFixed(2).replace('.', ',')})`}
               </button>
               <button
                 onClick={handleWhatsAppClick}

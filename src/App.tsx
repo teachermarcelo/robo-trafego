@@ -39,7 +39,13 @@ export default function App() {
           // Merge with INITIAL_CAMPAIGNS so any new defaults (like COMUNIDADE MILHAS 3.0) aren't missing
           const existingIds = new Set(parsed.map((c: any) => c.id));
           const missingDefaults = INITIAL_CAMPAIGNS.filter((d) => !existingIds.has(d.id));
-          return [...parsed, ...missingDefaults];
+          const merged = [...parsed, ...missingDefaults];
+          return merged.map((c) => {
+            if (c.id === 'camp-tarefinhas-autismo' && (c.price === 37 || !c.price)) {
+              return { ...c, price: 9.90 };
+            }
+            return c;
+          });
         }
       }
       return INITIAL_CAMPAIGNS;
@@ -299,6 +305,37 @@ export default function App() {
     setNotifications((prev) => [notif, ...prev]);
   };
 
+  // Update existing campaign (price, title, pain point, URLs)
+  const handleUpdateCampaign = async (updated: Campaign) => {
+    setCampaigns((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+    try {
+      await fetch('/api/campaigns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updated),
+      });
+    } catch (e) {
+      console.warn('Backend campaign update skipped:', e);
+    }
+    try {
+      if (isSupabaseConnected()) {
+        await saveCampaignToSupabase(updated);
+      }
+    } catch (e) {
+      console.warn('Supabase campaign update error:', e);
+    }
+
+    const notif: PushNotification = {
+      id: `notif-${Date.now()}`,
+      title: '✏️ Campanha Atualizada!',
+      message: `As alterações em "${updated.title}" (R$ ${updated.price.toFixed(2)}) foram salvas com sucesso.`,
+      time: 'Agora mesmo',
+      type: 'tip',
+      read: false,
+    };
+    setNotifications((prev) => [notif, ...prev]);
+  };
+
   // Toggle campaign status
   const handleToggleCampaignStatus = async (id: string) => {
     const updated = campaigns.map((c) => {
@@ -506,6 +543,7 @@ export default function App() {
           <CampaignManagerTab
             campaigns={campaigns}
             onAddCampaign={handleAddCampaign}
+            onUpdateCampaign={handleUpdateCampaign}
             onToggleStatus={handleToggleCampaignStatus}
             onPreviewBridge={(c) => setBridgeModalCampaign(c)}
             onDeleteCampaign={handleDeleteCampaign}

@@ -1,0 +1,43 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128;
+    }
+
+    // Campaigns collection synced across browsers
+    match /autoviral_campaigns/{campaignId} {
+      allow read: if isValidId(campaignId);
+      allow create, update: if isValidId(campaignId)
+        && request.resource.data.id is string
+        && request.resource.data.name is string;
+      allow delete: if isValidId(campaignId);
+    }
+
+    // Landing page settings and cross-browser metadata
+    match /autoviral_settings/{settingId} {
+      allow read: if isValidId(settingId);
+      allow create, update, delete: if isValidId(settingId);
+    }
+
+    // Public analytics and tracking events (views, clicks, conversions)
+    match /autoviral_tracking_events/{eventId} {
+      allow read: if isValidId(eventId);
+      allow create: if isValidId(eventId)
+        && request.resource.data.campaignId is string;
+      allow update, delete: if isValidId(eventId);
+    }
+
+    // Mined Instagram / social profiles
+    match /autoviral_profiles/{profileId} {
+      allow read: if isValidId(profileId);
+      allow create, update, delete: if isValidId(profileId)
+        && request.resource.data.handle is string;
+    }
+  }
+}

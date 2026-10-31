@@ -10,6 +10,14 @@ export interface Campaign {
   checkoutUrl?: string;
   whatsappNumber?: string;
   price: number;
+  oldPrice?: number;
+  headline?: string;
+  subheadline?: string;
+  badgeText?: string;
+  guaranteeDays?: number;
+  ctaText?: string;
+  imageUrl?: string;
+  features?: string[];
   status: 'active' | 'paused' | 'draft';
   createdAt: string;
   antiBanOrganicMode: boolean;

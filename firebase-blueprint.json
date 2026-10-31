@@ -1,0 +1,96 @@
+{
+  "entities": {
+    "Campaign": {
+      "title": "Campaign",
+      "description": "Marketing and traffic campaign configured by the user",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 100 },
+        "name": { "type": "string", "maxLength": 200 },
+        "platform": { "type": "string", "maxLength": 50 },
+        "niche": { "type": "string", "maxLength": 100 },
+        "affiliateLink": { "type": "string", "maxLength": 500 },
+        "price": { "type": "string", "maxLength": 50 },
+        "commission": { "type": "string", "maxLength": 50 },
+        "status": { "type": "string", "maxLength": 50 },
+        "leadsFound": { "type": "number" },
+        "clicks": { "type": "number" },
+        "conversions": { "type": "number" },
+        "revenue": { "type": "number" },
+        "hook": { "type": "string", "maxLength": 500 },
+        "cta": { "type": "string", "maxLength": 500 },
+        "targetAudience": { "type": "string", "maxLength": 300 },
+        "conversionRate": { "type": "string", "maxLength": 20 },
+        "deleted": { "type": "boolean" },
+        "updatedAt": { "type": "string", "maxLength": 100 }
+      },
+      "required": ["id", "name"]
+    },
+    "AppSetting": {
+      "title": "AppSetting",
+      "description": "Global settings such as landing page copy, prices and deleted campaign IDs",
+      "type": "object",
+      "properties": {
+        "headline": { "type": "string", "maxLength": 300 },
+        "subheadline": { "type": "string", "maxLength": 500 },
+        "price": { "type": "string", "maxLength": 50 },
+        "oldPrice": { "type": "string", "maxLength": 50 },
+        "badge": { "type": "string", "maxLength": 100 },
+        "guarantee": { "type": "string", "maxLength": 100 },
+        "hotmartUrl": { "type": "string", "maxLength": 500 },
+        "whatsappNumber": { "type": "string", "maxLength": 50 },
+        "deletedCampaignIds": { "type": "array" },
+        "updatedAt": { "type": "string", "maxLength": 100 }
+      }
+    },
+    "TrackingEvent": {
+      "title": "TrackingEvent",
+      "description": "Public lead page interaction events",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 100 },
+        "campaignId": { "type": "string", "maxLength": 100 },
+        "type": { "type": "string", "maxLength": 50 },
+        "referrer": { "type": "string", "maxLength": 500 },
+        "timestamp": { "type": "string", "maxLength": 100 }
+      },
+      "required": ["id", "campaignId", "type"]
+    },
+    "ProfileLead": {
+      "title": "ProfileLead",
+      "description": "Instagram or social lead profile mined for outreach",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 100 },
+        "campaignId": { "type": "string", "maxLength": 100 },
+        "handle": { "type": "string", "maxLength": 100 },
+        "name": { "type": "string", "maxLength": 150 },
+        "followers": { "type": "string", "maxLength": 50 },
+        "relevanceScore": { "type": "number" },
+        "niche": { "type": "string", "maxLength": 100 },
+        "status": { "type": "string", "maxLength": 50 },
+        "suggestedDm": { "type": "string", "maxLength": 1000 },
+        "contactedAt": { "type": "string", "maxLength": 100 }
+      },
+      "required": ["id", "handle"]
+    }
+  },
+  "firestore": {
+    "/autoviral_campaigns/{campaignId}": {
+      "schema": { "$ref": "Campaign" },
+      "description": "User marketing campaigns synced in real time across all browsers"
+    },
+    "/autoviral_settings/{settingId}": {
+      "schema": { "$ref": "AppSetting" },
+      "description": "Landing page overrides and cross-browser preferences"
+    },
+    "/autoviral_tracking_events/{eventId}": {
+      "schema": { "$ref": "TrackingEvent" },
+      "description": "Public tracking and analytics events from visitors"
+    },
+    "/autoviral_profiles/{profileId}": {
+      "schema": { "$ref": "ProfileLead" },
+      "description": "Mined leads and Instagram profiles for anti-ban outreach"
+    }
+  }
+}

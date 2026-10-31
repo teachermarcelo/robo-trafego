@@ -13,6 +13,7 @@ import { RealtimeTrackingTab } from './components/RealtimeTrackingTab';
 import { CampaignManagerTab } from './components/CampaignManagerTab';
 import { AIReportsTab } from './components/AIReportsTab';
 import { LeadFinderTab } from './components/LeadFinderTab';
+import { LandingPageBuilderTab } from './components/LandingPageBuilderTab';
 import { PublicLeadLanding } from './components/PublicLeadLanding';
 import { BridgePageModal } from './components/BridgePageModal';
 import { Security2FAModal } from './components/Security2FAModal';
@@ -27,28 +28,53 @@ import {
   deleteCampaignFromSupabase,
   isSupabaseConnected,
 } from './lib/supabaseClient';
+import {
+  saveCampaignToFirebase,
+  deleteCampaignFromFirebase,
+  subscribeFirebaseCampaigns,
+  subscribeDeletedCampaignIds,
+  saveTrackingEventToFirebase,
+  subscribeTrackingEvents,
+} from './lib/firebase';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [deletedCampaignIds, setDeletedCampaignIds] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem('autoviral_deleted_campaign_ids');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return new Set(parsed);
+      }
+    } catch {}
+    // Pre-blacklist fictitious demo campaigns so they never resurrect
+    return new Set(['camp-1', 'camp-2', 'camp-3']);
+  });
+
   const [campaigns, setCampaigns] = useState<Campaign[]>(() => {
     try {
+      const savedDeleted = localStorage.getItem('autoviral_deleted_campaign_ids');
+      const delSet = savedDeleted ? new Set(JSON.parse(savedDeleted)) : new Set(['camp-1', 'camp-2', 'camp-3']);
       const saved = localStorage.getItem('autoviral_campaigns');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          // Merge with INITIAL_CAMPAIGNS so any new defaults (like COMUNIDADE MILHAS 3.0) aren't missing
-          const existingIds = new Set(parsed.map((c: any) => c.id));
-          const missingDefaults = INITIAL_CAMPAIGNS.filter((d) => !existingIds.has(d.id));
-          const merged = [...parsed, ...missingDefaults];
+          const nonDeleted = parsed.filter((c: any) => !delSet.has(c.id));
+          const existingIds = new Set(nonDeleted.map((c: any) => c.id));
+          const missingDefaults = INITIAL_CAMPAIGNS.filter(
+            (d) => !existingIds.has(d.id) && !delSet.has(d.id)
+          );
+          const merged = [...nonDeleted, ...missingDefaults];
           return merged.map((c) => {
-            if (c.id === 'camp-tarefinhas-autismo' && (c.price === 37 || !c.price)) {
-              return { ...c, price: 9.90 };
+            // Correct tarefinhas price if it had legacy 37 or 3.99
+            if (c.id === 'camp-tarefinhas-autismo' && (c.price === 37 || c.price === 3.99 || !c.price)) {
+              return { ...c, price: 9.90, oldPrice: 47.0 };
             }
             return c;
           });
         }
       }
-      return INITIAL_CAMPAIGNS;
+      return INITIAL_CAMPAIGNS.filter((c) => !delSet.has(c.id));
     } catch {
       return INITIAL_CAMPAIGNS;
     }
@@ -121,20 +147,70 @@ export default function App() {
     }
   }, [campaigns]);
 
-  // Sync campaigns from server backend AND Supabase on mount
+  // 1. Subscribe to Firebase deleted campaign IDs (ensures fictitious campaigns stay deleted on all devices)
+  useEffect(() => {
+    const unsubDeleted = subscribeDeletedCampaignIds((ids) => {
+      if (ids && ids.length > 0) {
+        setDeletedCampaignIds(new Set(ids));
+        try {
+          localStorage.setItem('autoviral_deleted_campaign_ids', JSON.stringify(ids));
+        } catch {}
+      }
+    });
+    return () => unsubDeleted();
+  }, []);
+
+  // 2. Real-time Firebase Firestore campaigns listener (synchronizes all browsers & mobile devices)
+  useEffect(() => {
+    const unsubCampaigns = subscribeFirebaseCampaigns(
+      (cloudCampaigns) => {
+        if (cloudCampaigns && cloudCampaigns.length > 0) {
+          const savedDeleted = localStorage.getItem('autoviral_deleted_campaign_ids');
+          const delSet = savedDeleted ? new Set(JSON.parse(savedDeleted)) : deletedCampaignIds;
+          const valid = cloudCampaigns.filter((c) => !delSet.has(c.id));
+          if (valid.length > 0) {
+            setCampaigns(valid);
+            try {
+              localStorage.setItem('autoviral_campaigns', JSON.stringify(valid));
+            } catch {}
+          }
+        }
+      },
+      (err) => console.warn('Firebase campaigns sync notice:', err)
+    );
+    return () => unsubCampaigns();
+  }, [deletedCampaignIds]);
+
+  // 3. Real-time Firebase Firestore tracking events listener
+  useEffect(() => {
+    const unsubTracking = subscribeTrackingEvents((cloudEvents) => {
+      if (cloudEvents && cloudEvents.length > 0) {
+        setTrackingEvents(cloudEvents);
+        try {
+          localStorage.setItem('autoviral_tracking_events', JSON.stringify(cloudEvents));
+        } catch {}
+      }
+    });
+    return () => unsubTracking();
+  }, []);
+
+  // 4. Secondary fallback fetch from server backend and Supabase
   useEffect(() => {
     let isMounted = true;
 
     const syncAllCampaigns = async () => {
       let merged: Campaign[] = [...campaigns];
+      const savedDeleted = localStorage.getItem('autoviral_deleted_campaign_ids');
+      const delSet = savedDeleted ? new Set(JSON.parse(savedDeleted)) : deletedCampaignIds;
 
-      // 1. Fetch from server endpoint
+      // Fetch from server endpoint
       try {
         const res = await fetch('/api/campaigns');
         if (res.ok) {
           const json = await res.json();
           if (json.campaigns && Array.isArray(json.campaigns)) {
             json.campaigns.forEach((sc: Campaign) => {
+              if (delSet.has(sc.id)) return;
               const idx = merged.findIndex((m) => m.id === sc.id);
               if (idx >= 0) {
                 merged[idx] = { ...merged[idx], ...sc };
@@ -145,15 +221,16 @@ export default function App() {
           }
         }
       } catch (err) {
-        console.warn('Backend server campaigns fetch skipped or offline:', err);
+        // Backend server offline/swallowed on Vercel
       }
 
-      // 2. Fetch from Supabase if connected
+      // Fetch from Supabase if configured
       try {
         if (isSupabaseConnected()) {
           const supaCampaigns = await fetchSupabaseCampaigns();
           if (supaCampaigns && supaCampaigns.length > 0) {
             supaCampaigns.forEach((sc) => {
+              if (delSet.has(sc.id)) return;
               const idx = merged.findIndex((m) => m.id === sc.id);
               if (idx >= 0) {
                 merged[idx] = { ...merged[idx], ...sc };
@@ -164,12 +241,11 @@ export default function App() {
           }
         }
       } catch (err) {
-        console.warn('Supabase auto-sync error on mount:', err);
+        console.warn('Supabase sync notice:', err);
       }
 
       if (isMounted && merged.length > 0) {
         setCampaigns(merged);
-        localStorage.setItem('autoviral_campaigns', JSON.stringify(merged));
       }
     };
 
@@ -178,24 +254,6 @@ export default function App() {
     return () => {
       isMounted = false;
     };
-  }, []);
-
-  // Fetch initial tracking events from server
-  useEffect(() => {
-    const fetchEvents = async () => {
-      try {
-        const res = await fetch('/api/tracking/events');
-        if (res.ok) {
-          const data = await res.json();
-          if (data.events && Array.isArray(data.events)) {
-            setTrackingEvents(data.events);
-          }
-        }
-      } catch (err) {
-        console.error('Failed to load tracking events from server:', err);
-      }
-    };
-    fetchEvents();
   }, []);
 
   const totalRevenue = campaigns.reduce((acc, c) => acc + c.revenue, 0);
@@ -285,7 +343,23 @@ export default function App() {
       setNotifications((prev) => [newNotif, ...prev]);
     }
 
-    // 4. Send to Server endpoint if available
+    // 4. Save to Firebase Firestore (syncs live to all devices and dashboard)
+    saveTrackingEventToFirebase(localEvent).catch((err) =>
+      console.warn('Firebase saveTrackingEvent error:', err)
+    );
+    if (targetCampaign) {
+      const isClick = localEvent.type === 'click' || localEvent.type === 'whatsapp_click' || localEvent.type === 'checkout_click';
+      const isConv = localEvent.type === 'conversion';
+      const addRevenue = isConv ? (localEvent.amount || targetCampaign.price) : 0;
+      saveCampaignToFirebase({
+        ...targetCampaign,
+        clicks: isClick ? targetCampaign.clicks + 1 : targetCampaign.clicks,
+        conversions: isConv ? targetCampaign.conversions + 1 : targetCampaign.conversions,
+        revenue: targetCampaign.revenue + addRevenue,
+      }).catch(console.warn);
+    }
+
+    // 5. Send to Server endpoint if available
     try {
       await fetch('/api/tracking/event', {
         method: 'POST',
@@ -328,11 +402,16 @@ export default function App() {
     setActiveTab('creatives');
   };
 
-  // Add new campaign with multi-layer persistence (State + LocalStorage + Server + Supabase)
+  // Add new campaign with multi-layer persistence (Firebase Cloud + LocalStorage + Server + Supabase)
   const handleAddCampaign = async (newCamp: Campaign) => {
     setCampaigns((prev) => [newCamp, ...prev]);
 
-    // 1. Post to Server API
+    // 1. Save to Firebase Firestore (multi-browser cloud sync)
+    saveCampaignToFirebase(newCamp).catch((e) =>
+      console.warn('Firebase saveCampaign error:', e)
+    );
+
+    // 2. Post to Server API
     try {
       await fetch('/api/campaigns', {
         method: 'POST',
@@ -343,7 +422,7 @@ export default function App() {
       console.warn('Backend server campaign save skipped:', e);
     }
 
-    // 2. Upsert to Supabase if connected
+    // 3. Upsert to Supabase if connected
     try {
       if (isSupabaseConnected()) {
         await saveCampaignToSupabase(newCamp);
@@ -354,8 +433,8 @@ export default function App() {
 
     const notif: PushNotification = {
       id: `notif-${Date.now()}`,
-      title: '🎯 Nova Campanha Salva & Sincronizada',
-      message: `A campanha "${newCamp.title}" foi gravada e protegida contra perda!`,
+      title: '🎯 Nova Campanha Salva na Nuvem Firebase',
+      message: `A campanha "${newCamp.title}" foi sincronizada e está acessível em todos os seus dispositivos!`,
       time: 'Agora mesmo',
       type: 'tip',
       read: false,
@@ -366,6 +445,13 @@ export default function App() {
   // Update existing campaign (price, title, pain point, URLs)
   const handleUpdateCampaign = async (updated: Campaign) => {
     setCampaigns((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+
+    // 1. Sync to Firebase Firestore
+    saveCampaignToFirebase(updated).catch((e) =>
+      console.warn('Firebase updateCampaign error:', e)
+    );
+
+    // 2. Sync to Server
     try {
       await fetch('/api/campaigns', {
         method: 'POST',
@@ -375,6 +461,8 @@ export default function App() {
     } catch (e) {
       console.warn('Backend campaign update skipped:', e);
     }
+
+    // 3. Sync to Supabase
     try {
       if (isSupabaseConnected()) {
         await saveCampaignToSupabase(updated);
@@ -385,8 +473,8 @@ export default function App() {
 
     const notif: PushNotification = {
       id: `notif-${Date.now()}`,
-      title: '✏️ Campanha Atualizada!',
-      message: `As alterações em "${updated.title}" (R$ ${updated.price.toFixed(2)}) foram salvas com sucesso.`,
+      title: '✏️ Campanha Atualizada na Nuvem!',
+      message: `As alterações em "${updated.title}" (R$ ${updated.price.toFixed(2)}) foram salvas e sincronizadas em todos os navegadores.`,
       time: 'Agora mesmo',
       type: 'tip',
       read: false,
@@ -409,6 +497,7 @@ export default function App() {
 
     const target = updated.find((c) => c.id === id);
     if (target) {
+      saveCampaignToFirebase(target).catch(console.warn);
       try {
         await fetch('/api/campaigns', {
           method: 'POST',
@@ -431,6 +520,25 @@ export default function App() {
   // Delete campaign
   const handleDeleteCampaign = async (id: string) => {
     setCampaigns((prev) => prev.filter((c) => c.id !== id));
+    setDeletedCampaignIds((prev) => {
+      const updated = new Set(prev);
+      updated.add(id);
+      try {
+        localStorage.setItem(
+          'autoviral_deleted_campaign_ids',
+          JSON.stringify(Array.from(updated))
+        );
+      } catch (e) {
+        console.warn(e);
+      }
+      return updated;
+    });
+
+    // Permanently delete in Firebase
+    deleteCampaignFromFirebase(id).catch((e) =>
+      console.warn('Firebase deleteCampaign error:', e)
+    );
+
     try {
       await fetch(`/api/campaigns/${id}`, { method: 'DELETE' });
     } catch (e) {
@@ -464,6 +572,11 @@ export default function App() {
     setCampaigns(resetCampaigns);
     localStorage.setItem('autoviral_real_mode', 'true');
     localStorage.setItem('autoviral_campaigns', JSON.stringify(resetCampaigns));
+
+    // Reset campaigns in Firebase
+    for (const camp of resetCampaigns) {
+      saveCampaignToFirebase(camp).catch(console.warn);
+    }
 
     if (isSupabaseConnected()) {
       for (const camp of resetCampaigns) {
@@ -562,6 +675,14 @@ export default function App() {
             onNavigateTab={(tab) => setActiveTab(tab)}
             onSimulateConversion={handleSimulateQuickConversion}
             onResetAllMetrics={handleResetToRealMode}
+          />
+        )}
+
+        {activeTab === 'landing_builder' && (
+          <LandingPageBuilderTab
+            campaigns={campaigns}
+            onUpdateCampaign={handleUpdateCampaign}
+            onPreviewBridge={(c) => setBridgeModalCampaign(c)}
           />
         )}
 

@@ -9,6 +9,7 @@ import {
   Radio,
   ExternalLink,
   Flame,
+  LayoutTemplate,
   Target,
 } from 'lucide-react';
 
@@ -41,7 +42,8 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const tabs = [
     { id: 'dashboard', label: 'Dashboard & Métricas', icon: TrendingUp },
-    { id: 'lead_finder', label: 'Achar Pessoas & Leads', icon: Target, badge: 'Prático' },
+    { id: 'landing_builder', label: 'Criar / Editar Landing Page', icon: LayoutTemplate, badge: 'Editar R$' },
+    { id: 'lead_finder', label: 'Achar Pessoas & Disparo Anti-Bloqueio', icon: Target, badge: 'Prospecção' },
     { id: 'pain_finder', label: 'Busca de Dores & Tendências', icon: Sparkles, badge: 'IA' },
     { id: 'creatives', label: 'Estúdio de Criativos IA', icon: Flame, badge: 'Viral' },
     { id: 'sales_bot', label: 'Robô de Vendas 24/7', icon: Radio },
@@ -132,9 +134,9 @@ export const Header: React.FC<HeaderProps> = ({
           )}
 
 
-          <div className="hidden md:flex items-center gap-1 text-slate-400 text-xs">
-            <CloudCheck className="w-3.5 h-3.5 text-blue-400" />
-            <span>Backup Nuvem OK</span>
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs border bg-emerald-950/70 text-emerald-300 border-emerald-700/60 shadow-sm" title="Google Cloud Firebase Firestore: Sincronização em tempo real ativa em todos os computadores, celulares e navegadores">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="font-semibold tracking-wide">Nuvem Firebase: Sincronizado</span>
           </div>
 
           <button

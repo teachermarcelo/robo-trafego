@@ -17,6 +17,7 @@ import {
   Heart,
 } from 'lucide-react';
 import { Campaign, TrackingEvent } from '../types';
+import { subscribeLandingPageSettings } from '../lib/firebase';
 
 interface PublicLeadLandingProps {
   campaign: Campaign;
@@ -31,11 +32,42 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
 }) => {
   const [hasTrackedView, setHasTrackedView] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const [liveSettings, setLiveSettings] = useState<any>(null);
 
   const isTarefinhas =
     campaign.id === 'camp-tarefinhas-autismo' ||
     campaign.niche === 'psicopedagogia' ||
     campaign.title.toLowerCase().includes('tarefinha');
+
+  // Real-time synchronization of landing page content and pricing from Firebase
+  useEffect(() => {
+    if (isTarefinhas) {
+      const unsub = subscribeLandingPageSettings((settings) => {
+        if (settings) {
+          setLiveSettings(settings);
+        }
+      });
+      return () => unsub();
+    }
+  }, [isTarefinhas]);
+
+  const effectivePrice =
+    liveSettings?.price != null
+      ? parseFloat(String(liveSettings.price).replace(',', '.')) || 9.9
+      : campaign.price;
+  const effectiveOldPrice =
+    liveSettings?.oldPrice != null
+      ? parseFloat(String(liveSettings.oldPrice).replace(',', '.')) || 47.0
+      : campaign.oldPrice || 47.0;
+  const effectiveHeadline = liveSettings?.headline || campaign.headline;
+  const effectiveSubheadline = liveSettings?.subheadline || campaign.subheadline;
+  const effectiveBadgeText = liveSettings?.badgeText || campaign.badgeText;
+  const effectiveCtaText = liveSettings?.ctaText || campaign.ctaText;
+  const effectiveCheckoutUrl = liveSettings?.checkoutUrl || campaign.checkoutUrl;
+  const effectiveWhatsappNumber =
+    liveSettings?.whatsappNumber || campaign.whatsappNumber || '5541998778348';
+  const effectiveGuaranteeDays =
+    liveSettings?.guaranteeDays || campaign.guaranteeDays || 7;
 
   const [chatMessages, setChatMessages] = useState<Array<{ sender: 'bot' | 'user'; text: string }>>(() => [
     {
@@ -60,7 +92,7 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
       } else if (question.includes('garantia')) {
         reply = 'Você tem 7 dias de garantia incondicional assegurada pela Hotmart. Se não amar as atividades, devolvemos 100% do seu dinheiro!';
       } else {
-        reply = `O material com mais de 100 tarefinhas está com valor promocional liberado na Hotmart por apenas R$ ${campaign.price.toFixed(2).replace('.', ',')}. Clique no botão verde para garantir o seu!`;
+        reply = `O material com mais de 100 tarefinhas está com valor promocional liberado na Hotmart por apenas R$ ${effectivePrice.toFixed(2).replace('.', ',')}. Clique no botão verde para garantir o seu!`;
       }
     } else {
       if (question.includes('cartão Black')) {
@@ -118,12 +150,12 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
         ? `Olá! Vi o material de 100 Tarefinhas de Educação Infantil e Autismo e gostaria de tirar uma dúvida!`
         : `Olá! Vi sua página da Comunidade Milhas 3.0 e quero entender como começar a lucrar com milhas ainda essa semana!`
     );
-    window.location.href = `https://wa.me/${campaign.whatsappNumber || '5541998778348'}?text=${text}`;
+    window.location.href = `https://wa.me/${effectiveWhatsappNumber}?text=${text}`;
   };
 
   const handleCheckoutClick = () => {
     onTrackAction('checkout_click');
-    window.location.href = campaign.checkoutUrl || (isTarefinhas ? 'https://pay.hotmart.com/U95248783T' : 'https://chk.eduzz.com/39ZEGY8198');
+    window.location.href = effectiveCheckoutUrl || (isTarefinhas ? 'https://pay.hotmart.com/U95248783T' : 'https://chk.eduzz.com/39ZEGY8198');
   };
 
   return (
@@ -132,9 +164,10 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
       <div className="bg-gradient-to-r from-emerald-600 via-green-600 to-emerald-700 text-slate-950 px-4 py-2 text-center text-xs sm:text-sm font-black tracking-wide flex items-center justify-center gap-2">
         <Sparkles className="w-4 h-4 fill-slate-950 shrink-0" />
         <span>
-          {isTarefinhas
-            ? 'PROMOÇÃO EXCLUSIVA HOTMART • ARQUIVOS EM PDF PRONTOS PARA IMPRIMIR'
-            : 'VAGAS PROMOCIONAIS LIBERADAS • SUPORTE DIRETO NO WHATSAPP'}
+          {effectiveBadgeText ||
+            (isTarefinhas
+              ? 'PROMOÇÃO EXCLUSIVA HOTMART • ARQUIVOS EM PDF PRONTOS PARA IMPRIMIR'
+              : 'VAGAS PROMOCIONAIS LIBERADAS • SUPORTE DIRETO NO WHATSAPP')}
         </span>
       </div>
 
@@ -157,7 +190,9 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
 
         {/* Main Title */}
         <h1 className="text-3xl sm:text-5xl font-black text-white leading-tight tracking-tight">
-          {isTarefinhas ? (
+          {effectiveHeadline ? (
+            effectiveHeadline
+          ) : isTarefinhas ? (
             <>
               + 100 Tarefinhas Prontas para{' '}
               <span className="text-emerald-400 underline decoration-emerald-500/50">
@@ -177,18 +212,19 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
 
         {/* Subtitle */}
         <p className="text-slate-300 text-base sm:text-lg max-w-2xl mx-auto leading-relaxed">
-          {isTarefinhas
-            ? 'Economize dezenas de horas de planejamento com atividades lúdicas, testadas e prontas para imprimir, que estimulam a coordenação motora, foco, linguagem e autonomia das crianças sem causar frustração.'
-            : 'Sem precisar aparecer, sem precisar viajar e transformando os gastos que você já tem no mercado, farmácia e contas básicas em lucro líquido na sua conta.'}
+          {effectiveSubheadline ||
+            (isTarefinhas
+              ? 'Economize dezenas de horas de planejamento com atividades lúdicas, testadas e prontas para imprimir, que estimulam a coordenação motora, foco, linguagem e autonomia das crianças sem causar frustração.'
+              : 'Sem precisar aparecer, sem precisar viajar e transformando os gastos que você já tem no mercado, farmácia e contas básicas em lucro líquido na sua conta.')}
         </p>
 
-        {/* Product Cover Image if Tarefinhas */}
-        {isTarefinhas && (
+        {/* Product Cover Image if Tarefinhas or custom imageUrl */}
+        {(campaign.imageUrl || isTarefinhas) && (
           <div className="max-w-xs mx-auto py-2">
             <div className="relative group rounded-3xl overflow-hidden border-2 border-emerald-500/40 shadow-2xl shadow-emerald-950/80 transform group-hover:scale-105 transition duration-300">
               <img
-                src="/assets/aistudio/image_e9e67204.png"
-                alt="+ 100 Tarefinha Educação Infantil e Autismo"
+                src={campaign.imageUrl || '/assets/aistudio/image_e9e67204.png'}
+                alt={campaign.title}
                 className="w-full h-auto object-cover"
               />
               <div className="absolute top-3 left-3 px-2.5 py-1 bg-slate-900/90 text-white text-[11px] font-bold rounded-lg border border-slate-700 flex items-center gap-1.5 shadow">
@@ -221,10 +257,10 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
         <div className="p-6 bg-slate-900/90 border border-emerald-900/60 rounded-3xl shadow-2xl space-y-4 max-w-xl mx-auto">
           <div className="space-y-1">
             <span className="text-xs text-slate-400 line-through">
-              {isTarefinhas ? 'De R$ 47,00' : 'De R$ 697,00'}
+              De R$ {effectiveOldPrice ? effectiveOldPrice.toFixed(2).replace('.', ',') : (isTarefinhas ? '47,00' : '697,00')}
             </span>
             <div className="text-4xl font-black text-emerald-400">
-              R$ {campaign.price.toFixed(2).replace('.', ',')}
+              R$ {effectivePrice.toFixed(2).replace('.', ',')}
             </div>
             <span className="text-xs text-slate-300">
               {isTarefinhas
@@ -241,9 +277,10 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
             >
               <Lock className="w-5 h-5 text-slate-950" />
               <span>
-                {isTarefinhas
-                  ? 'QUERO BAIXAR AS 100 TAREFINHAS AGORA'
-                  : 'QUERO ENTRAR NA COMUNIDADE AGORA'}
+                {effectiveCtaText ||
+                  (isTarefinhas
+                    ? 'QUERO BAIXAR AS 100 TAREFINHAS AGORA'
+                    : 'QUERO ENTRAR NA COMUNIDADE AGORA')}
               </span>
               <ArrowRight className="w-5 h-5 text-slate-950" />
             </button>
@@ -261,7 +298,7 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
           <div className="pt-2 flex items-center justify-center gap-3 text-xs text-slate-400">
             <span className="flex items-center gap-1">
               <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              Garantia de 7 Dias
+              Garantia de {effectiveGuaranteeDays} Dias
             </span>
             <span>•</span>
             <span className="flex items-center gap-1">

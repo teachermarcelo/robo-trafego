@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   LayoutTemplate,
   Save,
@@ -22,6 +22,9 @@ import {
   Plus,
   RefreshCw,
   Image as ImageIcon,
+  Upload,
+  FolderOpen,
+  Trash2,
 } from 'lucide-react';
 import { Campaign } from '../types';
 import { saveLandingPageSettingsToFirebase } from '../lib/firebase';
@@ -92,9 +95,85 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
         : '')
   );
 
+  // File upload state for PC images
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [uploadLoading, setUploadLoading] = useState(false);
+  const [uploadFileName, setUploadFileName] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const processImageFile = (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      alert('Por favor, selecione um arquivo de imagem válido (PNG, JPG, JPEG ou WEBP).');
+      return;
+    }
+
+    setUploadLoading(true);
+    setUploadFileName(file.name);
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const rawDataUrl = e.target?.result as string;
+      const img = new Image();
+      img.onload = () => {
+        // Optimize and compress to keep Firestore document compact and fast
+        const maxDim = 900;
+        let width = img.width;
+        let height = img.height;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.88);
+          setImageUrl(compressedDataUrl);
+        } else {
+          setImageUrl(rawDataUrl);
+        }
+        setUploadLoading(false);
+      };
+      img.onerror = () => {
+        setImageUrl(rawDataUrl);
+        setUploadLoading(false);
+      };
+      img.src = rawDataUrl;
+    };
+    reader.onerror = () => {
+      setUploadLoading(false);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      processImageFile(file);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      processImageFile(file);
+    }
+  };
+
   // When switching campaign, reload state
   const handleSelectCampaign = (id: string) => {
     setSelectedCampaignId(id);
+    setUploadFileName(null);
     const c = campaigns.find((camp) => camp.id === id);
     if (c) {
       setTitle(c.title);
@@ -433,28 +512,179 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
               </div>
             </div>
 
-            {/* Section: Capa e Mídia */}
+            {/* Section: Capa e Mídia (Upload Direto do PC) */}
             <div className="space-y-4 border-b border-slate-800 pb-6">
-              <div className="flex items-center gap-2 text-pink-400 font-bold text-sm">
-                <ImageIcon className="w-4 h-4" />
-                <span>Imagem de Capa do Produto</span>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Caminho ou URL da Imagem da Capa:
-                </label>
-                <input
-                  type="text"
-                  value={imageUrl}
-                  onChange={(e) => setImageUrl(e.target.value)}
-                  placeholder="/assets/aistudio/image_e9e67204.png"
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-white text-xs font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-                <span className="text-[11px] text-slate-400 mt-1 block">
-                  Capa oficial cadastrada na Hotmart: <code className="text-emerald-400 font-mono">/assets/aistudio/image_e9e67204.png</code>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-pink-400 font-bold text-sm">
+                  <ImageIcon className="w-4 h-4" />
+                  <span>Imagem de Capa do Produto</span>
+                </div>
+                <span className="text-[11px] px-2 py-0.5 rounded-full bg-pink-950/80 border border-pink-700/50 text-pink-300 font-medium">
+                  Upload Direto do PC
                 </span>
               </div>
+
+              {/* Hidden Native File Input */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png, image/jpeg, image/jpg, image/webp"
+                onChange={handleFileChange}
+                className="hidden"
+              />
+
+              {/* Upload Dropzone / Button */}
+              <div
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setIsDragging(true);
+                }}
+                onDragLeave={() => setIsDragging(false)}
+                onDrop={handleDrop}
+                onClick={() => fileInputRef.current?.click()}
+                className={`relative border-2 border-dashed rounded-2xl p-5 text-center cursor-pointer transition-all duration-200 group ${
+                  isDragging
+                    ? 'border-emerald-400 bg-emerald-950/40 scale-[1.01]'
+                    : 'border-slate-700 hover:border-emerald-500/80 bg-slate-950/70 hover:bg-slate-900/80'
+                }`}
+              >
+                <div className="flex flex-col items-center justify-center gap-2">
+                  <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 group-hover:scale-110 group-hover:bg-emerald-500 group-hover:text-slate-950 transition">
+                    {uploadLoading ? (
+                      <RefreshCw className="w-6 h-6 animate-spin" />
+                    ) : (
+                      <Upload className="w-6 h-6" />
+                    )}
+                  </div>
+
+                  <div>
+                    <p className="text-xs sm:text-sm font-bold text-white">
+                      {uploadLoading
+                        ? 'Otimizando e carregando imagem...'
+                        : 'Clique para escolher uma imagem do seu computador'}
+                    </p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      ou arraste o arquivo baixado (PNG, JPG, WEBP) para cá
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      fileInputRef.current?.click();
+                    }}
+                    className="mt-1 px-4 py-1.5 bg-emerald-500/20 hover:bg-emerald-500 text-emerald-300 hover:text-slate-950 text-xs font-bold rounded-lg border border-emerald-500/40 transition flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <FolderOpen className="w-3.5 h-3.5" />
+                    <span>Procurar Arquivo no PC</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Active Image Preview & Action Controls */}
+              {imageUrl ? (
+                <div className="bg-slate-950 border border-slate-800 rounded-2xl p-3 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-14 h-14 rounded-xl overflow-hidden border border-emerald-500/40 bg-slate-900 shrink-0 shadow">
+                      <img
+                        src={imageUrl}
+                        alt="Capa Ativa"
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          (e.target as HTMLElement).style.display = 'none';
+                        }}
+                      />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                        <span className="text-xs font-bold text-emerald-300">
+                          {uploadFileName ? 'Foto do Computador Pronta' : 'Capa Ativa na Página'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 truncate font-mono">
+                        {uploadFileName || (imageUrl.startsWith('data:') ? 'Imagem carregada localmente' : imageUrl)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-lg text-slate-300 hover:text-white text-[11px] font-medium transition flex items-center gap-1 cursor-pointer"
+                      title="Trocar por outro arquivo do computador"
+                    >
+                      <Upload className="w-3 h-3 text-emerald-400" />
+                      <span className="hidden sm:inline">Trocar</span>
+                    </button>
+                    {isTarefinhas && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setImageUrl('/assets/aistudio/image_e9e67204.png');
+                          setUploadFileName(null);
+                        }}
+                        className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-lg text-slate-400 hover:text-emerald-300 text-[11px] font-medium transition cursor-pointer"
+                        title="Restaurar a capa oficial cadastrada na Hotmart"
+                      >
+                        Restaurar Padrão
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setImageUrl('');
+                        setUploadFileName(null);
+                      }}
+                      className="p-1.5 bg-red-950/40 hover:bg-red-900/60 border border-red-800/50 rounded-lg text-red-400 hover:text-red-300 transition cursor-pointer"
+                      title="Remover capa"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-3 bg-slate-950/60 border border-dashed border-slate-800 rounded-xl text-center">
+                  <span className="text-xs text-slate-400">
+                    Nenhuma imagem selecionada no momento.
+                  </span>
+                  {isTarefinhas && (
+                    <button
+                      type="button"
+                      onClick={() => setImageUrl('/assets/aistudio/image_e9e67204.png')}
+                      className="ml-2 text-xs font-bold text-emerald-400 hover:underline cursor-pointer"
+                    >
+                      Usar Capa Padrão Hotmart
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Advanced / Manual URL field (Collapsible) */}
+              <details className="group text-xs text-slate-400">
+                <summary className="cursor-pointer hover:text-slate-300 list-none flex items-center gap-1 select-none">
+                  <span className="text-[10px] text-slate-500 group-open:rotate-90 transition-transform inline-block">▶</span>
+                  <span>Opções avançadas (digitar URL ou caminho manualmente)</span>
+                </summary>
+                <div className="pt-2 pl-3 space-y-1.5">
+                  <input
+                    type="text"
+                    value={imageUrl.startsWith('data:') ? '(Imagem codificada em Base64 do seu computador)' : imageUrl}
+                    onChange={(e) => {
+                      if (!e.target.value.startsWith('(')) {
+                        setImageUrl(e.target.value);
+                      }
+                    }}
+                    placeholder="/assets/aistudio/image_e9e67204.png ou https://..."
+                    className="w-full px-3 py-1.5 bg-slate-950 border border-slate-700 rounded-lg text-white text-xs font-mono focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                  <span className="text-[10px] text-slate-500 block">
+                    Capa oficial cadastrada na Hotmart: <code className="text-emerald-400 font-mono">/assets/aistudio/image_e9e67204.png</code>
+                  </span>
+                </div>
+              </details>
             </div>
 
             {/* Save Button */}

@@ -91,6 +91,7 @@ export interface TrackingEvent {
   amount?: number;
   leadScore?: number;
   durationSeconds?: number;
+  isSimulation?: boolean;
 }
 
 export interface AIReport {

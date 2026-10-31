@@ -360,21 +360,33 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
                 </span>
                 <h3 className="text-sm font-bold text-white">Radar de Pessoas ao Vivo</h3>
               </div>
-              <button
-                onClick={() => onNavigateTab('tracking')}
-                className="text-[11px] text-indigo-400 hover:text-indigo-300 font-medium"
-              >
-                Ver Radar Completo
-              </button>
+              <div className="flex items-center gap-2">
+                <a
+                  href="https://app.hotmart.com/sales"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[10px] px-2 py-0.5 rounded bg-orange-950 text-orange-300 border border-orange-800/60 hover:bg-orange-900 font-bold transition flex items-center gap-1"
+                  title="Conferir saldo e vendas oficiais no painel da Hotmart"
+                >
+                  <span>Conferir na Hotmart ↗</span>
+                </a>
+                <button
+                  onClick={() => onNavigateTab('tracking')}
+                  className="text-[11px] text-indigo-400 hover:text-indigo-300 font-medium"
+                >
+                  Ver Completo
+                </button>
+              </div>
             </div>
-            <p className="text-xs text-slate-400 mb-4">
-              Visitantes chegando pelo TikTok e Pinterest sem nenhum custo de anúncio
+            <p className="text-xs text-slate-400 mb-3">
+              Rastreamento em tempo real dos visitantes que chegam aos seus links de vendas
             </p>
 
             <div className="space-y-2.5">
               {recentEvents.map((event) => {
                 const isHighIntent = (event.leadScore ?? 0) >= 85;
                 const isConversion = event.type === 'conversion';
+                const isSimulated = event.isSimulation === true || (isConversion && (event.amount === 3.99 || !event.isSimulation));
                 return (
                   <div
                     key={event.id}
@@ -386,11 +398,22 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
                         : 'bg-slate-800/40 border-slate-800'
                     }`}
                   >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="font-semibold text-white flex items-center gap-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                        {event.geo.city}, {event.geo.state}
-                      </span>
+                    <div className="flex items-center justify-between mb-1 gap-1 flex-wrap">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className={`w-1.5 h-1.5 rounded-full ${isSimulated ? 'bg-amber-400' : 'bg-emerald-400'}`} />
+                        <span className="font-semibold text-white">
+                          {event.geo.city}, {event.geo.state}
+                        </span>
+                        {isSimulated ? (
+                          <span className="text-[9px] font-bold px-1.5 py-0.2 bg-amber-950/80 text-amber-300 border border-amber-800/60 rounded">
+                            TESTE DO PAINEL
+                          </span>
+                        ) : (
+                          <span className="text-[9px] font-bold px-1.5 py-0.2 bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 rounded">
+                            ACESSO REAL AO VIVO
+                          </span>
+                        )}
+                      </div>
                       <span className="text-[10px] text-slate-400 font-mono">
                         {new Date(event.timestamp).toLocaleTimeString('pt-BR', {
                           hour: '2-digit',
@@ -415,14 +438,32 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
                     </div>
 
                     {isConversion && (
-                      <div className="mt-1 text-[11px] font-bold text-emerald-400 flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3" />
-                        <span>Venda Confirmada: R$ {event.amount?.toFixed(2)}</span>
+                      <div className="mt-1.5 p-1.5 rounded bg-emerald-950/60 border border-emerald-800/40 text-[11px] font-bold text-emerald-400 flex items-center justify-between">
+                        <div className="flex items-center gap-1">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>{isSimulated ? 'Simulação de Venda:' : 'Venda Rastreada:'} R$ {event.amount?.toFixed(2)}</span>
+                        </div>
+                        <a
+                          href="https://app.hotmart.com/sales"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[10px] text-emerald-300 underline font-normal"
+                        >
+                          Conferir na Hotmart
+                        </a>
                       </div>
                     )}
                   </div>
                 );
               })}
+            </div>
+
+            {/* Guia de Confirmação Oficial */}
+            <div className="mt-3 p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-300 space-y-1">
+              <span className="font-bold text-white block">ℹ️ Como confirmar suas vendas reais:</span>
+              <p className="text-slate-400 leading-relaxed text-[10px]">
+                O dinheiro das vendas cai direto na sua conta bancária via <strong>Hotmart</strong>. Quando alguém pagar o Pix ou cartão, a Hotmart envia notificação no seu e-mail (marcellospropaganda@gmail.com) e app da Hotmart.
+              </p>
             </div>
           </div>
 

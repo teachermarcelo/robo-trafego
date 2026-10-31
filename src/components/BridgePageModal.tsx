@@ -109,6 +109,20 @@ export const BridgePageModal: React.FC<BridgePageModalProps> = ({
               </p>
             </div>
 
+            {/* Product Cover Image if available */}
+            {campaign.imageUrl && (
+              <div className="relative rounded-2xl overflow-hidden border border-emerald-500/30 shadow-lg max-w-xs mx-auto">
+                <img
+                  src={campaign.imageUrl}
+                  alt={campaign.title}
+                  className="w-full h-auto object-cover max-h-56"
+                  onError={(e) => {
+                    (e.target as HTMLElement).style.display = 'none';
+                  }}
+                />
+              </div>
+            )}
+
             {/* Social Proof Star rating */}
             <div className="flex items-center justify-center gap-1.5 py-1">
               <div className="flex text-amber-400">

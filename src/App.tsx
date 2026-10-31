@@ -277,6 +277,7 @@ export default function App() {
       amount: eventData.amount,
       leadScore: eventData.leadScore || 85,
       durationSeconds: eventData.durationSeconds || 18,
+      isSimulation: eventData.isSimulation ?? false,
     };
 
     // 1. Immediately update tracking events locally
@@ -392,6 +393,7 @@ export default function App() {
       source: 'tiktok',
       leadScore: 98,
       durationSeconds: 154,
+      isSimulation: true,
     });
   };
 

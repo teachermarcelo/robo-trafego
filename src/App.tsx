@@ -54,7 +54,16 @@ export default function App() {
     }
   });
 
-  const [trackingEvents, setTrackingEvents] = useState<TrackingEvent[]>([]);
+  const [trackingEvents, setTrackingEvents] = useState<TrackingEvent[]>(() => {
+    try {
+      const saved = localStorage.getItem('autoviral_tracking_events');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return [];
+  });
   const [is2FAEnabled, setIs2FAEnabled] = useState(false);
   const [is2FAModalOpen, setIs2FAModalOpen] = useState(false);
   const [isNotificationsModalOpen, setIsNotificationsModalOpen] = useState(false);
@@ -191,50 +200,99 @@ export default function App() {
 
   const totalRevenue = campaigns.reduce((acc, c) => acc + c.revenue, 0);
 
-  // Handler to record a new tracking event
+  // Handler to record a new tracking event (works online and client-side on Vercel)
   const handleAddTrackingEvent = async (eventData: Partial<TrackingEvent>) => {
+    const targetCampaign =
+      campaigns.find((c) => c.id === eventData.campaignId) || campaigns[0];
+
+    const localEvent: TrackingEvent = {
+      id: `evt-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      campaignId: eventData.campaignId || targetCampaign?.id || 'camp-tarefinhas-autismo',
+      campaignTitle: eventData.campaignTitle || targetCampaign?.title || '+ 100 Tarefinha Educação Infantil e Autismo',
+      niche: eventData.niche || targetCampaign?.niche || 'psicopedagogia',
+      type: eventData.type || 'click',
+      timestamp: new Date().toISOString(),
+      geo: eventData.geo || { state: 'SP', city: 'Visitante Real', country: 'Brasil' },
+      device: eventData.device || (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ? 'mobile' : 'desktop'),
+      ageBracket: eventData.ageBracket || '25-34',
+      source: eventData.source || 'instagram',
+      amount: eventData.amount,
+      leadScore: eventData.leadScore || 85,
+      durationSeconds: eventData.durationSeconds || 18,
+    };
+
+    // 1. Immediately update tracking events locally
+    setTrackingEvents((prev) => {
+      const updated = [localEvent, ...prev.slice(0, 499)];
+      try {
+        localStorage.setItem('autoviral_tracking_events', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    // 2. Update campaign metrics (clicks, conversions, revenue)
+    setCampaigns((prev) => {
+      const updatedCampaigns = prev.map((c) => {
+        if (c.id === localEvent.campaignId) {
+          const isClick = localEvent.type === 'click' || localEvent.type === 'whatsapp_click' || localEvent.type === 'checkout_click';
+          const isConv = localEvent.type === 'conversion';
+          const addRevenue = isConv ? (localEvent.amount || c.price) : 0;
+          return {
+            ...c,
+            clicks: isClick ? c.clicks + 1 : c.clicks,
+            conversions: isConv ? c.conversions + 1 : c.conversions,
+            revenue: c.revenue + addRevenue,
+          };
+        }
+        return c;
+      });
+      try {
+        localStorage.setItem('autoviral_campaigns', JSON.stringify(updatedCampaigns));
+      } catch {}
+      return updatedCampaigns;
+    });
+
+    // 3. Add Push Notification
+    if (localEvent.type === 'conversion') {
+      const newNotif: PushNotification = {
+        id: `notif-${Date.now()}`,
+        title: '💰 Nova Venda Fechada!',
+        message: `Venda de R$ ${(localEvent.amount || targetCampaign?.price || 9.90).toFixed(2)} confirmada em ${localEvent.campaignTitle}!`,
+        time: 'Agora mesmo',
+        type: 'sale',
+        read: false,
+      };
+      setNotifications((prev) => [newNotif, ...prev]);
+    } else if (localEvent.type === 'whatsapp_click') {
+      const newNotif: PushNotification = {
+        id: `notif-${Date.now()}`,
+        title: '📲 Lead Chamando no WhatsApp!',
+        message: `Um visitante clicou para tirar dúvidas no seu WhatsApp (${localEvent.campaignTitle}).`,
+        time: 'Agora mesmo',
+        type: 'traffic',
+        read: false,
+      };
+      setNotifications((prev) => [newNotif, ...prev]);
+    } else if (localEvent.type === 'click') {
+      const newNotif: PushNotification = {
+        id: `notif-${Date.now()}`,
+        title: '👀 Novo Acesso Rastreado!',
+        message: `Visita registrada na página do lead via ${localEvent.source}.`,
+        time: 'Agora mesmo',
+        type: 'traffic',
+        read: false,
+      };
+      setNotifications((prev) => [newNotif, ...prev]);
+    }
+
+    // 4. Send to Server endpoint if available
     try {
-      const res = await fetch('/api/tracking/event', {
+      await fetch('/api/tracking/event', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(eventData),
+        body: JSON.stringify(localEvent),
       });
-      if (res.ok) {
-        const json = await res.json();
-        if (json.event) {
-          setTrackingEvents((prev) => [json.event, ...prev.slice(0, 499)]);
-
-          // If conversion, update campaign metrics
-          if (json.event.type === 'conversion' && json.event.amount) {
-            setCampaigns((prev) =>
-              prev.map((c) => {
-                if (c.id === json.event.campaignId) {
-                  return {
-                    ...c,
-                    conversions: c.conversions + 1,
-                    revenue: c.revenue + json.event.amount,
-                  };
-                }
-                return c;
-              })
-            );
-
-            // Add notification
-            const newNotif: PushNotification = {
-              id: `notif-${Date.now()}`,
-              title: '💰 Nova Venda Fechada!',
-              message: `Venda de R$ ${json.event.amount.toFixed(2)} convertida em ${json.event.campaignTitle}!`,
-              time: 'Agora mesmo',
-              type: 'sale',
-              read: false,
-            };
-            setNotifications((prev) => [newNotif, ...prev]);
-          }
-        }
-      }
-    } catch (err) {
-      console.error('Error logging event:', err);
-    }
+    } catch {}
   };
 
   // Simulate a quick manual conversion for instant live feedback

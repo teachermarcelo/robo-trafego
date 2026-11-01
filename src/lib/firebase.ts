@@ -122,8 +122,12 @@ export function subscribeFirebaseCampaigns(
 
       const list: Campaign[] = [];
       snapshot.forEach((d) => {
-        const data = d.data() as Campaign;
-        list.push({ ...data, id: d.id });
+        const data = d.data() as any;
+        list.push({
+          ...data,
+          id: d.id,
+          title: data.title || data.name || 'Campanha',
+        });
       });
       onUpdate(list);
     },
@@ -135,16 +139,24 @@ export function subscribeFirebaseCampaigns(
 }
 
 /**
- * Save or update campaign in Firestore
+ * Save or update campaign in Firestore (ensures both title and name are populated)
  */
 export async function saveCampaignToFirebase(campaign: Campaign): Promise<void> {
   const path = `${CAMPAIGNS_COLLECTION}/${campaign.id}`;
   try {
     const docRef = doc(db, CAMPAIGNS_COLLECTION, campaign.id);
-    await setDoc(docRef, {
-      ...campaign,
-      updatedAt: new Date().toISOString(),
-    }, { merge: true });
+    const titleVal = campaign.title || (campaign as any).name || 'Campanha';
+    await setDoc(
+      docRef,
+      {
+        ...campaign,
+        id: campaign.id,
+        title: titleVal,
+        name: titleVal,
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -236,13 +248,25 @@ export function subscribeTrackingEvents(onUpdate: (events: TrackingEvent[]) => v
 /**
  * Save Landing Page override settings (for Public Lead landing page across all devices)
  */
-export async function saveLandingPageSettingsToFirebase(settings: Record<string, any>): Promise<void> {
-  const path = `${SETTINGS_COLLECTION}/landing_page_tarefinhas`;
+export async function saveLandingPageSettingsToFirebase(
+  settings: Record<string, any>,
+  campaignId?: string
+): Promise<void> {
+  const docKey = campaignId ? `landing_page_${campaignId}` : 'landing_page_tarefinhas';
+  const path = `${SETTINGS_COLLECTION}/${docKey}`;
   try {
-    await setDoc(doc(db, SETTINGS_COLLECTION, 'landing_page_tarefinhas'), {
+    await setDoc(doc(db, SETTINGS_COLLECTION, docKey), {
       ...settings,
       updatedAt: new Date().toISOString(),
     }, { merge: true });
+
+    // Also update generic fallback if tarefinhas
+    if (!campaignId || campaignId === 'camp-tarefinhas-autismo') {
+      await setDoc(doc(db, SETTINGS_COLLECTION, 'landing_page_tarefinhas'), {
+        ...settings,
+        updatedAt: new Date().toISOString(),
+      }, { merge: true });
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -251,8 +275,12 @@ export async function saveLandingPageSettingsToFirebase(settings: Record<string,
 /**
  * Subscribe to Landing Page override settings
  */
-export function subscribeLandingPageSettings(onUpdate: (settings: any) => void): () => void {
-  const docRef = doc(db, SETTINGS_COLLECTION, 'landing_page_tarefinhas');
+export function subscribeLandingPageSettings(
+  onUpdate: (settings: any) => void,
+  campaignId?: string
+): () => void {
+  const docKey = campaignId ? `landing_page_${campaignId}` : 'landing_page_tarefinhas';
+  const docRef = doc(db, SETTINGS_COLLECTION, docKey);
   return onSnapshot(
     docRef,
     (snap) => {
@@ -262,6 +290,51 @@ export function subscribeLandingPageSettings(onUpdate: (settings: any) => void):
     },
     (err) => {
       console.warn('Landing page settings subscription error:', err);
+    }
+  );
+}
+
+/**
+ * Dispatch message template for ReplyRush and direct outreach
+ */
+export interface DispatchTemplateSettings {
+  nicheId: string;
+  keyword: string;
+  message: string;
+  spinTemplates?: string[];
+  updatedAt?: string;
+}
+
+export async function saveDispatchTemplateToFirebase(template: DispatchTemplateSettings): Promise<void> {
+  const path = `${SETTINGS_COLLECTION}/dispatch_${template.nicheId}`;
+  try {
+    await setDoc(doc(db, SETTINGS_COLLECTION, `dispatch_${template.nicheId}`), {
+      ...template,
+      updatedAt: new Date().toISOString(),
+    }, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export function subscribeDispatchTemplates(
+  onUpdate: (templates: Record<string, DispatchTemplateSettings>) => void
+): () => void {
+  const colRef = collection(db, SETTINGS_COLLECTION);
+  return onSnapshot(
+    colRef,
+    (snap) => {
+      const result: Record<string, DispatchTemplateSettings> = {};
+      snap.forEach((d) => {
+        if (d.id.startsWith('dispatch_')) {
+          const nicheId = d.id.replace('dispatch_', '');
+          result[nicheId] = d.data() as DispatchTemplateSettings;
+        }
+      });
+      onUpdate(result);
+    },
+    (err) => {
+      console.warn('Dispatch templates subscription error:', err);
     }
   );
 }

@@ -15,7 +15,10 @@ service cloud.firestore {
       allow read: if isValidId(campaignId);
       allow create, update: if isValidId(campaignId)
         && request.resource.data.id is string
-        && request.resource.data.name is string;
+        && (
+          (request.resource.data.title is string && request.resource.data.title.size() > 0) ||
+          (request.resource.data.name is string && request.resource.data.name.size() > 0)
+        );
       allow delete: if isValidId(campaignId);
     }
 

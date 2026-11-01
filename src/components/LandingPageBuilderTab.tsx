@@ -80,12 +80,40 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
     activeCamp?.badgeText ||
       'PROMOÇÃO EXCLUSIVA HOTMART • ARQUIVOS EM PDF PRONTOS PARA IMPRIMIR'
   );
-  const [ctaText, setCtaText] = useState(
-    activeCamp?.ctaText ||
-      (activeCamp?.id === 'camp-tarefinhas-autismo'
-        ? 'QUERO BAIXAR AS 100 TAREFINHAS AGORA'
-        : 'QUERO ENTRAR NA COMUNIDADE AGORA')
-  );
+
+  function getDefaultCtaText(camp?: Campaign): string {
+    if (camp?.ctaText && camp.ctaText.trim()) {
+      const titleLower = (camp.title || '').toLowerCase();
+      const isKidsOrEdu =
+        titleLower.includes('tarefinha') ||
+        titleLower.includes('autista') ||
+        titleLower.includes('cognitiv') ||
+        titleLower.includes('criança') ||
+        titleLower.includes('pedagog');
+      if (isKidsOrEdu && camp.ctaText.toUpperCase().includes('COMUNIDADE')) {
+        return 'QUERO BAIXAR AS ATIVIDADES EM PDF AGORA';
+      }
+      return camp.ctaText;
+    }
+    const titleLower = (camp?.title || '').toLowerCase();
+    const nicheLower = (camp?.niche || '').toLowerCase();
+    if (
+      titleLower.includes('tarefinha') ||
+      titleLower.includes('autista') ||
+      titleLower.includes('cognitiv') ||
+      titleLower.includes('criança') ||
+      titleLower.includes('pedagog') ||
+      nicheLower.includes('psico')
+    ) {
+      return 'QUERO BAIXAR AS ATIVIDADES EM PDF AGORA';
+    }
+    if (titleLower.includes('milha') || nicheLower.includes('renda')) {
+      return 'QUERO ENTRAR NA COMUNIDADE AGORA';
+    }
+    return 'QUERO GARANTIR MEU ACESSO AGORA';
+  }
+
+  const [ctaText, setCtaText] = useState(getDefaultCtaText(activeCamp));
   const [guaranteeDays, setGuaranteeDays] = useState(
     activeCamp?.guaranteeDays?.toString() || '7'
   );
@@ -192,12 +220,7 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
       setBadgeText(
         c.badgeText || 'PROMOÇÃO EXCLUSIVA • ACESSO IMEDIATO'
       );
-      setCtaText(
-        c.ctaText ||
-          (c.id === 'camp-tarefinhas-autismo'
-            ? 'QUERO BAIXAR AS 100 TAREFINHAS AGORA'
-            : 'QUERO COMEÇAR AGORA')
-      );
+      setCtaText(getDefaultCtaText(c));
       setGuaranteeDays(c.guaranteeDays ? c.guaranteeDays.toString() : '7');
       setImageUrl(c.imageUrl || (c.id === 'camp-tarefinhas-autismo' ? '/assets/aistudio/image_e9e67204.png' : ''));
     }
@@ -240,7 +263,7 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
       ctaText: updated.ctaText,
       guaranteeDays: updated.guaranteeDays,
       imageUrl: updated.imageUrl,
-    }).catch(console.warn);
+    }, updated.id).catch(console.warn);
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 3000);
   };

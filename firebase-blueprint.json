@@ -6,7 +6,8 @@
       "type": "object",
       "properties": {
         "id": { "type": "string", "maxLength": 100 },
-        "name": { "type": "string", "maxLength": 200 },
+        "title": { "type": "string", "maxLength": 300 },
+        "name": { "type": "string", "maxLength": 300 },
         "platform": { "type": "string", "maxLength": 50 },
         "niche": { "type": "string", "maxLength": 100 },
         "affiliateLink": { "type": "string", "maxLength": 500 },
@@ -24,7 +25,7 @@
         "deleted": { "type": "boolean" },
         "updatedAt": { "type": "string", "maxLength": 100 }
       },
-      "required": ["id", "name"]
+      "required": ["id"]
     },
     "AppSetting": {
       "title": "AppSetting",

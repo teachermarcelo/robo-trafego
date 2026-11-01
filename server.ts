@@ -81,7 +81,9 @@ export interface ServerCampaign {
   revenue: number;
 }
 
-let serverCampaigns: ServerCampaign[] = [
+const CAMPAIGNS_FILE = path.join(process.cwd(), 'campaigns_store.json');
+
+const DEFAULT_SERVER_CAMPAIGNS: ServerCampaign[] = [
   {
     id: 'camp-tarefinhas-autismo',
     title: '+ 100 Tarefinha Educação Infantil e Também para Criança Autista',
@@ -121,6 +123,31 @@ let serverCampaigns: ServerCampaign[] = [
     revenue: 0.0,
   },
 ];
+
+function loadCampaignsFromDisk(): ServerCampaign[] {
+  try {
+    if (fs.existsSync(CAMPAIGNS_FILE)) {
+      const data = fs.readFileSync(CAMPAIGNS_FILE, 'utf-8');
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.warn('Could not read campaigns_store.json:', e);
+  }
+  return DEFAULT_SERVER_CAMPAIGNS;
+}
+
+function saveCampaignsToDisk(campaigns: ServerCampaign[]): void {
+  try {
+    fs.writeFileSync(CAMPAIGNS_FILE, JSON.stringify(campaigns, null, 2), 'utf-8');
+  } catch (e) {
+    console.warn('Could not save campaigns_store.json:', e);
+  }
+}
+
+let serverCampaigns: ServerCampaign[] = loadCampaignsFromDisk();
 
 // Helper to provide realistic rich fallback responses if AI key is missing or quota exhausted
 function getFallbackPainSearch(niche: string, keyword: string) {
@@ -787,6 +814,7 @@ app.post('/api/campaigns', (req, res) => {
     } else {
       serverCampaigns.unshift(camp);
     }
+    saveCampaignsToDisk(serverCampaigns);
 
     return res.json({ success: true, campaign: camp });
   } catch (err: any) {
@@ -798,6 +826,7 @@ app.post('/api/campaigns', (req, res) => {
 app.delete('/api/campaigns/:id', (req, res) => {
   const { id } = req.params;
   serverCampaigns = serverCampaigns.filter((c) => c.id !== id);
+  saveCampaignsToDisk(serverCampaigns);
   return res.json({ success: true, deletedId: id });
 });
 
@@ -809,6 +838,7 @@ app.post('/api/campaigns/reset-metrics', (req, res) => {
     conversions: 0,
     revenue: 0,
   }));
+  saveCampaignsToDisk(serverCampaigns);
   return res.json({ success: true, campaigns: serverCampaigns });
 });
 

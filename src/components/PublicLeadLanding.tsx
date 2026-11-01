@@ -37,19 +37,20 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
   const isTarefinhas =
     campaign.id === 'camp-tarefinhas-autismo' ||
     campaign.niche === 'psicopedagogia' ||
-    campaign.title.toLowerCase().includes('tarefinha');
+    campaign.title.toLowerCase().includes('tarefinha') ||
+    campaign.title.toLowerCase().includes('cognitiv') ||
+    campaign.title.toLowerCase().includes('autista') ||
+    campaign.title.toLowerCase().includes('criança');
 
   // Real-time synchronization of landing page content and pricing from Firebase
   useEffect(() => {
-    if (isTarefinhas) {
-      const unsub = subscribeLandingPageSettings((settings) => {
-        if (settings) {
-          setLiveSettings(settings);
-        }
-      });
-      return () => unsub();
-    }
-  }, [isTarefinhas]);
+    const unsub = subscribeLandingPageSettings((settings) => {
+      if (settings) {
+        setLiveSettings(settings);
+      }
+    }, campaign.id);
+    return () => unsub();
+  }, [campaign.id]);
 
   const effectivePrice =
     liveSettings?.price != null
@@ -62,7 +63,16 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
   const effectiveHeadline = liveSettings?.headline || campaign.headline;
   const effectiveSubheadline = liveSettings?.subheadline || campaign.subheadline;
   const effectiveBadgeText = liveSettings?.badgeText || campaign.badgeText;
-  const effectiveCtaText = liveSettings?.ctaText || campaign.ctaText;
+  const effectiveCtaText = (() => {
+    const raw = liveSettings?.ctaText || campaign.ctaText;
+    if (isTarefinhas && raw && raw.toUpperCase().includes('COMUNIDADE')) {
+      return 'QUERO BAIXAR AS ATIVIDADES EM PDF AGORA';
+    }
+    if (raw && raw.trim()) return raw;
+    if (isTarefinhas) return 'QUERO BAIXAR AS ATIVIDADES EM PDF AGORA';
+    if (campaign.title.toLowerCase().includes('milha')) return 'QUERO ENTRAR NA COMUNIDADE AGORA';
+    return 'QUERO GARANTIR MEU ACESSO AGORA';
+  })();
   const effectiveCheckoutUrl = liveSettings?.checkoutUrl || campaign.checkoutUrl;
   const effectiveWhatsappNumber =
     liveSettings?.whatsappNumber || campaign.whatsappNumber || '5541998778348';

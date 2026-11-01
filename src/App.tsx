@@ -176,10 +176,19 @@ export default function App() {
           const delSet = savedDeleted ? new Set(JSON.parse(savedDeleted)) : deletedCampaignIds;
           const valid = cloudCampaigns.filter((c) => !delSet.has(c.id));
           if (valid.length > 0) {
-            setCampaigns(valid);
-            try {
-              localStorage.setItem('autoviral_campaigns', JSON.stringify(valid));
-            } catch {}
+            setCampaigns((prev) => {
+              const cloudIds = new Set(valid.map((c) => c.id));
+              // Preserve any newly created local campaigns not yet in cloud
+              const localUnsynced = prev.filter((p) => !cloudIds.has(p.id) && !delSet.has(p.id));
+              localUnsynced.forEach((lu) => {
+                saveCampaignToFirebase(lu).catch(console.warn);
+              });
+              const merged = [...valid, ...localUnsynced];
+              try {
+                localStorage.setItem('autoviral_campaigns', JSON.stringify(merged));
+              } catch {}
+              return merged;
+            });
           }
         }
       },

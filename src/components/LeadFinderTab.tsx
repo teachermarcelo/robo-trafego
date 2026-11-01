@@ -41,7 +41,9 @@ import {
   Edit3,
   Sliders,
   PlusCircle,
-  CheckCircle,
+  Save,
+  Edit2,
+  Wand2,
 } from 'lucide-react';
 import { Campaign } from '../types';
 import {
@@ -51,7 +53,11 @@ import {
   InstagramOriginAccount,
   saveInstagramOriginAccountToFirebase,
   subscribeInstagramOriginAccount,
+  saveDispatchTemplateToFirebase,
+  subscribeDispatchTemplates,
+  DispatchTemplateSettings,
 } from '../lib/firebase';
+import { getCampaignSlug } from '../utils/campaignSlug';
 
 interface LeadFinderTabProps {
   campaigns: Campaign[];
@@ -414,6 +420,141 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
         script: `Olá! Vi sua dúvida sobre ${selectedSegmentId}. Temos uma solução prática em PDF para isso: https://robo-trafego.vercel.app/?niche=${encodeURIComponent(selectedSegmentId)}&src=outreach_direct`,
       },
     ],
+  };
+
+  // Custom Editable Dispatch Message & Keyword for ReplyRush & Outgoing Directs
+  const [customDispatchTemplates, setCustomDispatchTemplates] = useState<
+    Record<string, { keyword: string; message: string }>
+  >(() => {
+    try {
+      const saved = localStorage.getItem('autoviral_dispatch_templates');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return {};
+  });
+
+  const [editingKeyword, setEditingKeyword] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('autoviral_dispatch_templates');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed['pedagogia']?.keyword) return parsed['pedagogia'].keyword;
+      }
+    } catch {}
+    return 'EU QUERO';
+  });
+
+  const [editingMessage, setEditingMessage] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('autoviral_dispatch_templates');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed['pedagogia']?.message) return parsed['pedagogia'].message;
+      }
+    } catch {}
+    return `Olá, profe/mamãe! 🎨📚 Vi que você comentou querendo as tarefinhas inclusivas para Educação Infantil e Autismo (TEA).\n\nPreparei a página com o material completo pronto para imprimir (+ 100 tarefinhas por apenas R$ 9,90):\n👉 https://robo-trafego.vercel.app/?p=tarefinhas&src=replyrush\n\nSe tiver qualquer dúvida pedagógica ou sobre os arquivos, pode me chamar direto no meu WhatsApp oficial:\n📲 https://wa.me/5541998778348?text=Oi!%20Vim%20pelo%20Instagram%20das%20tarefinhas%20de%20autismo!`;
+  });
+
+  const [selectedCampaignForDispatch, setSelectedCampaignForDispatch] = useState<string>(
+    campaigns[0]?.id || 'camp-tarefinhas-autismo'
+  );
+  const [dispatchSavedSuccess, setDispatchSavedSuccess] = useState<boolean>(false);
+  const [editingSpinIndex, setEditingSpinIndex] = useState<number | null>(null);
+  const [tempSpinText, setTempSpinText] = useState<string>('');
+
+  // Real-time subscription to Firebase dispatch message templates
+  useEffect(() => {
+    const unsub = subscribeDispatchTemplates((cloudTemplates) => {
+      if (cloudTemplates && Object.keys(cloudTemplates).length > 0) {
+        setCustomDispatchTemplates((prev) => {
+          const merged = { ...prev, ...cloudTemplates };
+          try {
+            localStorage.setItem('autoviral_dispatch_templates', JSON.stringify(merged));
+          } catch {}
+          return merged;
+        });
+
+        const currentCloud = cloudTemplates[selectedSegmentId];
+        if (currentCloud) {
+          if (currentCloud.keyword) setEditingKeyword(currentCloud.keyword);
+          if (currentCloud.message) setEditingMessage(currentCloud.message);
+        }
+      }
+    });
+    return () => unsub();
+  }, [selectedSegmentId]);
+
+  // When selectedSegmentId changes, update editor state
+  useEffect(() => {
+    const custom = customDispatchTemplates[selectedSegmentId];
+    if (custom) {
+      setEditingKeyword(custom.keyword || currentNicheData.replyRushKeyword);
+      setEditingMessage(custom.message || currentNicheData.replyRushMessage);
+    } else {
+      setEditingKeyword(currentNicheData.replyRushKeyword);
+      setEditingMessage(currentNicheData.replyRushMessage);
+    }
+    setDispatchSavedSuccess(false);
+  }, [selectedSegmentId, currentNicheData.replyRushKeyword, currentNicheData.replyRushMessage]);
+
+  const handleSaveDispatchMessage = () => {
+    const kw = editingKeyword.trim() || currentNicheData.replyRushKeyword;
+    const msg = editingMessage.trim() || currentNicheData.replyRushMessage;
+
+    const updated = {
+      ...customDispatchTemplates,
+      [selectedSegmentId]: { keyword: kw, message: msg },
+    };
+    setCustomDispatchTemplates(updated);
+    try {
+      localStorage.setItem('autoviral_dispatch_templates', JSON.stringify(updated));
+    } catch {}
+
+    saveDispatchTemplateToFirebase({
+      nicheId: selectedSegmentId,
+      keyword: kw,
+      message: msg,
+    }).catch(console.warn);
+
+    setDispatchSavedSuccess(true);
+    setTimeout(() => setDispatchSavedSuccess(false), 3000);
+  };
+
+  const handleResetDispatchMessage = () => {
+    setEditingKeyword(currentNicheData.replyRushKeyword);
+    setEditingMessage(currentNicheData.replyRushMessage);
+    const updated = { ...customDispatchTemplates };
+    delete updated[selectedSegmentId];
+    setCustomDispatchTemplates(updated);
+    try {
+      localStorage.setItem('autoviral_dispatch_templates', JSON.stringify(updated));
+    } catch {}
+  };
+
+  const handleApplyCampaignLink = (campId: string) => {
+    setSelectedCampaignForDispatch(campId);
+    const targetCamp = campaigns.find((c) => c.id === campId);
+    if (!targetCamp) return;
+    const slug = getCampaignSlug(targetCamp);
+    const newUrl = `${window.location.origin}/?p=${slug}&src=replyrush`;
+
+    const urlRegex = /(https?:\/\/[^\s]+(?:\?p=[a-z0-9_-]+[^\s]*|src=replyrush[^\s]*))/i;
+    if (urlRegex.test(editingMessage)) {
+      setEditingMessage((prev) => prev.replace(urlRegex, newUrl));
+    } else {
+      setEditingMessage((prev) => `${prev}\n\n👉 ${newUrl}`);
+    }
+  };
+
+  const handleTestOnWhatsApp = () => {
+    const encoded = encodeURIComponent(editingMessage);
+    const target = campaigns.find((c) => c.id === selectedCampaignForDispatch) || campaigns[0];
+    const phone = target?.whatsappNumber || '5541998778348';
+    window.open(`https://wa.me/${phone.replace(/[^0-9]/g, '')}?text=${encoded}`, '_blank');
+  };
+
+  const handleInsertTag = (tag: string) => {
+    setEditingMessage((prev) => `${prev} ${tag}`);
   };
 
   // Merge custom searched @ profiles with current niche profiles
@@ -1221,16 +1362,68 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
                   <span className="font-bold text-emerald-400">
                     Variação {String.fromCharCode(65 + idx)}
                   </span>
-                  <button
-                    onClick={() => copyToClipboard(template, `spin-${idx}`)}
-                    className="text-[10px] text-slate-400 hover:text-white underline cursor-pointer"
-                  >
-                    {copiedId === `spin-${idx}` ? 'Copiado!' : 'Copiar'}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (editingSpinIndex === idx) {
+                          setEditingSpinIndex(null);
+                        } else {
+                          setEditingSpinIndex(idx);
+                          setTempSpinText(template);
+                        }
+                      }}
+                      className="text-[10px] text-indigo-400 hover:text-indigo-300 font-semibold cursor-pointer"
+                    >
+                      {editingSpinIndex === idx ? 'Fechar' : 'Editar'}
+                    </button>
+                    <button
+                      onClick={() => copyToClipboard(template, `spin-${idx}`)}
+                      className="text-[10px] text-slate-400 hover:text-white underline cursor-pointer"
+                    >
+                      {copiedId === `spin-${idx}` ? 'Copiado!' : 'Copiar'}
+                    </button>
+                  </div>
                 </div>
-                <p className="text-[11px] text-slate-300 leading-relaxed italic line-clamp-4">
-                  "{template}"
-                </p>
+
+                {editingSpinIndex === idx ? (
+                  <div className="space-y-1.5 pt-1">
+                    <textarea
+                      value={tempSpinText}
+                      onChange={(e) => setTempSpinText(e.target.value)}
+                      rows={4}
+                      className="w-full bg-slate-950 border border-indigo-500 rounded-lg p-2 text-[11px] text-emerald-300 font-mono focus:outline-none"
+                    />
+                    <div className="flex items-center justify-end gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setEditingSpinIndex(null)}
+                        className="px-2 py-0.5 rounded bg-slate-800 text-slate-400 hover:text-white text-[10px] cursor-pointer"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const updated = [...spinTemplates];
+                          updated[idx] = tempSpinText.trim() || template;
+                          setSpinTemplates(updated);
+                          setEditingSpinIndex(null);
+                          try {
+                            localStorage.setItem('autoviral_spin_templates', JSON.stringify(updated));
+                          } catch {}
+                        }}
+                        className="px-2.5 py-0.5 rounded bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-[10px] cursor-pointer"
+                      >
+                        Salvar
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-slate-300 leading-relaxed italic line-clamp-4">
+                    "{template}"
+                  </p>
+                )}
               </div>
             ))}
           </div>
@@ -1463,64 +1656,297 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
         </div>
       </div>
 
-      {/* SECTION 3: REPLYRUSH INTEGRATION (USER HAS REPLYRUSH BOOKMARKED) */}
-      <div className="bg-slate-900 border border-indigo-900/60 rounded-3xl p-6 sm:p-8 space-y-6 shadow-xl">
+      {/* SECTION 3: EDITABLE DISPATCH & REPLYRUSH INTEGRATION */}
+      <div className="bg-slate-900 border-2 border-indigo-500/50 rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl relative overflow-hidden">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div className="space-y-1">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-950 text-indigo-300 text-xs font-semibold border border-indigo-800/60">
               <Zap className="w-3.5 h-3.5 text-amber-400" />
-              <span>REPLYRUSH AUTO DM • NICHO: {currentNicheData.label.toUpperCase()}</span>
+              <span>REPLYRUSH & DIRECT DISPATCH • MENSAGEM 100% EDITÁVEL</span>
             </div>
-            <h2 className="text-xl sm:text-2xl font-bold text-white">
-              Configuração Rápida para o ReplyRush (Comentou no Post ➡️ Recebe Link no Direct)
+            <h2 className="text-xl sm:text-2xl font-black text-white">
+              Editor de Mensagem para Disparo Automático (ReplyRush & Direct)
             </h2>
-            <p className="text-xs text-slate-400">
-              Você já tem o ReplyRush aberto nos favoritos. Copie a mensagem configurada abaixo para disparar quando alguém comentar no seu post do Instagram:
+            <p className="text-xs text-slate-400 max-w-2xl">
+              Altere o texto, o gatilho (palavra-chave) e o link que o robô envia no direct quando alguém comentar no seu post ou te chamar no Instagram. Suas edições ficam salvas na nuvem Firebase.
             </p>
           </div>
 
-          <a
-            href="https://app.replyrush.com/posts?view=list&status=all&page=1"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl flex items-center gap-2 transition shrink-0"
-          >
-            <span>Abrir Painel do ReplyRush</span>
-            <ExternalLink className="w-3.5 h-3.5" />
-          </a>
+          <div className="flex items-center gap-2 flex-wrap">
+            <a
+              href="https://app.replyrush.com/posts?view=list&status=all&page=1"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl flex items-center gap-2 transition shrink-0 shadow-lg"
+            >
+              <span>Abrir Painel do ReplyRush</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          </div>
         </div>
 
-        {/* ReplyRush DM Template Box */}
-        <div className="p-5 bg-slate-950 border border-slate-800 rounded-2xl space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-slate-300">Gatilho (Palavra-Chave no Post):</span>
-              <span className="px-2.5 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/40 text-xs font-mono font-bold">
-                {currentNicheData.replyRushKeyword}
-              </span>
+        {/* Dispatch Editor Card */}
+        <div className="p-6 bg-slate-950 border border-indigo-900/60 rounded-2xl space-y-5">
+          {/* Top Controls: Trigger Keyword & Campaign Link Selector */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Trigger Keyword Input */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-amber-300 flex items-center gap-1.5 uppercase tracking-wider">
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                <span>Gatilho (Palavra-Chave no Post):</span>
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={editingKeyword}
+                  onChange={(e) => setEditingKeyword(e.target.value.toUpperCase())}
+                  placeholder="ex: EU QUERO, QUERO, PDF, MATERIAL..."
+                  className="w-full bg-slate-900 border border-amber-500/50 rounded-xl px-3.5 py-2 text-xs sm:text-sm font-mono font-bold text-amber-300 focus:outline-none focus:border-amber-400 uppercase placeholder-slate-500"
+                />
+              </div>
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                <span className="text-[10px] text-slate-400">Sugestões de gatilho:</span>
+                {['EU QUERO', 'QUERO', 'PDF', 'ATIVIDADES', 'MILHAS'].map((kw) => (
+                  <button
+                    key={kw}
+                    type="button"
+                    onClick={() => setEditingKeyword(kw)}
+                    className="text-[10px] px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 text-amber-300 border border-amber-500/30 transition cursor-pointer font-mono"
+                  >
+                    {kw}
+                  </button>
+                ))}
+              </div>
             </div>
 
+            {/* Campaign Destination Link Selector */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-emerald-300 flex items-center gap-1.5 uppercase tracking-wider">
+                <Target className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Vincular Link do Produto no Texto:</span>
+              </label>
+              <select
+                value={selectedCampaignForDispatch}
+                onChange={(e) => handleApplyCampaignLink(e.target.value)}
+                className="w-full bg-slate-900 border border-emerald-600/50 rounded-xl px-3.5 py-2 text-xs sm:text-sm font-medium text-emerald-300 focus:outline-none focus:border-emerald-400 cursor-pointer"
+              >
+                {campaigns.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.title} • R$ {c.price.toFixed(2)}
+                  </option>
+                ))}
+              </select>
+              <span className="text-[10px] text-slate-400 block pt-1">
+                Ao selecionar, o link exclusivo da landing page é atualizado automaticamente na mensagem.
+              </span>
+            </div>
+          </div>
+
+          {/* Quick Insert Pills */}
+          <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-slate-800/80">
+            <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1">
+              <span>Inserir rapidamente:</span>
+            </span>
             <button
-              onClick={() => copyToClipboard(currentNicheData.replyRushMessage, 'copy-replyrush-msg')}
-              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold text-xs rounded-lg flex items-center gap-1.5 transition self-start sm:self-auto cursor-pointer"
+              type="button"
+              onClick={() => {
+                const target = campaigns.find((c) => c.id === selectedCampaignForDispatch) || campaigns[0];
+                const slug = target ? getCampaignSlug(target) : 'tarefinhas';
+                handleInsertTag(`👉 ${window.location.origin}/?p=${slug}&src=replyrush`);
+              }}
+              className="text-[11px] bg-slate-900 hover:bg-slate-800 text-emerald-300 px-2.5 py-1 rounded-lg border border-emerald-800/50 transition cursor-pointer font-medium"
             >
-              {copiedId === 'copy-replyrush-msg' ? (
-                <>
-                  <Check className="w-3.5 h-3.5" />
-                  <span>Mensagem Copiada!</span>
-                </>
-              ) : (
-                <>
-                  <Copy className="w-3.5 h-3.5" />
-                  <span>Copiar Mensagem do Direct</span>
-                </>
-              )}
+              + Link do Produto
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const target = campaigns.find((c) => c.id === selectedCampaignForDispatch) || campaigns[0];
+                handleInsertTag(`R$ ${(target?.price || 9.90).toFixed(2).replace('.', ',')}`);
+              }}
+              className="text-[11px] bg-slate-900 hover:bg-slate-800 text-emerald-300 px-2.5 py-1 rounded-lg border border-emerald-800/50 transition cursor-pointer font-medium"
+            >
+              + Valor Promocional
+            </button>
+            <button
+              type="button"
+              onClick={() => handleInsertTag('📲 https://wa.me/5541998778348?text=Oi!%20Vim%20pelo%20Instagram')}
+              className="text-[11px] bg-slate-900 hover:bg-slate-800 text-emerald-300 px-2.5 py-1 rounded-lg border border-emerald-800/50 transition cursor-pointer font-medium"
+            >
+              + Link WhatsApp
+            </button>
+            <button
+              type="button"
+              onClick={() => handleInsertTag('🎨📚')}
+              className="text-[11px] bg-slate-900 hover:bg-slate-800 text-slate-300 px-2 py-1 rounded-lg border border-slate-700 transition cursor-pointer"
+            >
+              🎨📚
+            </button>
+            <button
+              type="button"
+              onClick={() => handleInsertTag('👉')}
+              className="text-[11px] bg-slate-900 hover:bg-slate-800 text-slate-300 px-2 py-1 rounded-lg border border-slate-700 transition cursor-pointer"
+            >
+              👉
+            </button>
+            <button
+              type="button"
+              onClick={() => handleInsertTag('✨')}
+              className="text-[11px] bg-slate-900 hover:bg-slate-800 text-slate-300 px-2 py-1 rounded-lg border border-slate-700 transition cursor-pointer"
+            >
+              ✨
             </button>
           </div>
 
-          <pre className="text-xs text-slate-300 font-mono bg-slate-900/90 p-4 rounded-xl border border-slate-800 whitespace-pre-wrap leading-relaxed">
-            {currentNicheData.replyRushMessage}
-          </pre>
+          {/* Editable Textarea */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-xs">
+              <label className="font-bold text-slate-300 flex items-center gap-1.5">
+                <Edit3 className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Texto Completo da Mensagem que o Lead Recebe:</span>
+              </label>
+              <span className="text-[11px] text-slate-500 font-mono">
+                {editingMessage.length} caracteres
+              </span>
+            </div>
+
+            <textarea
+              value={editingMessage}
+              onChange={(e) => setEditingMessage(e.target.value)}
+              rows={8}
+              placeholder="Digite a mensagem personalizada que será enviada no direct..."
+              className="w-full bg-slate-900/90 border border-indigo-600/50 rounded-xl p-4 text-xs sm:text-sm font-mono text-emerald-300 leading-relaxed focus:outline-none focus:border-indigo-400 resize-y selection:bg-indigo-900"
+            />
+          </div>
+
+          {/* Actions Bar */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2 border-t border-slate-800">
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={handleSaveDispatchMessage}
+                className="px-5 py-2.5 bg-gradient-to-r from-emerald-500 to-green-500 hover:from-emerald-400 hover:to-green-400 text-slate-950 font-black text-xs sm:text-sm rounded-xl transition cursor-pointer shadow-lg shadow-emerald-500/25 flex items-center gap-2"
+              >
+                <Save className="w-4 h-4" />
+                <span>Salvar Mensagem na Nuvem</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => copyToClipboard(editingMessage, 'copy-replyrush-msg')}
+                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-xl flex items-center gap-2 transition cursor-pointer border border-slate-700"
+              >
+                {copiedId === 'copy-replyrush-msg' ? (
+                  <>
+                    <Check className="w-4 h-4 text-emerald-400" />
+                    <span className="text-emerald-400">Mensagem Copiada!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-4 h-4" />
+                    <span>Copiar Mensagem</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleTestOnWhatsApp}
+                className="px-4 py-2.5 bg-green-700/80 hover:bg-green-600 text-white font-bold text-xs rounded-xl flex items-center gap-2 transition cursor-pointer border border-green-600/40"
+                title="Abre o WhatsApp com a mensagem preenchida para testar no celular"
+              >
+                <Smartphone className="w-4 h-4 text-green-300" />
+                <span>Testar no WhatsApp</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleResetDispatchMessage}
+                className="px-3 py-2 text-slate-400 hover:text-white text-xs font-semibold flex items-center gap-1 transition cursor-pointer"
+                title="Restaura a mensagem original sugerida"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Restaurar Padrão</span>
+              </button>
+            </div>
+
+            {dispatchSavedSuccess && (
+              <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5 animate-in fade-in">
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Mensagem salva na nuvem Firebase com sucesso!</span>
+              </span>
+            )}
+          </div>
+
+          {/* Quick AI Copy Presets */}
+          <div className="pt-2">
+            <span className="text-[11px] font-bold text-slate-400 block mb-2">
+              💡 Modelos Prontos de Alta Conversão (Clique para carregar no editor):
+            </span>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const target = campaigns.find((c) => c.id === selectedCampaignForDispatch) || campaigns[0];
+                  const slug = target ? getCampaignSlug(target) : 'tarefinhas';
+                  const priceStr = `R$ ${(target?.price || 9.90).toFixed(2).replace('.', ',')}`;
+                  setEditingKeyword('EU QUERO');
+                  setEditingMessage(
+                    `Olá, profe/mamãe! 🎨🧩 Vi que você comentou querendo o material inclusivo.\n\nPreparei a página com o caderno completo pronto para imprimir (+ 100 tarefinhas por apenas ${priceStr}):\n👉 ${window.location.origin}/?p=${slug}&src=replyrush\n\nSe tiver qualquer dúvida pedagógica ou sobre os arquivos, pode me chamar direto no meu WhatsApp oficial:\n📲 https://wa.me/5541998778348?text=Oi!%20Vim%20pelo%20Instagram%20das%20tarefinhas`
+                  );
+                }}
+                className="p-2.5 bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-indigo-600/50 rounded-xl text-left transition cursor-pointer space-y-1"
+              >
+                <span className="text-xs font-bold text-indigo-300 block">
+                  1. Modelo Acolhedor & Empático
+                </span>
+                <span className="text-[10px] text-slate-400 block line-clamp-2">
+                  Tom maternal/pedagógico, validação de cansaço e link com valor acessível.
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const target = campaigns.find((c) => c.id === selectedCampaignForDispatch) || campaigns[0];
+                  const slug = target ? getCampaignSlug(target) : 'tarefinhas';
+                  const priceStr = `R$ ${(target?.price || 9.90).toFixed(2).replace('.', ',')}`;
+                  setEditingKeyword('PDF');
+                  setEditingMessage(
+                    `Oi! Tudo bem? Aqui está o link que você pediu nos comentários:\n\n👉 ${window.location.origin}/?p=${slug}&src=replyrush\n\nO acesso é imediato no seu e-mail e o arquivo em PDF de alta resolução sai por apenas ${priceStr} hoje na Hotmart. Qualquer dúvida estou no WhatsApp: 📲 https://wa.me/5541998778348`
+                  );
+                }}
+                className="p-2.5 bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-emerald-600/50 rounded-xl text-left transition cursor-pointer space-y-1"
+              >
+                <span className="text-xs font-bold text-emerald-300 block">
+                  2. Modelo Direto & Desconto
+                </span>
+                <span className="text-[10px] text-slate-400 block line-clamp-2">
+                  Mensagem rápida e objetiva com entrega imediata e link direto.
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const target = campaigns.find((c) => c.id === selectedCampaignForDispatch) || campaigns[0];
+                  const slug = target ? getCampaignSlug(target) : 'tarefinhas';
+                  setEditingKeyword('QUERO');
+                  setEditingMessage(
+                    `Olá! Que alegria ver seu interesse em atividades estruturadas para crianças.\n\nLiberamos o material com mais de 100 fichas lúdicas prontas para imprimir:\n👉 ${window.location.origin}/?p=${slug}&src=replyrush\n\nQual a idade do seu filho ou dos seus alunos? Pode me mandar no WhatsApp oficial (+55 41 99877-8348) que te oriento com carinho!`
+                  );
+                }}
+                className="p-2.5 bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-amber-600/50 rounded-xl text-left transition cursor-pointer space-y-1"
+              >
+                <span className="text-xs font-bold text-amber-300 block">
+                  3. Modelo Consultivo com Pergunta
+                </span>
+                <span className="text-[10px] text-slate-400 block line-clamp-2">
+                  Faz uma pergunta sobre a idade da criança para abrir conversa no WhatsApp.
+                </span>
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 

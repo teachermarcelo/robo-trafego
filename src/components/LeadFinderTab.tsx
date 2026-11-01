@@ -44,6 +44,12 @@ import {
   Save,
   Edit2,
   Wand2,
+  Download,
+  Image as ImageIcon,
+  Tag,
+  ShoppingBag,
+  Smile,
+  Eye,
 } from 'lucide-react';
 import { Campaign } from '../types';
 import {
@@ -461,6 +467,153 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
   const [dispatchSavedSuccess, setDispatchSavedSuccess] = useState<boolean>(false);
   const [editingSpinIndex, setEditingSpinIndex] = useState<number | null>(null);
   const [tempSpinText, setTempSpinText] = useState<string>('');
+
+  // ---------------------------------------------------------------------------
+  // Smart Auto-Copywriter & Persuasive CTA Generator States
+  // ---------------------------------------------------------------------------
+  type TargetAudiencePersona = 'mae' | 'prof' | 'educador' | 'profissional' | 'todos';
+  const [selectedPersona, setSelectedPersona] = useState<TargetAudiencePersona>('todos');
+  const [generatorTitle, setGeneratorTitle] = useState<string>('');
+  const [generatorPrice, setGeneratorPrice] = useState<string>('');
+  const [generatorOldPrice, setGeneratorOldPrice] = useState<string>('47,00');
+  const [generatorLinkType, setGeneratorLinkType] = useState<'landing' | 'checkout'>('landing');
+  const [generatorCustomLink, setGeneratorCustomLink] = useState<string>('');
+  const [generatorIncludeImage, setGeneratorIncludeImage] = useState<boolean>(true);
+  const [generatorCtaGoal, setGeneratorCtaGoal] = useState<'facilidade' | 'urgencia' | 'whatsapp' | 'garantia'>('facilidade');
+  const [generatorImagePreviewUrl, setGeneratorImagePreviewUrl] = useState<string>('/assets/aistudio/image_e9e67204.png');
+  const [generatedCopies, setGeneratedCopies] = useState<
+    Array<{ id: string; title: string; text: string; badge: string; hook: string }>
+  >([]);
+  const [isGeneratorOpen, setIsGeneratorOpen] = useState<boolean>(true);
+
+  // Sync generator form fields whenever selectedCampaignForDispatch or generatorLinkType changes
+  useEffect(() => {
+    const activeCamp =
+      campaigns.find((c) => c.id === selectedCampaignForDispatch) || campaigns[0];
+    if (activeCamp) {
+      setGeneratorTitle(activeCamp.title || '+ 100 Tarefinha Educação Infantil e Autismo');
+      setGeneratorPrice(activeCamp.price ? activeCamp.price.toFixed(2).replace('.', ',') : '9,90');
+      setGeneratorOldPrice(activeCamp.oldPrice ? activeCamp.oldPrice.toFixed(2).replace('.', ',') : '47,00');
+      const slug = getCampaignSlug(activeCamp);
+      const landingLink = `${window.location.origin}/?p=${slug}&src=replyrush`;
+      const checkoutLink = activeCamp.checkoutUrl || 'https://pay.hotmart.com/U95248783T';
+      setGeneratorCustomLink(generatorLinkType === 'checkout' ? checkoutLink : landingLink);
+      setGeneratorImagePreviewUrl(activeCamp.imageUrl || '/assets/aistudio/image_e9e67204.png');
+    }
+  }, [selectedCampaignForDispatch, generatorLinkType, campaigns]);
+
+  const handleGeneratePersuasiveMessages = () => {
+    const activeCamp =
+      campaigns.find((c) => c.id === selectedCampaignForDispatch) || campaigns[0];
+    const title = generatorTitle.trim() || activeCamp?.title || '+ 100 Tarefinha Educação Infantil e Autismo';
+    const price = generatorPrice.trim() || '9,90';
+    const oldPrice = generatorOldPrice.trim() || '47,00';
+    const link = generatorCustomLink.trim() || `${window.location.origin}/?p=tarefinhas&src=replyrush`;
+    const whatsapp = activeCamp?.whatsappNumber || '5541998778348';
+    const cleanPhone = whatsapp.replace(/[^0-9]/g, '');
+    const waLink = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(`Oi! Vim pelo Instagram sobre o material "${title}"`)}`;
+
+    let salutation = 'Olá, profe/mamãe! 🎨📚';
+    let painContext = 'Vi que você comentou querendo as atividades inclusivas para Educação Infantil e Autismo (TEA).';
+    let benefitSolution = `Preparei o caderno digital com + 100 atividades lúdicas em PDF prontas para imprimir, feitas para estimular foco, linguagem e coordenação motora fina sem sobrecarga sensorial.`;
+
+    if (selectedPersona === 'mae') {
+      salutation = 'Olá, mamãe! 💖🌸';
+      painContext = 'Vi seu comentário no post! Sei como a rotina com os pequenos pode ser exaustiva e como nos preocupamos em estimular a fala, foco e coordenação sem telas ou crises de choro.';
+      benefitSolution = `O "${title}" foi desenhado para você aplicar em casa com 15 minutos por dia, com materiais visuais limpos e fáceis de entender.`;
+    } else if (selectedPersona === 'prof') {
+      salutation = 'Olá, professora! 👩‍🏫🍎';
+      painContext = 'Vi seu comentário querendo materiais práticos! Sei o quanto cansa passar o fim de semana procurando atividades e ainda precisar adaptar folhas do zero para alunos com TEA e TDAH.';
+      benefitSolution = `Com o "${title}", você tem fichas estruturadas alinhadas à BNCC e inclusão prática em PDF de alta qualidade, prontas para imprimir para toda a turma.`;
+    } else if (selectedPersona === 'educador') {
+      salutation = 'Olá, colega educador(a)! 🧩🧠';
+      painContext = 'Acompanhei seu comentário sobre estimulação cognitiva. Na prática pedagógica inclusiva, atividades desestruturadas geram desatenção imediata.';
+      benefitSolution = `O "${title}" traz fichas sensoriais progressivas para desenvolvimento de funções executivas, autonomia e grafomotricidade.`;
+    } else if (selectedPersona === 'profissional') {
+      salutation = 'Olá, especialista! 🩺✨';
+      painContext = 'Excelente ver seu interesse em recursos práticos para desenvolvimento neurotípico e atípico.';
+      benefitSolution = `O "${title}" é um acervo de apoio para consultórios de psicopedagogia, fonoaudiologia e clínicas de desenvolvimento infantil.`;
+    }
+
+    const imageSentence = generatorIncludeImage
+      ? '\n📸 (Dê uma olhadinha na capa do material anexada aqui na mensagem para ver as ilustrações e como ele é lindo!)'
+      : '';
+
+    let ctaA = '';
+    let ctaB = '';
+    let ctaC = '';
+
+    if (generatorCtaGoal === 'urgencia') {
+      ctaA = `⚠️ Condição Especial: O material de R$ ${oldPrice} está saindo por apenas R$ ${price} na Hotmart por tempo limitado!\n👉 Garanta o seu antes que volte ao valor normal: ${link}`;
+      ctaB = `🔥 Aproveite agora por apenas R$ ${price} (de R$ ${oldPrice}):\n👉 ${link}\nO acesso ao PDF é imediato no seu e-mail após a confirmação!`;
+      ctaC = `Valor promocional liberado hoje: apenas R$ ${price}!\n👉 Link de acesso: ${link}\nSe tiver qualquer dúvida antes de fechar, estou à disposição no WhatsApp: 📲 ${waLink}`;
+    } else if (generatorCtaGoal === 'whatsapp') {
+      ctaA = `O acesso ao PDF é imediato por apenas R$ ${price}.\n👉 Acesse aqui: ${link}\n\n📲 Se tiver qualquer dúvida sobre a idade da criança ou como imprimir, pode me chamar direto no meu WhatsApp pessoal:\n${waLink}`;
+      ctaB = `Liberamos seu acesso por apenas R$ ${price}:\n👉 ${link}\n\nPrefere tirar dúvidas antes? Me chame no WhatsApp: 📲 ${waLink}`;
+      ctaC = `👉 Link direto com valor promocional de R$ ${price}: ${link}\n\nMe chama no WhatsApp (${whatsapp}) que te explico como funciona o download e a impressão com todo o carinho! 💬`;
+    } else if (generatorCtaGoal === 'garantia') {
+      ctaA = `O investimento é de apenas R$ ${price} com RISCO ZERO: você tem 7 dias de garantia total pela Hotmart. Se não amar, basta 1 mensagem que devolvemos 100%!\n👉 Garanta seu exemplar: ${link}`;
+      ctaB = `Apenas R$ ${price} com 7 dias de garantia incondicional blindada:\n👉 ${link}\nVocê baixa, imprime e testa com as crianças sem nenhum risco!`;
+      ctaC = `Acesso imediato no e-mail por R$ ${price} com garantia de 7 dias Hotmart.\n👉 ${link}\nQualquer dúvida me chame: 📲 ${waLink}`;
+    } else {
+      ctaA = `O arquivo digital chega imediatamente no seu e-mail após a aprovação para você imprimir quantas vezes quiser por apenas R$ ${price}.\n👉 Toque no link e baixe agora: ${link}\n\nQualquer dúvida pedagógica estou no WhatsApp: 📲 ${waLink}`;
+      ctaB = `👉 Baixe o caderno completo em PDF por apenas R$ ${price}:\n${link}\nArquivos em alta resolução prontos para impressão no seu computador ou celular!`;
+      ctaC = `Liberamos as atividades em PDF por apenas R$ ${price}.\n👉 Acesse a página aqui: ${link}${imageSentence}\n\nSe precisar de ajuda com os arquivos, estou no WhatsApp: 📲 ${waLink}`;
+    }
+
+    const copy1 = `${salutation}\n\n${painContext}\n\n${benefitSolution}${imageSentence}\n\n${ctaA}`;
+    const copy2 = `Oi! Tudo bem? Vi seu comentário querendo o material "${title}".\n\n${benefitSolution}${imageSentence}\n\n${ctaB}`;
+    const copy3 = `${salutation}\n\n${painContext}\n\n${benefitSolution}${imageSentence}\n\n${ctaC}`;
+
+    setGeneratedCopies([
+      {
+        id: 'opt-1',
+        title: 'Opção 1: Conectiva & Emocional (Alta Conversão)',
+        badge: 'Mais Recomendada',
+        hook: `Foco no acolhimento de ${selectedPersona === 'todos' ? 'Mães e Professoras' : selectedPersona.toUpperCase()}`,
+        text: copy1,
+      },
+      {
+        id: 'opt-2',
+        title: 'Opção 2: Rápida & Direta ao Ponto (Preço e Link)',
+        badge: 'Ideal para Resposta Rápida',
+        hook: 'Texto mais enxuto com valor visível e link direto',
+        text: copy2,
+      },
+      {
+        id: 'opt-3',
+        title: 'Opção 3: Humanizada com Suporte no WhatsApp',
+        badge: 'Quebra de Objeções',
+        hook: 'Convite para tirar dúvidas e fechar no 1 a 1',
+        text: copy3,
+      },
+    ]);
+  };
+
+  const handleApplyGeneratedCopy = (text: string) => {
+    setEditingMessage(text);
+    const textareaEl = document.getElementById('dispatch-message-textarea');
+    if (textareaEl) {
+      textareaEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      textareaEl.focus();
+    }
+  };
+
+  const handleDownloadProductImage = () => {
+    const link = document.createElement('a');
+    link.href = generatorImagePreviewUrl;
+    link.download = `capa-produto-${selectedPersona}.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleCopyImageLink = () => {
+    const fullUrl = generatorImagePreviewUrl.startsWith('http')
+      ? generatorImagePreviewUrl
+      : `${window.location.origin}${generatorImagePreviewUrl}`;
+    copyToClipboard(fullUrl, 'copy-product-image-url');
+  };
 
   // Real-time subscription to Firebase dispatch message templates
   useEffect(() => {
@@ -1742,6 +1895,342 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
             </div>
           </div>
 
+          {/* ========================================================================= */}
+          {/* SMART AUTO-COPYWRITER & PERSUASIVE CTA GENERATOR                          */}
+          {/* (Público: Mãe, Prof, Educador, Profissional, Imagem de Confiança & CTA)   */}
+          {/* ========================================================================= */}
+          <div className="bg-gradient-to-b from-indigo-950/70 via-slate-900 to-slate-950 border-2 border-indigo-500/60 rounded-2xl p-5 sm:p-6 space-y-5 shadow-2xl relative">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-indigo-900/50 pb-4">
+              <div className="space-y-1">
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-900/80 text-indigo-300 text-[11px] font-bold border border-indigo-700/50">
+                  <Wand2 className="w-3.5 h-3.5 text-amber-400" />
+                  <span>CRIADOR INTELIGENTE DE MENSAGEM & CTA CONVINCENTE</span>
+                </div>
+                <h3 className="text-lg sm:text-xl font-black text-white flex items-center gap-2">
+                  <span>Criar Mensagem Personalizada por Público & Imagem</span>
+                </h3>
+                <p className="text-xs text-slate-300">
+                  Selecione o público (mãe, professora, educador...), o tipo de link e a imagem oficial do produto para gerar automaticamente copys persuasivas que quebram objeções e fecham vendas.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsGeneratorOpen(!isGeneratorOpen)}
+                className="text-xs text-indigo-300 hover:text-white bg-indigo-950/80 px-3 py-1.5 rounded-xl border border-indigo-800/60 transition flex items-center gap-1.5 self-start sm:self-auto cursor-pointer"
+              >
+                <span>{isGeneratorOpen ? 'Minimizar Gerador' : 'Expandir Gerador'}</span>
+              </button>
+            </div>
+
+            {isGeneratorOpen && (
+              <div className="space-y-6">
+                {/* PASSO 1: SELECIONAR A QUEM SE DESTINA (PERSONA / PÚBLICO-ALVO) */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-amber-300 flex items-center gap-1.5 uppercase tracking-wider">
+                      <Users className="w-3.5 h-3.5 text-amber-400" />
+                      <span>1. Selecionar a quem se destina a mensagem (Público-Alvo):</span>
+                    </label>
+                    <span className="text-[11px] text-slate-400">
+                      Adapta o tom, a dor e o vocabulário
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                    {[
+                      { id: 'mae', label: 'Mãe / Família', icon: '💖', desc: 'Foco em afeto, paciência e estímulo do filho em casa' },
+                      { id: 'prof', label: 'Professora', icon: '👩‍🏫', desc: 'Foco em sala de aula, alinhado à BNCC e poupar tempo' },
+                      { id: 'educador', label: 'Educador / TEA', icon: '🧩', desc: 'Foco em inclusão, coordenação e sem crise sensorial' },
+                      { id: 'profissional', label: 'Profissional', icon: '🩺', desc: 'Foco em consultório, terapia e reforço escolar' },
+                      { id: 'todos', label: 'Todos (Misto)', icon: '👥', desc: 'Linguagem ampla e acolhedora (profe & mamãe)' },
+                    ].map((p) => {
+                      const isSelected = selectedPersona === p.id;
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => setSelectedPersona(p.id as TargetAudiencePersona)}
+                          className={`p-3 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between space-y-1.5 ${
+                            isSelected
+                              ? 'bg-amber-500/20 border-amber-400 text-white shadow-lg shadow-amber-500/10 ring-2 ring-amber-400/40'
+                              : 'bg-slate-900/80 border-slate-800 text-slate-300 hover:bg-slate-800 hover:text-white'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-base">{p.icon}</span>
+                            {isSelected && (
+                              <CheckCircle2 className="w-3.5 h-3.5 text-amber-400" />
+                            )}
+                          </div>
+                          <div>
+                            <span className="text-xs font-bold block">{p.label}</span>
+                            <span className="text-[10px] text-slate-400 block line-clamp-2 leading-tight">
+                              {p.desc}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* PASSO 2: DADOS DO PRODUTO, LINK DE COMPRA & IMAGEM DE CONFIANÇA */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 pt-1">
+                  {/* Detalhes do Produto e Preço (2 Colunas) */}
+                  <div className="lg:col-span-2 space-y-4 bg-slate-900/80 border border-slate-800 rounded-2xl p-4">
+                    <span className="text-xs font-bold text-white flex items-center gap-1.5 uppercase tracking-wider">
+                      <Tag className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>2. Informações do Produto & Link de Compra:</span>
+                    </span>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      {/* Título do Produto */}
+                      <div className="sm:col-span-2 space-y-1">
+                        <label className="text-[11px] font-bold text-slate-300">Título do Produto:</label>
+                        <input
+                          type="text"
+                          value={generatorTitle}
+                          onChange={(e) => setGeneratorTitle(e.target.value)}
+                          placeholder="ex: + 100 Tarefinha Educação Infantil e Autismo"
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs font-medium text-white focus:outline-none focus:border-indigo-400"
+                        />
+                      </div>
+
+                      {/* Valor Promocional */}
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-bold text-slate-300">Valor Promocional (R$):</label>
+                        <div className="relative">
+                          <span className="absolute left-3 top-2 text-xs text-emerald-400 font-bold">R$</span>
+                          <input
+                            type="text"
+                            value={generatorPrice}
+                            onChange={(e) => setGeneratorPrice(e.target.value)}
+                            placeholder="9,90"
+                            className="w-full bg-slate-950 border border-emerald-600/50 rounded-xl pl-9 pr-3 py-2 text-xs font-bold text-emerald-300 focus:outline-none focus:border-emerald-400"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Seleção do Tipo de Link */}
+                    <div className="space-y-2 pt-1 border-t border-slate-800">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[11px] font-bold text-slate-300">
+                          Inserir Link de Compra no Direct:
+                        </label>
+                        <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-[10px]">
+                          <button
+                            type="button"
+                            onClick={() => setGeneratorLinkType('landing')}
+                            className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${
+                              generatorLinkType === 'landing'
+                                ? 'bg-indigo-600 text-white'
+                                : 'text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            Página Oficial (Landing)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setGeneratorLinkType('checkout')}
+                            className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${
+                              generatorLinkType === 'checkout'
+                                ? 'bg-emerald-600 text-slate-950'
+                                : 'text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            Checkout Direto (Hotmart/Eduzz)
+                          </button>
+                        </div>
+                      </div>
+
+                      <input
+                        type="text"
+                        value={generatorCustomLink}
+                        onChange={(e) => setGeneratorCustomLink(e.target.value)}
+                        placeholder="https://..."
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono text-emerald-300 focus:outline-none focus:border-indigo-400"
+                      />
+                    </div>
+
+                    {/* Escolha do Objetivo do CTA */}
+                    <div className="space-y-1.5 pt-1 border-t border-slate-800">
+                      <label className="text-[11px] font-bold text-slate-300 block">
+                        Gatilho do CTA (Chamada para Ação Convincente):
+                      </label>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                        {[
+                          { id: 'facilidade', label: '⚡ Download Imediato', desc: 'Chega na hora no e-mail' },
+                          { id: 'urgencia', label: '🔥 Urgência / Desconto', desc: 'Valor promocional limitado' },
+                          { id: 'whatsapp', label: '📲 Dúvidas no WhatsApp', desc: 'Atendimento humanizado' },
+                          { id: 'garantia', label: '🛡️ Risco Zero 7 Dias', desc: 'Garantia total Hotmart' },
+                        ].map((c) => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => setGeneratorCtaGoal(c.id as any)}
+                            className={`p-2 rounded-xl border text-left transition cursor-pointer ${
+                              generatorCtaGoal === c.id
+                                ? 'bg-indigo-600/30 border-indigo-400 text-white'
+                                : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                            }`}
+                          >
+                            <span className="text-[11px] font-bold block">{c.label}</span>
+                            <span className="text-[9px] text-slate-500 block">{c.desc}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Coluna de Imagem do Produto (Mais Confiança) */}
+                  <div className="bg-slate-900/80 border border-indigo-900/60 rounded-2xl p-4 flex flex-col justify-between space-y-3">
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-white flex items-center gap-1.5 uppercase tracking-wider">
+                          <ImageIcon className="w-3.5 h-3.5 text-pink-400" />
+                          <span>Imagem de Confiança:</span>
+                        </span>
+                        <span className="text-[9px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-1.5 py-0.5 rounded-full font-bold">
+                          +300% de Conversão
+                        </span>
+                      </div>
+
+                      {/* Preview da Capa */}
+                      <div className="relative group rounded-xl overflow-hidden border border-slate-800 bg-slate-950 aspect-[4/3] flex items-center justify-center">
+                        {generatorImagePreviewUrl ? (
+                          <img
+                            src={generatorImagePreviewUrl}
+                            alt="Capa do Produto"
+                            className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                          />
+                        ) : (
+                          <div className="text-center p-3 text-slate-500 text-xs">
+                            <ImageIcon className="w-8 h-8 mx-auto mb-1 text-slate-600" />
+                            <span>Sem capa cadastrada</span>
+                          </div>
+                        )}
+                        <div className="absolute top-2 right-2 bg-slate-950/80 backdrop-blur-sm text-[10px] text-emerald-400 px-2 py-0.5 rounded-md border border-emerald-800/60 font-bold">
+                          Capa Oficial
+                        </div>
+                      </div>
+
+                      {/* Opção para mencionar no direct */}
+                      <label className="flex items-start gap-2 pt-1 text-xs text-slate-300 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={generatorIncludeImage}
+                          onChange={(e) => setGeneratorIncludeImage(e.target.checked)}
+                          className="w-4 h-4 mt-0.5 rounded text-indigo-500 focus:ring-indigo-400 bg-slate-950 border-slate-700 cursor-pointer"
+                        />
+                        <span className="text-[11px] leading-snug">
+                          Mencionar imagem na mensagem: <em>"(Veja a foto do material acima ☝️)"</em>
+                        </span>
+                      </label>
+                    </div>
+
+                    {/* Botões de Imagem */}
+                    <div className="space-y-1.5 pt-1 border-t border-slate-800">
+                      <button
+                        type="button"
+                        onClick={handleDownloadProductImage}
+                        className="w-full py-1.5 px-2.5 bg-slate-800 hover:bg-slate-750 text-slate-200 hover:text-white rounded-lg text-[11px] font-bold border border-slate-700 transition flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <Download className="w-3.5 h-3.5 text-indigo-400" />
+                        <span>Baixar Foto para Anexar no Chat</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleCopyImageLink}
+                        className="w-full py-1.5 px-2.5 bg-slate-950 hover:bg-slate-900 text-slate-400 hover:text-slate-200 rounded-lg text-[10px] font-medium border border-slate-800 transition flex items-center justify-center gap-1 cursor-pointer"
+                      >
+                        <Copy className="w-3 h-3" />
+                        <span>{copiedId === 'copy-product-image-url' ? 'Link Copiado!' : 'Copiar Link da Imagem'}</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* BOTÃO PRINCIPAL DE GERAÇÃO */}
+                <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <button
+                    type="button"
+                    onClick={handleGeneratePersuasiveMessages}
+                    className="w-full sm:w-auto px-8 py-3.5 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-sm rounded-xl transition cursor-pointer shadow-xl shadow-amber-500/25 flex items-center justify-center gap-2"
+                  >
+                    <Sparkles className="w-4 h-4 fill-slate-950" />
+                    <span>GERAR MENSAGENS COM CTA CONVINCENTE</span>
+                  </button>
+
+                  <span className="text-[11px] text-slate-400 text-center sm:text-right">
+                    Gera 3 opções persuasivas adaptadas para <strong>{selectedPersona === 'todos' ? 'Mães & Professoras' : selectedPersona.toUpperCase()}</strong>
+                  </span>
+                </div>
+
+                {/* EXIBIÇÃO DAS MENSAGENS GERADAS */}
+                {generatedCopies.length > 0 && (
+                  <div className="space-y-3 pt-3 border-t border-indigo-900/60 animate-in fade-in">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>3 Opções Convincentes Geradas: Escolha uma para usar</span>
+                      </span>
+                      <span className="text-[11px] text-slate-400">Clique em "Usar no Editor" para carregar abaixo</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      {generatedCopies.map((copy) => (
+                        <div
+                          key={copy.id}
+                          className="p-4 bg-slate-950 border border-slate-800 hover:border-indigo-500/60 rounded-xl flex flex-col justify-between space-y-3 transition"
+                        >
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-800">
+                                {copy.badge}
+                              </span>
+                            </div>
+                            <h4 className="text-xs font-bold text-white">{copy.title}</h4>
+                            <p className="text-[10px] text-slate-400">{copy.hook}</p>
+                            <pre className="text-[11px] text-emerald-300 font-mono bg-slate-900/90 p-3 rounded-lg border border-slate-800/80 whitespace-pre-wrap leading-relaxed line-clamp-6">
+                              {copy.text}
+                            </pre>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 pt-2 border-t border-slate-800/80">
+                            <button
+                              type="button"
+                              onClick={() => handleApplyGeneratedCopy(copy.text)}
+                              className="flex-1 py-2 bg-gradient-to-r from-emerald-500 to-green-500 hover:from-emerald-400 hover:to-green-400 text-slate-950 font-black text-xs rounded-lg transition flex items-center justify-center gap-1 cursor-pointer shadow-md shadow-emerald-500/20"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                              <span>Usar no Editor</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => copyToClipboard(copy.text, `copy-gen-${copy.id}`)}
+                              className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg text-xs transition cursor-pointer border border-slate-700"
+                              title="Copiar mensagem"
+                            >
+                              {copiedId === `copy-gen-${copy.id}` ? (
+                                <Check className="w-3.5 h-3.5 text-emerald-400" />
+                              ) : (
+                                <Copy className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Quick Insert Pills */}
           <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-slate-800/80">
             <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1">
@@ -1811,6 +2300,7 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
             </div>
 
             <textarea
+              id="dispatch-message-textarea"
               value={editingMessage}
               onChange={(e) => setEditingMessage(e.target.value)}
               rows={8}

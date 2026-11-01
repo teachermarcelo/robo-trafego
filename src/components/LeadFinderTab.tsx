@@ -92,6 +92,61 @@ interface NicheData {
   profiles: TargetProfile[];
 }
 
+export const sanitizeInstagramHandle = (raw: string): { handle: string; username: string } => {
+  let clean = (raw || '').trim();
+  if (clean.includes('instagram.com/')) {
+    const match = clean.match(/instagram\.com\/([a-zA-Z0-9._]+)/);
+    if (match && match[1]) clean = match[1];
+  }
+  // Strip accents: e.g. "mães atípicas" -> "maes atipicas"
+  clean = clean.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  // Replace spaces with dots: "maes atipicas" -> "maes.atipicas"
+  clean = clean.replace(/\s+/g, '.');
+  // Strip characters outside a-z, 0-9, dot and underscore
+  clean = clean.toLowerCase().replace(/[^a-z0-9._]/g, '');
+  // Clean dots
+  clean = clean.replace(/^\.+|\.+$/g, '').replace(/\.{2,}/g, '.');
+  if (!clean) clean = 'perfil.instagram';
+  return {
+    handle: `@${clean}`,
+    username: clean,
+  };
+};
+
+export const formatInstagramDisplayName = (username: string, preferredName?: string): string => {
+  if (preferredName && preferredName.trim() && !preferredName.startsWith('@') && !preferredName.includes('instagram.com/')) {
+    return preferredName.trim();
+  }
+  const clean = username.replace(/^@/, '');
+  const parts = clean.split(/[._]/).filter(Boolean);
+  if (parts.length === 0) return clean;
+  return parts.map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
+};
+
+export const parseBulkInstagramHandles = (text: string): string[] => {
+  const rawItems = text.split(/[\n,;]+/);
+  const list: string[] = [];
+  for (const raw of rawItems) {
+    let t = raw.trim();
+    if (!t) continue;
+    if (t.includes('instagram.com/')) {
+      const match = t.match(/instagram\.com\/([a-zA-Z0-9._]+)/);
+      if (match && match[1]) {
+        list.push(match[1]);
+        continue;
+      }
+    }
+    const atTokens = t.match(/@[a-zA-Z0-9._ãáàâéêíóôõúçÃÁÀÂÉÊÍÓÔÕÚÇ]+/g);
+    if (atTokens && atTokens.length > 0) {
+      atTokens.forEach((tk) => list.push(tk));
+    } else {
+      const words = t.split(/\s+/).filter(Boolean);
+      words.forEach((w) => list.push(w));
+    }
+  }
+  return Array.from(new Set(list));
+};
+
 export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
   const [selectedPlatform, setSelectedPlatform] = useState<'instagram' | 'pinterest' | 'tiktok'>('instagram');
   const [selectedSegmentId, setSelectedSegmentId] = useState<string>('pedagogia');
@@ -100,6 +155,24 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [selectedProfileIndex, setSelectedProfileIndex] = useState(0);
   const [successAddedHandle, setSuccessAddedHandle] = useState<string | null>(null);
+
+  // In-list search filter for the profiles sidebar (Image 2)
+  const [profilesFilterQuery, setProfilesFilterQuery] = useState('');
+
+  // Manual Instagram accounts insertion state
+  const [isManualInsertOpen, setIsManualInsertOpen] = useState(false);
+  const [manualInsertTab, setManualInsertTab] = useState<'single' | 'bulk'>('single');
+  const [manualHandleInput, setManualHandleInput] = useState('');
+  const [manualNameInput, setManualNameInput] = useState('');
+  const [manualFocusInput, setManualFocusInput] = useState('');
+  const [manualAudienceInput, setManualAudienceInput] = useState('Perfil Ativo no Instagram');
+  const [manualNotesInput, setManualNotesInput] = useState('');
+  const [bulkAccountsText, setBulkAccountsText] = useState('');
+  const [manualSuccessMessage, setManualSuccessMessage] = useState<string | null>(null);
+
+  // Search dropdown / focus state
+  const [isHandleSearchFocused, setIsHandleSearchFocused] = useState(false);
+  const [isNicheSearchFocused, setIsNicheSearchFocused] = useState(false);
 
   // Custom added @ profiles by the user (synced across all browsers with Firebase Cloud)
   const [customProfiles, setCustomProfiles] = useState<TargetProfile[]>(() => {
@@ -395,6 +468,67 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
           focus: 'Receitas saudáveis e dietas práticas',
           whatToLook: 'Mulheres comentando que não têm tempo para cozinhar ou que não aguentam mais o efeito sanfona.',
           script: `Oi! Vi seu comentário no post sobre a dificuldade de manter a dieta... montei um guia com receitas de 15 minutos e chás naturais para desinchar: https://robo-trafego.vercel.app/?src=outreach_direct`,
+        },
+      ],
+    },
+    ingles: {
+      id: 'ingles',
+      label: 'Inglês & Idiomas do Zero',
+      badge: 'Conversação & Vocabulário',
+      iconName: 'book-open',
+      description: 'Adultos e jovens que travam na conversação ou precisam de inglês para trabalho e viagens sem cursos de anos.',
+      replyRushKeyword: 'INGLES',
+      replyRushMessage: `Hello! 🇬🇧 Vi que você comentou querendo destravar seu inglês de forma prática.\n\nLiberamos o material com áudios e método acelerado com desconto:\n👉 https://robo-trafego.vercel.app/?p=ingles&src=replyrush\n\nFale direto comigo no WhatsApp: 📲 https://wa.me/5541998778348`,
+      pinterestSearchTerms: [
+        'como aprender ingles sozinho em casa',
+        'frases mais usadas em ingles pdf',
+        'vocabulario ingles basico para viagem',
+        'dicas para destravar conversacao ingles',
+      ],
+      profiles: [
+        {
+          handle: '@inglesparaviagem',
+          name: 'Inglês Prático & Viagens',
+          url: 'https://www.instagram.com/explore/tags/inglesparaviagem/',
+          audience: '640k seguidores',
+          focus: 'Inglês para iniciantes e vocabulário rápido para viagens',
+          whatToLook: 'Pessoas com vergonha de falar ou que não conseguem entender séries sem legenda.',
+          script: `Hi! Vi seu comentário querendo destravar seu inglês... preparamos um guia prático com as 500 estruturas essenciais para conversar sem travar: https://robo-trafego.vercel.app/?p=ingles&src=outreach_direct`,
+        },
+        {
+          handle: '@explorar.ingles',
+          name: 'Comunidade Inglês',
+          url: 'https://www.instagram.com/explore/tags/dicasdeingles/',
+          audience: '500k+ interessados',
+          focus: 'Estudantes e profissionais buscando fluência rápida',
+          whatToLook: 'Comentários com dúvidas sobre como manter a rotina de estudos e pronúncia.',
+          script: `Hello! Vi seu comentário buscando métodos mais rápidos para aprender inglês. Esse material com foco em conversação diária pode te ajudar: https://robo-trafego.vercel.app/?p=ingles&src=outreach_direct`,
+        },
+      ],
+    },
+    confeitaria: {
+      id: 'confeitaria',
+      label: 'Confeitaria Lucrativa & Doces',
+      badge: 'Renda Extra com Bolos & Doces',
+      iconName: 'utensils',
+      description: 'Mães e empreendedoras buscando faturar de R$ 2.000 a R$ 5.000 por mês fazendo bolos e doces na própria cozinha.',
+      replyRushKeyword: 'RECEITAS',
+      replyRushMessage: `Oi, confeiteira! 🎂 Vi seu comentário querendo as receitas lucrativas.\n\nLiberamos o guia com massas perfeitas, recheios de ponto firme e precificação:\n👉 https://robo-trafego.vercel.app/?p=confeitaria&src=replyrush\n\nDúvidas? Me chame no WhatsApp: 📲 https://wa.me/5541998778348`,
+      pinterestSearchTerms: [
+        'receitas brigadeiro gourmet para vender',
+        'recheios de bolo que não derretem no calor',
+        'como precificar doces e bolos',
+        'massas fofinhas para bolo de festa',
+      ],
+      profiles: [
+        {
+          handle: '@confeitaria.desucesso',
+          name: 'Confeitaria Lucrativa',
+          url: 'https://www.instagram.com/explore/tags/confeitariaartesanal/',
+          audience: '420k seguidoras',
+          focus: 'Receitas profissionais, precificação e vendas de doces',
+          whatToLook: 'Mulheres pedindo receitas de recheio que não desandam e dicas de como começar.',
+          script: `Oi! Vi seu comentário querendo receitas lucrativas para vender. Temos um e-book com passo a passo e tabela de precificação pronta: https://robo-trafego.vercel.app/?p=confeitaria&src=outreach_direct`,
         },
       ],
     },
@@ -874,28 +1008,50 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
     setEditingMessage((prev) => `${prev} ${tag}`);
   };
 
-  // Merge custom searched @ profiles with current niche profiles
+  // Merge custom searched & manually added profiles with current niche profiles with clean handle sanitization
   const displayedProfiles: TargetProfile[] = [
-    ...customProfiles,
-    ...currentNicheData.profiles.filter(
-      (p) => !customProfiles.some((cp) => cp.handle.toLowerCase() === p.handle.toLowerCase())
-    ),
+    ...customProfiles.map((p) => {
+      const sanitized = sanitizeInstagramHandle(p.handle);
+      return {
+        ...p,
+        handle: sanitized.handle,
+        url: p.url && !p.url.includes(' ') ? p.url : `https://www.instagram.com/${sanitized.username}/`,
+        name: p.name || formatInstagramDisplayName(sanitized.username),
+      };
+    }),
+    ...currentNicheData.profiles
+      .filter((p) => !customProfiles.some((cp) => cp.handle.toLowerCase() === p.handle.toLowerCase()))
+      .map((p) => {
+        const sanitized = sanitizeInstagramHandle(p.handle);
+        return {
+          ...p,
+          handle: sanitized.handle,
+          url: p.url && !p.url.includes(' ') ? p.url : `https://www.instagram.com/${sanitized.username}/`,
+        };
+      }),
   ];
 
-  // Search by @ (Arroba) handler
+  // In-list real-time filter for accounts (Image 2)
+  const filteredProfiles = displayedProfiles.filter((p) => {
+    if (!profilesFilterQuery.trim()) return true;
+    const q = profilesFilterQuery.toLowerCase().trim();
+    const cleanQ = q.replace(/^@/, '');
+    return (
+      p.name.toLowerCase().includes(q) ||
+      p.handle.toLowerCase().includes(q) ||
+      p.handle.toLowerCase().replace(/^@/, '').includes(cleanQ) ||
+      (p.focus && p.focus.toLowerCase().includes(q)) ||
+      (p.audience && p.audience.toLowerCase().includes(q))
+    );
+  });
+
+  // Search by @ or by Name handler (auto-sanitizes and attaches active campaign)
   const handleSearchByAtSign = (customAt?: string) => {
     const raw = (customAt || handleSearchInput || searchQuery).trim();
     if (!raw) return;
 
-    let cleanHandle = raw;
-    if (cleanHandle.includes('instagram.com/')) {
-      const match = cleanHandle.match(/instagram\.com\/([a-zA-Z0-9._]+)/);
-      if (match && match[1]) cleanHandle = match[1];
-    }
-    cleanHandle = cleanHandle.replace(/^@+/, '').replace(/\/$/, '').trim();
+    const { handle: formattedHandle, username: cleanHandle } = sanitizeInstagramHandle(raw);
     if (!cleanHandle) return;
-
-    const formattedHandle = `@${cleanHandle}`;
 
     const campTitle = activeCampaign.title || 'Material Digital';
     const campPrice = `R$ ${(activeCampaign.price || 9.99).toFixed(2).replace('.', ',')}`;
@@ -903,12 +1059,10 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
     const campLink = `${window.location.origin}/?p=${campSlug}&src=outreach_arroba`;
     const campFocus = activeCampaign.targetAudience || activeCampaign.nicheLabel || 'Educação Infantil & Inclusão';
 
-    const formattedName =
-      cleanHandle
-        .split(/[._]/)
-        .filter(Boolean)
-        .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
-        .join(' ') || cleanHandle;
+    const formattedName = formatInstagramDisplayName(
+      cleanHandle,
+      !raw.startsWith('@') && !raw.includes('instagram.com/') ? raw : undefined
+    );
 
     const newProfile: TargetProfile = {
       handle: formattedHandle,
@@ -949,8 +1103,119 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
     setSelectedProfileIndex(0);
     setHandleSearchInput('');
     setSearchQuery('');
+    setIsHandleSearchFocused(false);
+    setIsNicheSearchFocused(false);
     setSuccessAddedHandle(formattedHandle);
     setTimeout(() => setSuccessAddedHandle(null), 4000);
+  };
+
+  // Manual Insertion Handler: Single Instagram Account
+  const handleSaveSingleManualAccount = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const rawHandle = manualHandleInput.trim();
+    if (!rawHandle) return;
+
+    const { handle, username } = sanitizeInstagramHandle(rawHandle);
+    const displayName = formatInstagramDisplayName(username, manualNameInput);
+    const campTitle = activeCampaign.title || 'Material Digital';
+    const campPrice = `R$ ${(activeCampaign.price || 9.99).toFixed(2).replace('.', ',')}`;
+    const campSlug = getCampaignSlug(activeCampaign);
+    const campLink = `${window.location.origin}/?p=${campSlug}&src=outreach_manual`;
+    const campFocus = manualFocusInput.trim() || activeCampaign.targetAudience || activeCampaign.nicheLabel || 'Educação Infantil & Inclusão';
+    const audience = manualAudienceInput.trim() || 'Perfil Ativo no Instagram';
+    const whatToLook = manualNotesInput.trim() || 'Verifique as publicações recentes, comentários de pessoas interessadas no assunto e inicie uma conversa acolhedora com o script.';
+
+    const newProfile: TargetProfile = {
+      handle,
+      name: displayName,
+      url: `https://www.instagram.com/${username}/`,
+      audience,
+      focus: campFocus,
+      whatToLook,
+      script: `Olá ${displayName}! Acompanho seu trabalho no Instagram e acho maravilhosa sua dedicação. Desenvolvemos o material "${campTitle}" com acesso completo em PDF pronto para imprimir por apenas ${campPrice}. Deixei a amostra aqui se quiser ver: ${campLink}`,
+      isCustom: true,
+    };
+
+    setCustomProfiles((prev) => {
+      const filtered = prev.filter((p) => p.handle.toLowerCase() !== handle.toLowerCase());
+      const updated = [newProfile, ...filtered];
+      try {
+        localStorage.setItem('autoviral_custom_instagram_profiles', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    saveCustomProfileToFirebase(newProfile).catch(console.warn);
+
+    setSelectedHandles((prev) => (prev.includes(handle) ? prev : [handle, ...prev]));
+    setSelectedProfileIndex(0);
+    setManualHandleInput('');
+    setManualNameInput('');
+    setManualFocusInput('');
+    setManualNotesInput('');
+    setIsManualInsertOpen(false);
+
+    setManualSuccessMessage(`Conta ${handle} (${displayName}) inserida com sucesso e conectada ao produto "${activeCampaign.title}"!`);
+    setTimeout(() => setManualSuccessMessage(null), 5000);
+  };
+
+  // Manual Insertion Handler: Bulk Multi-Account Paste
+  const handleSaveBulkAccounts = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const rawHandles = parseBulkInstagramHandles(bulkAccountsText);
+    if (rawHandles.length === 0) return;
+
+    const campTitle = activeCampaign.title || 'Material Digital';
+    const campPrice = `R$ ${(activeCampaign.price || 9.99).toFixed(2).replace('.', ',')}`;
+    const campSlug = getCampaignSlug(activeCampaign);
+    const campLink = `${window.location.origin}/?p=${campSlug}&src=outreach_bulk`;
+    const campFocus = activeCampaign.targetAudience || activeCampaign.nicheLabel || 'Educação Infantil & Inclusão';
+
+    const newProfilesList: TargetProfile[] = [];
+    const newHandlesList: string[] = [];
+
+    for (const raw of rawHandles) {
+      const { handle, username } = sanitizeInstagramHandle(raw);
+      if (!handle || username.length < 2) continue;
+      const displayName = formatInstagramDisplayName(username);
+
+      const profile: TargetProfile = {
+        handle,
+        name: displayName,
+        url: `https://www.instagram.com/${username}/`,
+        audience: 'Perfil Ativo no Instagram',
+        focus: campFocus,
+        whatToLook: 'Verifique as publicações recentes, comentários de pessoas interessadas no assunto e inicie uma conversa acolhedora com o script.',
+        script: `Olá ${displayName}! Acompanho seu trabalho no Instagram e acho maravilhosa sua dedicação. Desenvolvemos o material "${campTitle}" com acesso completo em PDF pronto para imprimir por apenas ${campPrice}. Deixei a amostra aqui se quiser ver: ${campLink}`,
+        isCustom: true,
+      };
+
+      newProfilesList.push(profile);
+      newHandlesList.push(handle);
+      saveCustomProfileToFirebase(profile).catch(console.warn);
+    }
+
+    setCustomProfiles((prev) => {
+      const existingHandles = new Set(newProfilesList.map((p) => p.handle.toLowerCase()));
+      const filtered = prev.filter((p) => !existingHandles.has(p.handle.toLowerCase()));
+      const updated = [...newProfilesList, ...filtered];
+      try {
+        localStorage.setItem('autoviral_custom_instagram_profiles', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    setSelectedHandles((prev) => {
+      const set = new Set([...newHandlesList, ...prev]);
+      return Array.from(set);
+    });
+
+    setSelectedProfileIndex(0);
+    setBulkAccountsText('');
+    setIsManualInsertOpen(false);
+
+    setManualSuccessMessage(`🎉 ${newProfilesList.length} contas do Instagram foram importadas com sucesso e conectadas à campanha!`);
+    setTimeout(() => setManualSuccessMessage(null), 6000);
   };
 
   const handleRemoveCustomProfile = (handleToRemove: string) => {
@@ -1058,7 +1323,7 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
   };
 
   const selectAllProfiles = () => {
-    const all = displayedProfiles.map((p) => p.handle);
+    const all = filteredProfiles.map((p) => p.handle);
     setSelectedHandles(all);
   };
 
@@ -1068,32 +1333,79 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const handleCustomSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    const query = searchQuery.trim();
+  // Improved Smart Universal Search by Name, @, Segment or Keywords
+  const handleCustomSearch = (e?: React.FormEvent, directTerm?: string) => {
+    if (e) e.preventDefault();
+    const query = (directTerm || searchQuery).trim();
     if (!query) return;
 
-    // If query starts with @ or contains instagram handle format, route directly to @ search
+    // 1. If query starts with @ or is a link or raw handle, route directly to @ search
     if (query.startsWith('@') || query.includes('instagram.com/')) {
       handleSearchByAtSign(query);
       return;
     }
 
     const normalized = query.toLowerCase();
-    const match = Object.keys(catalogNiches).find((k) =>
-      catalogNiches[k].label.toLowerCase().includes(normalized) || k.includes(normalized)
+
+    // 2. Search if any profile across ALL niches or custom matches the name or handle
+    const allKnownProfiles: Array<{ profile: TargetProfile; nicheId?: string }> = [
+      ...customProfiles.map((p) => ({ profile: p })),
+    ];
+    Object.keys(catalogNiches).forEach((nId) => {
+      catalogNiches[nId].profiles.forEach((p) => {
+        allKnownProfiles.push({ profile: p, nicheId: nId });
+      });
+    });
+
+    const matchedProfile = allKnownProfiles.find(
+      (item) =>
+        item.profile.name.toLowerCase().includes(normalized) ||
+        item.profile.handle.toLowerCase().includes(normalized) ||
+        (item.profile.focus && item.profile.focus.toLowerCase().includes(normalized))
     );
 
-    if (match) {
-      setSelectedSegmentId(match);
-    } else {
-      setSelectedSegmentId(query);
+    if (matchedProfile) {
+      if (matchedProfile.nicheId && matchedProfile.nicheId !== selectedSegmentId) {
+        setSelectedSegmentId(matchedProfile.nicheId);
+      }
+      // Find index in displayedProfiles
+      const targetIdx = displayedProfiles.findIndex(
+        (p) => p.handle.toLowerCase() === matchedProfile.profile.handle.toLowerCase()
+      );
+      setSelectedProfileIndex(targetIdx >= 0 ? targetIdx : 0);
+      setSuccessAddedHandle(`Perfil localizado: ${matchedProfile.profile.name} (${matchedProfile.profile.handle})`);
+      setTimeout(() => setSuccessAddedHandle(null), 4000);
+      setSearchQuery('');
+      setIsNicheSearchFocused(false);
+      return;
     }
-    setSelectedProfileIndex(0);
+
+    // 3. Search if query matches a known niche category or description
+    const matchNiche = Object.keys(catalogNiches).find((k) =>
+      catalogNiches[k].label.toLowerCase().includes(normalized) ||
+      k.includes(normalized) ||
+      catalogNiches[k].description.toLowerCase().includes(normalized)
+    );
+
+    if (matchNiche) {
+      setSelectedSegmentId(matchNiche);
+      setSelectedProfileIndex(0);
+      setSuccessAddedHandle(`Nicho selecionado: ${catalogNiches[matchNiche].label}`);
+      setTimeout(() => setSuccessAddedHandle(null), 4000);
+    } else {
+      // Dynamic synthesized niche
+      setSelectedSegmentId(query);
+      setSelectedProfileIndex(0);
+    }
+    setSearchQuery('');
+    setIsNicheSearchFocused(false);
   };
 
   const currentProfile =
-    displayedProfiles[selectedProfileIndex] || displayedProfiles[0] || currentNicheData.profiles[0];
+    filteredProfiles[selectedProfileIndex] ||
+    filteredProfiles[0] ||
+    displayedProfiles[0] ||
+    currentNicheData.profiles[0];
 
   return (
     <div className="space-y-8 animate-in fade-in duration-300 pb-12">
@@ -1162,17 +1474,17 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
           </p>
         </div>
 
-        {/* DUAL SEARCH SYSTEM: NICHE & @ (ARROBA) */}
+        {/* DUAL SEARCH SYSTEM: NICHE & @ (ARROBA) COM BUSCA INTELIGENTE POR NOME */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 relative z-10">
-          {/* Search by @ (Arroba) - Highlighted */}
-          <div className="p-4 bg-slate-950/90 border-2 border-pink-500/60 rounded-2xl space-y-2.5 shadow-xl">
+          {/* Search by Name or @ (Arroba) */}
+          <div className="p-4 bg-slate-950/90 border-2 border-pink-500/60 rounded-2xl space-y-2.5 shadow-xl relative">
             <div className="flex items-center justify-between">
               <label className="text-xs font-bold text-pink-300 flex items-center gap-1.5 uppercase tracking-wider">
                 <AtSign className="w-4 h-4 text-pink-400" />
-                <span>Procurar Perfil pelo @ do Instagram:</span>
+                <span>Procurar Perfil por Nome ou @ do Instagram:</span>
               </label>
               <span className="text-[10px] bg-pink-950/70 text-pink-300 px-2 py-0.5 rounded-full border border-pink-800/50 font-semibold">
-                Busca Exata
+                Busca Inteligente por Nome ou @
               </span>
             </div>
 
@@ -1181,7 +1493,7 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
                 e.preventDefault();
                 handleSearchByAtSign();
               }}
-              className="flex gap-2"
+              className="flex gap-2 relative"
             >
               <div className="relative flex-1">
                 <AtSign className="w-4 h-4 text-pink-400 absolute left-3 top-3" />
@@ -1189,9 +1501,22 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
                   type="text"
                   value={handleSearchInput}
                   onChange={(e) => setHandleSearchInput(e.target.value)}
-                  placeholder="ex: @redepedagogica, @psicopedagoga_ana..."
-                  className="w-full bg-slate-900 border border-pink-500/40 rounded-xl pl-9 pr-3 py-2.5 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-pink-400"
+                  onFocus={() => setIsHandleSearchFocused(true)}
+                  placeholder="ex: Mães Atípicas, Taise, @redepedagogica, Psicopedagoga..."
+                  className="w-full bg-slate-900 border border-pink-500/40 rounded-xl pl-9 pr-3 py-2.5 text-xs sm:text-sm text-white placeholder-slate-400 focus:outline-none focus:border-pink-400 font-medium"
                 />
+                {handleSearchInput && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHandleSearchInput('');
+                      setIsHandleSearchFocused(false);
+                    }}
+                    className="absolute right-3 top-2.5 text-xs text-slate-400 hover:text-white"
+                  >
+                    ✕
+                  </button>
+                )}
               </div>
               <button
                 type="submit"
@@ -1200,6 +1525,78 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
                 <UserPlus className="w-4 h-4" />
                 <span>Analisar @</span>
               </button>
+
+              {/* Dynamic Live Suggestions Dropdown for Name / @ Search */}
+              {isHandleSearchFocused && handleSearchInput.trim().length >= 2 && (
+                <div className="absolute left-0 right-0 top-full mt-1.5 bg-slate-900 border-2 border-pink-500/70 rounded-2xl shadow-2xl p-2 z-50 max-h-60 overflow-y-auto space-y-1">
+                  <div className="px-2 py-1 text-[10px] font-bold text-pink-300 uppercase tracking-wider flex items-center justify-between border-b border-slate-800">
+                    <span>Resultados Sugeridos ({handleSearchInput}):</span>
+                    <button
+                      type="button"
+                      onClick={() => setIsHandleSearchFocused(false)}
+                      className="text-slate-400 hover:text-white"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  {/* Matching profiles in catalog & custom */}
+                  {displayedProfiles
+                    .filter((p) => {
+                      const q = handleSearchInput.toLowerCase().trim();
+                      const cleanQ = q.replace(/^@/, '');
+                      return (
+                        p.name.toLowerCase().includes(q) ||
+                        p.handle.toLowerCase().includes(q) ||
+                        p.handle.toLowerCase().replace(/^@/, '').includes(cleanQ) ||
+                        p.focus.toLowerCase().includes(q)
+                      );
+                    })
+                    .slice(0, 5)
+                    .map((matched, idx) => (
+                      <div
+                        key={matched.handle}
+                        onClick={() => {
+                          const idxInList = displayedProfiles.findIndex((p) => p.handle === matched.handle);
+                          if (idxInList >= 0) setSelectedProfileIndex(idxInList);
+                          setHandleSearchInput(matched.handle);
+                          setIsHandleSearchFocused(false);
+                        }}
+                        className="p-2 hover:bg-slate-800 rounded-xl cursor-pointer flex items-center justify-between transition"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Instagram className="w-3.5 h-3.5 text-pink-400 shrink-0" />
+                          <div>
+                            <span className="text-xs font-bold text-white block">{matched.name}</span>
+                            <span className="text-[10px] text-pink-300 font-mono block">{matched.handle}</span>
+                          </div>
+                        </div>
+                        <span className="text-[10px] px-2 py-0.5 rounded bg-pink-950 text-pink-300 border border-pink-800/60 font-semibold">
+                          Selecionar
+                        </span>
+                      </div>
+                    ))}
+
+                  {/* Action to create new account if exact match not found */}
+                  <div
+                    onClick={() => {
+                      handleSearchByAtSign(handleSearchInput);
+                      setIsHandleSearchFocused(false);
+                    }}
+                    className="p-2.5 bg-pink-950/60 hover:bg-pink-900/80 border border-pink-700/60 rounded-xl cursor-pointer flex items-center justify-between transition mt-1"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                      <span className="text-xs font-bold text-white">
+                        Analisar "{handleSearchInput}" e Gerar Script
+                      </span>
+                    </div>
+                    <span className="text-[10px] bg-pink-600 text-white px-2 py-0.5 rounded font-bold">
+                      + Adicionar
+                    </span>
+                  </div>
+                </div>
+              )}
             </form>
 
             {/* Quick @ suggestions */}
@@ -1211,6 +1608,7 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
                 '@psicopedagogiandope',
                 '@autismoerealidade',
                 '@espaco_inclusivo_tea',
+                '@inglesparaviagem',
               ].map((sug) => (
                 <button
                   key={sug}
@@ -1224,8 +1622,8 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
             </div>
           </div>
 
-          {/* Search by Niche Keyword */}
-          <div className="p-4 bg-slate-950/90 border border-emerald-700/50 rounded-2xl space-y-2.5 shadow-xl">
+          {/* Search by Niche Keyword & Segment */}
+          <div className="p-4 bg-slate-950/90 border border-emerald-700/50 rounded-2xl space-y-2.5 shadow-xl relative">
             <div className="flex items-center justify-between">
               <label className="text-xs font-bold text-emerald-300 flex items-center gap-1.5 uppercase tracking-wider">
                 <Search className="w-4 h-4 text-emerald-400" />
@@ -1236,16 +1634,29 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
               </span>
             </div>
 
-            <form onSubmit={handleCustomSearch} className="flex gap-2">
+            <form onSubmit={handleCustomSearch} className="flex gap-2 relative">
               <div className="relative flex-1">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="ex: TEA, Autismo, Psicopedagogia, Confeitaria..."
-                  className="w-full bg-slate-900 border border-emerald-700/50 rounded-xl pl-9 pr-3 py-2.5 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-400"
+                  onFocus={() => setIsNicheSearchFocused(true)}
+                  placeholder="ex: TEA, Autismo, Inglês, Alfabetização, Confeitaria..."
+                  className="w-full bg-slate-900 border border-emerald-700/50 rounded-xl pl-9 pr-3 py-2.5 text-xs sm:text-sm text-white placeholder-slate-400 focus:outline-none focus:border-emerald-400 font-medium"
                 />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchQuery('');
+                      setIsNicheSearchFocused(false);
+                    }}
+                    className="absolute right-3 top-2.5 text-xs text-slate-400 hover:text-white"
+                  >
+                    ✕
+                  </button>
+                )}
               </div>
               <button
                 type="submit"
@@ -1256,9 +1667,29 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
               </button>
             </form>
 
-            <span className="text-[10px] text-slate-400 block pt-1">
-              Também aceita digitar @ aqui para encontrar qualquer perfil automaticamente!
-            </span>
+            {/* Quick Niche Chips */}
+            <div className="flex flex-wrap items-center gap-1.5 pt-1">
+              <span className="text-[10px] text-slate-400">Atalhos de nicho:</span>
+              {[
+                { id: 'pedagogia', label: 'Pedagogia & TEA' },
+                { id: 'ingles', label: 'Inglês' },
+                { id: 'milhas', label: 'Milhas' },
+                { id: 'emagrecimento', label: 'Emagrecimento' },
+                { id: 'confeitaria', label: 'Confeitaria' },
+              ].map((n) => (
+                <button
+                  key={n.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedSegmentId(n.id);
+                    setSelectedProfileIndex(0);
+                  }}
+                  className="text-[10px] text-emerald-300 hover:text-white bg-emerald-950/40 hover:bg-emerald-900/60 border border-emerald-800/40 px-2 py-0.5 rounded-md transition cursor-pointer"
+                >
+                  {n.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -1860,68 +2291,367 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Profiles List */}
-          <div className="space-y-3 max-h-[620px] overflow-y-auto pr-1">
-            {displayedProfiles.map((p, idx) => {
-              const isChecked = selectedHandles.includes(p.handle);
-              return (
-                <div
-                  key={p.handle}
-                  onClick={() => {
-                    setSelectedProfileIndex(idx);
-                    setIsEditingTargetScript(false);
-                  }}
-                  className={`w-full text-left p-4 rounded-2xl border transition flex items-center justify-between cursor-pointer ${
-                    selectedProfileIndex === idx
-                      ? 'bg-emerald-950/60 border-emerald-600/70 text-white shadow-lg'
-                      : 'bg-slate-800/50 border-slate-700/60 text-slate-300 hover:bg-slate-800 hover:text-white'
-                  }`}
+          {/* Profiles Column with Manual Insertion & Real-time Filter */}
+          <div className="space-y-3.5 max-h-[750px] overflow-y-auto pr-1">
+            {/* Header: Title + Button 'Inserir Contas Manual Instagram' */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 bg-slate-950 p-3 rounded-2xl border border-slate-800 shadow-md">
+              <div className="flex items-center gap-2">
+                <Instagram className="w-4 h-4 text-pink-400 shrink-0" />
+                <span className="text-xs font-black text-white uppercase tracking-wider">
+                  Contas Instagram ({filteredProfiles.length})
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsManualInsertOpen(!isManualInsertOpen)}
+                className={`px-3 py-1.5 rounded-xl font-black text-[11px] sm:text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow-md ${
+                  isManualInsertOpen
+                    ? 'bg-slate-800 text-slate-200 hover:bg-slate-700'
+                    : 'bg-gradient-to-r from-pink-600 via-rose-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 text-white shadow-pink-900/30'
+                }`}
+              >
+                <UserPlus className="w-3.5 h-3.5" />
+                <span>{isManualInsertOpen ? 'Fechar Inserção' : '➕ Inserir Contas Manual Instagram'}</span>
+              </button>
+            </div>
+
+            {/* Quick In-List Search / Filter Bar (Image 2) */}
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+              <input
+                type="text"
+                value={profilesFilterQuery}
+                onChange={(e) => {
+                  setProfilesFilterQuery(e.target.value);
+                  setSelectedProfileIndex(0);
+                }}
+                placeholder="🔍 Filtrar contas por nome ou @..."
+                className="w-full bg-slate-900/90 border border-slate-700/80 rounded-xl pl-9 pr-8 py-2 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-emerald-400 transition"
+              />
+              {profilesFilterQuery && (
+                <button
+                  type="button"
+                  onClick={() => setProfilesFilterQuery('')}
+                  className="absolute right-2.5 top-2 text-xs text-slate-400 hover:text-white px-1"
                 >
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="checkbox"
-                      checked={isChecked}
-                      onChange={(e) => {
-                        e.stopPropagation();
-                        toggleHandleSelection(p.handle);
-                      }}
-                      className="w-4 h-4 rounded text-emerald-500 focus:ring-emerald-400 bg-slate-900 border-slate-700 cursor-pointer"
-                    />
-                    <div>
-                      <div className="font-bold text-sm flex items-center gap-1.5">
-                        <Instagram className="w-4 h-4 text-pink-400 shrink-0" />
-                        <span className="truncate">{p.name}</span>
-                        {p.isCustom && (
-                          <span className="text-[9px] bg-pink-950 text-pink-300 border border-pink-700/60 px-1.5 py-0.2 rounded font-bold">
-                            @ Buscado
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-xs text-slate-400 font-mono">{p.handle}</div>
-                    </div>
+                  ✕
+                </button>
+              )}
+            </div>
+
+            {/* Success Feedback Alert for Manual Insertion */}
+            {manualSuccessMessage && (
+              <div className="p-3 bg-emerald-950/90 border border-emerald-500 rounded-xl flex items-center justify-between text-xs font-bold text-emerald-300 animate-in fade-in shadow-lg">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>{manualSuccessMessage}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setManualSuccessMessage(null)}
+                  className="text-slate-400 hover:text-white ml-2"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
+            {/* DRAWER / CARD: INSERIR CONTAS MANUAL INSTAGRAM */}
+            {isManualInsertOpen && (
+              <div className="p-4 bg-slate-950 border-2 border-pink-500/80 rounded-2xl space-y-3.5 shadow-2xl animate-in fade-in">
+                {/* Tabs Selector: Individual vs Bulk Paste */}
+                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl">
+                    <button
+                      type="button"
+                      onClick={() => setManualInsertTab('single')}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                        manualInsertTab === 'single'
+                          ? 'bg-pink-600 text-white shadow-md'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <UserPlus className="w-3.5 h-3.5" />
+                      <span>Inserção Individual</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setManualInsertTab('bulk')}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                        manualInsertTab === 'bulk'
+                          ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-md'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <Layers className="w-3.5 h-3.5" />
+                      <span>Colar Várias em Massa</span>
+                    </button>
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] font-semibold text-emerald-400 bg-emerald-950 px-2 py-0.5 rounded-full border border-emerald-800/50 shrink-0">
-                      {p.audience}
-                    </span>
-                    {p.isCustom && (
+                  <button
+                    type="button"
+                    onClick={() => setIsManualInsertOpen(false)}
+                    className="text-slate-400 hover:text-white text-xs font-bold px-2 py-1 cursor-pointer"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {/* Form Tab 1: Single Manual Account */}
+                {manualInsertTab === 'single' && (
+                  <form onSubmit={handleSaveSingleManualAccount} className="space-y-3">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-pink-300 uppercase tracking-wider flex items-center justify-between">
+                        <span>@ do Perfil no Instagram: *</span>
+                        {manualHandleInput && (
+                          <span className="text-[9px] text-emerald-400 lowercase font-mono">
+                            instagram.com/{sanitizeInstagramHandle(manualHandleInput).username}/
+                          </span>
+                        )}
+                      </label>
+                      <div className="relative">
+                        <AtSign className="w-4 h-4 text-pink-400 absolute left-3 top-2.5" />
+                        <input
+                          type="text"
+                          value={manualHandleInput}
+                          onChange={(e) => {
+                            setManualHandleInput(e.target.value);
+                            if (!manualNameInput) {
+                              const norm = sanitizeInstagramHandle(e.target.value);
+                              setManualNameInput(formatInstagramDisplayName(norm.username));
+                            }
+                          }}
+                          placeholder="ex: @maes_atipicas ou maes.atipicas"
+                          className="w-full bg-slate-900 border border-pink-500/50 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-pink-400 font-mono"
+                          required
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-slate-300 uppercase tracking-wider">
+                        Nome de Exibição / Página:
+                      </label>
+                      <input
+                        type="text"
+                        value={manualNameInput}
+                        onChange={(e) => setManualNameInput(e.target.value)}
+                        placeholder="ex: Mães Atípicas & Inclusão"
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-400"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-300 uppercase tracking-wider">
+                          Nicho / Foco:
+                        </label>
+                        <input
+                          type="text"
+                          value={manualFocusInput}
+                          onChange={(e) => setManualFocusInput(e.target.value)}
+                          placeholder="ex: Pedagogia & Autismo"
+                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-400"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-300 uppercase tracking-wider">
+                          Audiência / Seguidores:
+                        </label>
+                        <input
+                          type="text"
+                          value={manualAudienceInput}
+                          onChange={(e) => setManualAudienceInput(e.target.value)}
+                          placeholder="ex: 150k seguidoras"
+                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-400"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-slate-300 uppercase tracking-wider">
+                        O que procurar nos comentários / Notas:
+                      </label>
+                      <input
+                        type="text"
+                        value={manualNotesInput}
+                        onChange={(e) => setManualNotesInput(e.target.value)}
+                        placeholder="ex: Mães e professoras pedindo atividades lúdicas em PDF"
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-400"
+                      />
+                    </div>
+
+                    {/* Active Campaign Connection Badge */}
+                    <div className="p-2.5 bg-slate-900 border border-emerald-900/40 rounded-xl flex items-center justify-between text-[10px]">
+                      <span className="text-slate-300">
+                        Produto vinculado: <strong className="text-emerald-400">{activeCampaign.title}</strong> (R$ {(activeCampaign.price || 9.99).toFixed(2).replace('.', ',')})
+                      </span>
+                      <span className="text-emerald-400 font-bold">Script Automático</span>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2 pt-1">
                       <button
                         type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleRemoveCustomProfile(p.handle);
-                        }}
-                        className="text-slate-500 hover:text-red-400 p-1"
-                        title="Remover perfil"
+                        onClick={() => setIsManualInsertOpen(false)}
+                        className="px-3 py-2 rounded-xl text-xs text-slate-400 hover:text-white cursor-pointer"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        Cancelar
                       </button>
-                    )}
+                      <button
+                        type="submit"
+                        className="px-4 py-2 bg-gradient-to-r from-emerald-500 to-green-500 hover:from-emerald-400 hover:to-green-400 text-slate-950 font-black text-xs rounded-xl flex items-center gap-1.5 transition cursor-pointer shadow-lg shadow-emerald-500/20"
+                      >
+                        <Save className="w-3.5 h-3.5" />
+                        <span>Salvar Conta Manual</span>
+                      </button>
+                    </div>
+                  </form>
+                )}
+
+                {/* Form Tab 2: Bulk Multi-account Paste */}
+                {manualInsertTab === 'bulk' && (
+                  <form onSubmit={handleSaveBulkAccounts} className="space-y-3">
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
+                          <Layers className="w-3.5 h-3.5 text-indigo-400" />
+                          <span>Cole várias contas (linha por linha ou separadas por vírgula):</span>
+                        </label>
+                        <span className="text-[10px] bg-indigo-950 text-indigo-300 border border-indigo-700/60 px-2 py-0.5 rounded-full font-bold">
+                          {parseBulkInstagramHandles(bulkAccountsText).length} detectadas
+                        </span>
+                      </div>
+
+                      <textarea
+                        value={bulkAccountsText}
+                        onChange={(e) => setBulkAccountsText(e.target.value)}
+                        rows={5}
+                        placeholder={`@maes.atipicas\n@pedagogiainclusiva\n@espaco_inclusivo_tea, @autismoerealidade\nhttps://www.instagram.com/cantinhodaprofe/`}
+                        className="w-full bg-slate-900 border-2 border-indigo-500/60 rounded-xl p-3 text-xs font-mono text-emerald-300 placeholder-slate-500 focus:outline-none focus:border-indigo-400 leading-relaxed"
+                        required
+                      />
+
+                      <p className="text-[10px] text-slate-400 leading-relaxed">
+                        💡 Você pode colar nomes com ou sem @, links do Instagram ou listas separadas por vírgula. O robô higieniza os nomes (remove espaços e acentos), formata o @ correto e conecta a campanha do produto selecionado!
+                      </p>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setIsManualInsertOpen(false)}
+                        className="px-3 py-2 rounded-xl text-xs text-slate-400 hover:text-white cursor-pointer"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={parseBulkInstagramHandles(bulkAccountsText).length === 0}
+                        className="px-4 py-2 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-500 hover:to-pink-500 disabled:opacity-50 text-white font-black text-xs rounded-xl flex items-center gap-1.5 transition cursor-pointer shadow-lg shadow-purple-900/30"
+                      >
+                        <UserPlus className="w-3.5 h-3.5" />
+                        <span>
+                          Importar {parseBulkInstagramHandles(bulkAccountsText).length} Contas para a Fila
+                        </span>
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
+            )}
+
+            {/* List of Profiles */}
+            <div className="space-y-2.5">
+              {filteredProfiles.length === 0 ? (
+                <div className="p-6 bg-slate-900/60 border border-slate-800 rounded-2xl text-center space-y-3">
+                  <p className="text-xs text-slate-400">
+                    Nenhuma conta encontrada com o termo <strong className="text-white font-mono">"{profilesFilterQuery}"</strong>.
+                  </p>
+                  <div className="flex items-center justify-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setProfilesFilterQuery('')}
+                      className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 font-bold"
+                    >
+                      Limpar Filtro
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setManualHandleInput(profilesFilterQuery);
+                        setIsManualInsertOpen(true);
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-pink-600 hover:bg-pink-500 text-xs text-white font-bold"
+                    >
+                      ➕ Inserir como Nova Conta
+                    </button>
                   </div>
                 </div>
-              );
-            })}
+              ) : (
+                filteredProfiles.map((p, idx) => {
+                  const isChecked = selectedHandles.includes(p.handle);
+                  return (
+                    <div
+                      key={p.handle}
+                      onClick={() => {
+                        setSelectedProfileIndex(idx);
+                        setIsEditingTargetScript(false);
+                      }}
+                      className={`w-full text-left p-3.5 rounded-2xl border transition flex items-center justify-between cursor-pointer ${
+                        selectedProfileIndex === idx
+                          ? 'bg-emerald-950/60 border-emerald-600/70 text-white shadow-lg'
+                          : 'bg-slate-800/50 border-slate-700/60 text-slate-300 hover:bg-slate-800 hover:text-white'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                            toggleHandleSelection(p.handle);
+                          }}
+                          className="w-4 h-4 rounded text-emerald-500 focus:ring-emerald-400 bg-slate-900 border-slate-700 cursor-pointer shrink-0"
+                        />
+                        <div className="min-w-0">
+                          <div className="font-bold text-xs sm:text-sm flex items-center gap-1.5 truncate">
+                            <Instagram className="w-3.5 h-3.5 text-pink-400 shrink-0" />
+                            <span className="truncate">{p.name}</span>
+                            {p.isCustom && (
+                              <span className="text-[9px] bg-pink-950 text-pink-300 border border-pink-700/60 px-1.5 py-0.2 rounded font-bold shrink-0">
+                                @ Manual
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-slate-400 font-mono truncate">{p.handle}</div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                        <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-950 px-2 py-0.5 rounded-full border border-emerald-800/50 shrink-0">
+                          {p.audience}
+                        </span>
+                        {p.isCustom && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRemoveCustomProfile(p.handle);
+                            }}
+                            className="text-slate-500 hover:text-red-400 p-1 cursor-pointer"
+                            title="Remover conta da lista"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
           </div>
 
           {/* Selected Profile Detailed Prospecting Guide */}

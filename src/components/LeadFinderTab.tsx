@@ -468,6 +468,34 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
   const [editingSpinIndex, setEditingSpinIndex] = useState<number | null>(null);
   const [tempSpinText, setTempSpinText] = useState<string>('');
 
+  // Active campaign referenced across all sections of LeadFinderTab
+  const activeCampaign =
+    campaigns.find((c) => c.id === selectedCampaignForDispatch) ||
+    campaigns[0] || {
+      id: 'camp-default',
+      title: 'Atividades Cognitivas para Crianças',
+      price: 9.99,
+      oldPrice: 47.00,
+      nicheLabel: 'Educação Infantil',
+      imageUrl: '/assets/aistudio/image_e9e67204.png',
+      whatsappNumber: '5541998778348',
+    };
+
+  // Profile-specific script overrides (allows editing the script for any profile and remembering edits)
+  const [profileScriptOverrides, setProfileScriptOverrides] = useState<Record<string, string>>(() => {
+    try {
+      const saved = localStorage.getItem('autoviral_profile_script_overrides');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return {};
+  });
+
+  const [isEditingTargetScript, setIsEditingTargetScript] = useState<boolean>(false);
+  const [tempTargetScriptText, setTempTargetScriptText] = useState<string>('');
+  const [targetScriptSavedSuccess, setTargetScriptSavedSuccess] = useState<boolean>(false);
+  const [showDirectMockup, setShowDirectMockup] = useState<boolean>(false);
+  const [copyImageSuccess, setCopyImageSuccess] = useState<boolean>(false);
+
   // ---------------------------------------------------------------------------
   // Smart Auto-Copywriter & Persuasive CTA Generator States
   // ---------------------------------------------------------------------------
@@ -491,8 +519,8 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
     const activeCamp =
       campaigns.find((c) => c.id === selectedCampaignForDispatch) || campaigns[0];
     if (activeCamp) {
-      setGeneratorTitle(activeCamp.title || '+ 100 Tarefinha Educação Infantil e Autismo');
-      setGeneratorPrice(activeCamp.price ? activeCamp.price.toFixed(2).replace('.', ',') : '9,90');
+      setGeneratorTitle(activeCamp.title || 'Atividades Cognitivas para Crianças');
+      setGeneratorPrice(activeCamp.price ? activeCamp.price.toFixed(2).replace('.', ',') : '9,99');
       setGeneratorOldPrice(activeCamp.oldPrice ? activeCamp.oldPrice.toFixed(2).replace('.', ',') : '47,00');
       const slug = getCampaignSlug(activeCamp);
       const landingLink = `${window.location.origin}/?p=${slug}&src=replyrush`;
@@ -501,6 +529,142 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
       setGeneratorImagePreviewUrl(activeCamp.imageUrl || '/assets/aistudio/image_e9e67204.png');
     }
   }, [selectedCampaignForDispatch, generatorLinkType, campaigns]);
+
+  // Resolves the effective prospecting script dynamically adapted to the active campaign or custom edit
+  const getEffectiveScript = (profile: TargetProfile): string => {
+    const handleKey = profile.handle.toLowerCase();
+    // 1. If user edited this script manually, respect user's edit
+    if (profileScriptOverrides[handleKey]) {
+      return profileScriptOverrides[handleKey];
+    }
+    // 2. If it's a custom profile added by user and doesn't contain obsolete default link, use its script
+    if (profile.isCustom && profile.script && !profile.script.includes('p=tarefinhas&src=outreach_arroba')) {
+      return profile.script;
+    }
+
+    // 3. Dynamically generate clean script tailored to activeCampaign
+    const campTitle = activeCampaign.title || 'Material Digital Educativo';
+    const campPrice = `R$ ${(activeCampaign.price || 9.99).toFixed(2).replace('.', ',')}`;
+    const slug = getCampaignSlug(activeCampaign);
+    const link = `${window.location.origin}/?p=${slug}&src=outreach_direct`;
+
+    if (profile.handle === '@redepedagogica') {
+      return `Oi profe! Vi que você comentou lá no post procurando atividades... se você quiser economizar tempo, eu tenho o material "${campTitle}" pronto em PDF para imprimir por apenas ${campPrice}: ${link}`;
+    }
+    if (profile.handle === '@taiseagostini') {
+      return `Olá! Vi seu comentário no post da Taise sobre atividades lúdicas. Desenvolvemos o "${campTitle}" em PDF de alta qualidade por apenas ${campPrice}: ${link}`;
+    }
+    if (profile.handle === '@psicopedagogiandope') {
+      return `Olá! Vi sua dúvida sobre materiais de apoio e intervenção para crianças. O material "${campTitle}" em PDF pode te ajudar bastante: ${link}`;
+    }
+    if (profile.handle === '@autismoerealidade') {
+      return `Olá, mamãe! Sei o quanto pode ser desafiador encontrar atividades estruturadas para prender a atenção dos nossos pequenos. O material "${campTitle}" foi pensado nisso e está com valor promocional de ${campPrice}: ${link}`;
+    }
+    return `Olá ${profile.name}! Acompanho seu trabalho no Instagram e acho maravilhosa sua dedicação. Desenvolvemos o material "${campTitle}" com acesso completo em PDF pronto para imprimir por apenas ${campPrice}. Deixei a amostra e informações aqui: ${link}`;
+  };
+
+  // Save customized script for current profile (across state, localStorage & Firebase)
+  const handleSaveTargetScript = (profile: TargetProfile, newScriptText: string) => {
+    const handleKey = profile.handle.toLowerCase();
+    const updatedOverrides = {
+      ...profileScriptOverrides,
+      [handleKey]: newScriptText,
+    };
+    setProfileScriptOverrides(updatedOverrides);
+    try {
+      localStorage.setItem('autoviral_profile_script_overrides', JSON.stringify(updatedOverrides));
+    } catch {}
+
+    // If it's a custom profile, update in customProfiles and sync with Firebase
+    if (profile.isCustom) {
+      const updatedProfile = { ...profile, script: newScriptText };
+      setCustomProfiles((prev) =>
+        prev.map((p) => (p.handle.toLowerCase() === handleKey ? updatedProfile : p))
+      );
+      saveCustomProfileToFirebase(updatedProfile).catch(console.warn);
+    }
+
+    setTargetScriptSavedSuccess(true);
+    setIsEditingTargetScript(false);
+    setTimeout(() => setTargetScriptSavedSuccess(false), 3000);
+  };
+
+  // Reset target profile script to active product template
+  const handleResetTargetScriptToActiveCampaign = (profile: TargetProfile) => {
+    const handleKey = profile.handle.toLowerCase();
+    const campTitle = activeCampaign.title || 'Material Digital';
+    const campPrice = `R$ ${(activeCampaign.price || 9.99).toFixed(2).replace('.', ',')}`;
+    const slug = getCampaignSlug(activeCampaign);
+    const link = `${window.location.origin}/?p=${slug}&src=outreach_direct`;
+    const defaultTemplate = `Olá ${profile.name}! Acompanho seu trabalho no Instagram e acho maravilhosa sua dedicação. Desenvolvemos o material "${campTitle}" com acesso completo em PDF pronto para imprimir por apenas ${campPrice}. Deixei a amostra e informações aqui: ${link}`;
+
+    handleSaveTargetScript(profile, defaultTemplate);
+  };
+
+  // Adapt Section 1 Spin-Syntax variations to active campaign
+  const handleAdaptSpinTemplatesToActiveCampaign = () => {
+    const campTitle = activeCampaign.title || 'Material Digital';
+    const priceStr = `R$ ${(activeCampaign.price || 9.99).toFixed(2).replace('.', ',')}`;
+    const slug = getCampaignSlug(activeCampaign);
+    const link = `${window.location.origin}/?p=${slug}&src=outreach_insta`;
+
+    const newSpin = [
+      `Olá {nome}! Vi suas postagens sobre {foco} e achei o conteúdo incrível. Sei o quanto dá trabalho criar materiais do zero... desenvolvemos o "${campTitle}" em PDF pronto para imprimir por apenas ${priceStr}. Se quiser conhecer: ${link}`,
+      `Oi profe/mamãe {nome}! Tudo bem? Estava acompanhando seus posts dedicados à educação e crianças. Desenvolvemos o "${campTitle}" em alta resolução para economizar horas de planejamento por ${priceStr}. Deixei o link da página aqui: ${link}`,
+      `Olá querida {nome}! Parabéns pelo lindo trabalho com as crianças. Se você procura materiais práticos e envolventes, o "${campTitle}" está com valor promocional de ${priceStr}: ${link}`,
+    ];
+    setSpinTemplates(newSpin);
+    try {
+      localStorage.setItem('autoviral_spin_templates', JSON.stringify(newSpin));
+    } catch {}
+  };
+
+  // Copy product cover image directly to system clipboard as image blob (for Ctrl+V in Instagram/WhatsApp)
+  const handleCopyImageToClipboard = async (customUrl?: string) => {
+    const imgUrl = customUrl || generatorImagePreviewUrl || activeCampaign.imageUrl || '/assets/aistudio/image_e9e67204.png';
+    try {
+      const response = await fetch(imgUrl);
+      const blob = await response.blob();
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      const objUrl = URL.createObjectURL(blob);
+      img.src = objUrl;
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+      });
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth || 600;
+      canvas.height = img.naturalHeight || 600;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(img, 0, 0);
+        canvas.toBlob(async (pngBlob) => {
+          URL.revokeObjectURL(objUrl);
+          if (pngBlob) {
+            try {
+              await navigator.clipboard.write([
+                new ClipboardItem({ 'image/png': pngBlob }),
+              ]);
+              setCopyImageSuccess(true);
+              setCopiedId('copy-img-clipboard');
+              setTimeout(() => {
+                setCopyImageSuccess(false);
+                setCopiedId(null);
+              }, 4000);
+            } catch (err) {
+              console.warn('Clipboard write error, fallback to URL:', err);
+              copyToClipboard(imgUrl, 'copy-img-clipboard');
+            }
+          }
+        }, 'image/png');
+      }
+    } catch (err) {
+      console.warn('Erro ao copiar imagem:', err);
+      const fullUrl = imgUrl.startsWith('http') ? imgUrl : `${window.location.origin}${imgUrl}`;
+      copyToClipboard(fullUrl, 'copy-img-clipboard');
+    }
+  };
 
   const handleGeneratePersuasiveMessages = () => {
     const activeCamp =
@@ -733,13 +897,11 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
 
     const formattedHandle = `@${cleanHandle}`;
 
-    const isTarefinhas =
-      campaigns.some((c) => c.id === 'camp-tarefinhas-autismo') ||
-      selectedSegmentId === 'pedagogia';
-    const activePrice = isTarefinhas ? 'R$ 9,90' : 'R$ 385,00';
-    const activeLink = isTarefinhas
-      ? 'https://robo-trafego.vercel.app/?p=tarefinhas&src=outreach_arroba'
-      : 'https://robo-trafego.vercel.app/?p=milhas&src=outreach_arroba';
+    const campTitle = activeCampaign.title || 'Material Digital';
+    const campPrice = `R$ ${(activeCampaign.price || 9.99).toFixed(2).replace('.', ',')}`;
+    const campSlug = getCampaignSlug(activeCampaign);
+    const campLink = `${window.location.origin}/?p=${campSlug}&src=outreach_arroba`;
+    const campFocus = activeCampaign.targetAudience || activeCampaign.nicheLabel || 'Educação Infantil & Inclusão';
 
     const formattedName =
       cleanHandle
@@ -753,14 +915,10 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
       name: formattedName,
       url: `https://www.instagram.com/${cleanHandle}/`,
       audience: 'Perfil Ativo no Instagram',
-      focus: isTarefinhas
-        ? 'Pedagogia, Educação Infantil, Apoio Materno & Autismo (TEA)'
-        : 'Renda Extra & Milhas Lucrativas',
+      focus: campFocus,
       whatToLook:
-        'Verifique as publicações recentes, comentários de mães ou professoras com dúvidas de materiais e inicie uma conversa acolhedora com o script.',
-      script: isTarefinhas
-        ? `Olá ${formattedName}! Acompanho seu trabalho no Instagram e acho maravilhosa sua dedicação. Desenvolvemos um caderno com mais de 100 tarefinhas lúdicas adaptadas em PDF para Educação Infantil e crianças com autismo (TEA) por apenas ${activePrice}. Deixei a amostra aqui se quiser ver: ${activeLink}`
-        : `Olá ${formattedName}! Vi seu perfil e achei seu conteúdo muito bacana. Desenvolvemos um método prático de renda extra com milhas por ${activePrice}. Dá uma olhada aqui: ${activeLink}`,
+        'Verifique as publicações recentes, comentários de pessoas interessadas no assunto e inicie uma conversa acolhedora com o script.',
+      script: `Olá ${formattedName}! Acompanho seu trabalho no Instagram e acho maravilhosa sua dedicação. Desenvolvemos o material "${campTitle}" com acesso completo em PDF pronto para imprimir por apenas ${campPrice}. Deixei a amostra aqui se quiser ver: ${campLink}`,
       isCustom: true,
     };
 
@@ -1493,16 +1651,27 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
 
         {/* Spin-Syntax Messages Rotation Panel */}
         <div className="p-5 bg-slate-950/70 border border-slate-800 rounded-2xl space-y-3">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-amber-400" />
               <span className="text-xs font-bold text-white uppercase tracking-wider">
                 Variações Humanizadas de Mensagem (Spin-Syntax Anti-Spam)
               </span>
             </div>
-            <span className="text-[11px] text-slate-400">
-              O robô alterna automaticamente para nunca repetir a mesma mensagem
-            </span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={handleAdaptSpinTemplatesToActiveCampaign}
+                className="px-3 py-1 bg-indigo-950 hover:bg-indigo-900 text-indigo-300 border border-indigo-700/60 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                title={`Adapta as variações A, B e C para o produto "${activeCampaign.title}"`}
+              >
+                <Sparkles className="w-3 h-3 text-amber-400" />
+                <span>Conectar Variações ao Produto: {activeCampaign.title.slice(0, 24)}...</span>
+              </button>
+              <span className="text-[11px] text-slate-400">
+                Alterna automaticamente entre A, B e C
+              </span>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -1647,11 +1816,47 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
           <button
             type="button"
             onClick={selectAllProfiles}
-            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-emerald-800/50 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+            className="px-4 py-2 bg-slate-800 hover:bg-slate-750 text-emerald-400 border border-emerald-800/50 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
           >
             <CheckCircle2 className="w-3.5 h-3.5" />
             <span>Selecionar Todos ({displayedProfiles.length}) para a Fila</span>
           </button>
+        </div>
+
+        {/* VINCULAÇÃO COM O PRODUTO / CAMPANHA ATIVA */}
+        <div className="p-4 bg-slate-950/90 border border-emerald-600/40 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg">
+          <div className="space-y-0.5">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                <Tag className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Produto / Campanha Selecionada para Esta Prospecção:</span>
+              </span>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span>Conectado ao Script</span>
+              </span>
+            </div>
+            <p className="text-xs text-slate-300">
+              Escolha qual produto divulgar. O script de abordagem para cada perfil abaixo usa o título, valor e link desta campanha.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <select
+              value={selectedCampaignForDispatch}
+              onChange={(e) => {
+                setSelectedCampaignForDispatch(e.target.value);
+                setIsEditingTargetScript(false);
+              }}
+              className="bg-slate-900 border border-emerald-500/60 rounded-xl px-3.5 py-2 text-xs sm:text-sm font-bold text-emerald-300 focus:outline-none focus:border-emerald-400 cursor-pointer w-full sm:w-auto"
+            >
+              {campaigns.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.title} • R$ {c.price.toFixed(2)}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -1662,7 +1867,10 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
               return (
                 <div
                   key={p.handle}
-                  onClick={() => setSelectedProfileIndex(idx)}
+                  onClick={() => {
+                    setSelectedProfileIndex(idx);
+                    setIsEditingTargetScript(false);
+                  }}
                   className={`w-full text-left p-4 rounded-2xl border transition flex items-center justify-between cursor-pointer ${
                     selectedProfileIndex === idx
                       ? 'bg-emerald-950/60 border-emerald-600/70 text-white shadow-lg'
@@ -1774,7 +1982,7 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
               </div>
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-4">
               <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl space-y-1.5">
                 <h4 className="text-xs font-bold text-slate-200">
                   🔍 O que procurar nos comentários deste perfil:
@@ -1784,26 +1992,293 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
                 </p>
               </div>
 
-              <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl space-y-2">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-bold text-emerald-300">
-                    💬 Script de Abordagem Amigável para {currentProfile.handle} (Anti-Bloqueio / Sem Venda Agressiva):
-                  </h4>
-                  <button
-                    onClick={() => copyToClipboard(currentProfile.script, `copy-script-${selectedProfileIndex}`)}
-                    className="text-[11px] text-emerald-400 hover:text-emerald-300 underline font-semibold flex items-center gap-1 cursor-pointer"
-                  >
-                    {copiedId === `copy-script-${selectedProfileIndex}` ? (
-                      <span>✅ Copiado!</span>
+              {/* SCRIPT EDITÁVEL CONECTADO AO PRODUTO DA CAMPANHA ESPECÍFICA */}
+              {(() => {
+                const effectiveScript = getEffectiveScript(currentProfile);
+                const isOverridden = !!profileScriptOverrides[currentProfile.handle.toLowerCase()];
+
+                return (
+                  <div className="p-5 bg-slate-900 border-2 border-emerald-600/50 rounded-2xl space-y-3 shadow-xl">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className="text-xs font-black text-emerald-300 uppercase tracking-wider flex items-center gap-1.5">
+                            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                            <span>Script de Abordagem para {currentProfile.handle}:</span>
+                          </h4>
+                          <span className="text-[10px] bg-indigo-950 text-indigo-300 border border-indigo-700/60 px-2 py-0.5 rounded-full font-bold">
+                            Produto: {activeCampaign.title} (R$ {(activeCampaign.price || 9.99).toFixed(2).replace('.', ',')})
+                          </span>
+                          {isOverridden && (
+                            <span className="text-[10px] bg-amber-950 text-amber-300 border border-amber-700/60 px-2 py-0.5 rounded-full font-bold">
+                              Editado Manualmente
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-slate-400">
+                          Mensagem anti-bloqueio humanizada conectada diretamente ao produto da campanha ativa.
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 self-start sm:self-auto">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (isEditingTargetScript) {
+                              setIsEditingTargetScript(false);
+                            } else {
+                              setTempTargetScriptText(effectiveScript);
+                              setIsEditingTargetScript(true);
+                            }
+                          }}
+                          className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-sm"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                          <span>{isEditingTargetScript ? 'Fechar Edição' : 'Editar Script'}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleResetTargetScriptToActiveCampaign(currentProfile)}
+                          className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white rounded-xl text-xs font-semibold flex items-center gap-1 transition cursor-pointer border border-slate-700"
+                          title={`Recalcula e conecta o script com o produto "${activeCampaign.title}"`}
+                        >
+                          <RotateCcw className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>Sincronizar Produto</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Modo de Edição Ativo */}
+                    {isEditingTargetScript ? (
+                      <div className="space-y-3 pt-1 animate-in fade-in">
+                        {/* Quick Insertion Pills for Target Script */}
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-[10px] font-bold text-slate-400">Inserir no texto:</span>
+                          <button
+                            type="button"
+                            onClick={() => setTempTargetScriptText((prev) => `${prev} ${currentProfile.name}`)}
+                            className="text-[10px] bg-slate-950 hover:bg-slate-800 text-emerald-300 px-2 py-0.5 rounded border border-slate-700 cursor-pointer"
+                          >
+                            + Nome ({currentProfile.name})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setTempTargetScriptText((prev) => `${prev} "${activeCampaign.title}"`)}
+                            className="text-[10px] bg-slate-950 hover:bg-slate-800 text-emerald-300 px-2 py-0.5 rounded border border-slate-700 cursor-pointer"
+                          >
+                            + Título do Produto
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setTempTargetScriptText((prev) => `${prev} R$ ${(activeCampaign.price || 9.99).toFixed(2).replace('.', ',')}`)}
+                            className="text-[10px] bg-slate-950 hover:bg-slate-800 text-emerald-300 px-2 py-0.5 rounded border border-slate-700 cursor-pointer"
+                          >
+                            + Preço Promocional
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const slug = getCampaignSlug(activeCampaign);
+                              setTempTargetScriptText((prev) => `${prev} ${window.location.origin}/?p=${slug}&src=outreach_direct`);
+                            }}
+                            className="text-[10px] bg-slate-950 hover:bg-slate-800 text-emerald-300 px-2 py-0.5 rounded border border-slate-700 cursor-pointer"
+                          >
+                            + Link da Landing Page
+                          </button>
+                          {activeCampaign.checkoutUrl && (
+                            <button
+                              type="button"
+                              onClick={() => setTempTargetScriptText((prev) => `${prev} ${activeCampaign.checkoutUrl}`)}
+                              className="text-[10px] bg-slate-950 hover:bg-slate-800 text-emerald-300 px-2 py-0.5 rounded border border-slate-700 cursor-pointer"
+                            >
+                              + Link Checkout Direto
+                            </button>
+                          )}
+                        </div>
+
+                        <textarea
+                          value={tempTargetScriptText}
+                          onChange={(e) => setTempTargetScriptText(e.target.value)}
+                          rows={6}
+                          className="w-full bg-slate-950 border-2 border-indigo-500 rounded-xl p-3 text-xs sm:text-sm font-mono text-emerald-300 leading-relaxed focus:outline-none"
+                          placeholder="Digite ou edite a mensagem personalizada para este perfil..."
+                        />
+
+                        <div className="flex items-center justify-between gap-2 pt-1">
+                          <span className="text-[10px] text-slate-400">
+                            Ao salvar, sua alteração fica gravada no navegador e sincronizada na nuvem Firebase.
+                          </span>
+
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setIsEditingTargetScript(false)}
+                              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 text-xs font-semibold cursor-pointer"
+                            >
+                              Cancelar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleSaveTargetScript(currentProfile, tempTargetScriptText)}
+                              className="px-4 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-green-500 hover:from-emerald-400 hover:to-green-400 text-slate-950 text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-md shadow-emerald-500/20"
+                            >
+                              <Save className="w-3.5 h-3.5" />
+                              <span>Salvar Script deste Perfil</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
                     ) : (
-                      <span>Copiar Script</span>
+                      /* Modo de Visualização do Script */
+                      <div className="space-y-3">
+                        <div className="p-4 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
+                          <p className="text-xs text-slate-200 font-mono leading-relaxed whitespace-pre-wrap selection:bg-emerald-950">
+                            {effectiveScript}
+                          </p>
+                        </div>
+
+                        {/* Botões de Ação para o Script */}
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-800/80">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={() => copyToClipboard(effectiveScript, `copy-script-${selectedProfileIndex}`)}
+                              className="px-4 py-2 bg-gradient-to-r from-emerald-500 to-green-500 hover:from-emerald-400 hover:to-green-400 text-slate-950 font-black text-xs rounded-xl flex items-center gap-1.5 transition cursor-pointer shadow-md shadow-emerald-500/20"
+                            >
+                              {copiedId === `copy-script-${selectedProfileIndex}` ? (
+                                <>
+                                  <Check className="w-3.5 h-3.5" />
+                                  <span>Script Copiado!</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="w-3.5 h-3.5" />
+                                  <span>Copiar Script</span>
+                                </>
+                              )}
+                            </button>
+
+                            {/* Copiar Imagem do Produto para Área de Transferência (Ctrl+V) */}
+                            <button
+                              type="button"
+                              onClick={() => handleCopyImageToClipboard(activeCampaign.imageUrl)}
+                              className="px-3.5 py-2 bg-indigo-950 hover:bg-indigo-900 text-indigo-300 hover:text-white border border-indigo-700/60 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-sm"
+                              title="Copia a capa do produto para a área de transferência para colar com Ctrl+V no Instagram Direct ou WhatsApp"
+                            >
+                              <ImageIcon className="w-3.5 h-3.5 text-pink-400" />
+                              <span>
+                                {copiedId === 'copy-img-clipboard' || copyImageSuccess
+                                  ? '✅ Foto Copiada! (Ctrl+V no Chat)'
+                                  : 'Copiar Foto (Ctrl+V no Chat)'}
+                              </span>
+                            </button>
+
+                            {/* Testar no WhatsApp */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const phone = activeCampaign.whatsappNumber || '5541998778348';
+                                const clean = phone.replace(/[^0-9]/g, '');
+                                window.open(`https://wa.me/${clean}?text=${encodeURIComponent(effectiveScript)}`, '_blank');
+                              }}
+                              className="px-3 py-2 bg-green-700/80 hover:bg-green-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer border border-green-600/40"
+                              title="Testa o envio deste script no seu próprio WhatsApp"
+                            >
+                              <Smartphone className="w-3.5 h-3.5 text-green-300" />
+                              <span>Testar no WhatsApp</span>
+                            </button>
+
+                            {/* Abrir Conversa no Instagram */}
+                            <a
+                              href={`https://www.instagram.com/${currentProfile.handle.replace('@', '')}/`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-3 py-2 bg-pink-600/80 hover:bg-pink-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-sm"
+                              title="Abre o perfil deste lead no Instagram para colar o script no direct"
+                            >
+                              <Instagram className="w-3.5 h-3.5" />
+                              <span>Abrir Chat no Instagram</span>
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => setShowDirectMockup(!showDirectMockup)}
+                            className="text-xs text-indigo-400 hover:text-indigo-300 underline font-semibold flex items-center gap-1 cursor-pointer"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>{showDirectMockup ? 'Ocultar Prévia do Chat' : 'Ver como Fica no Direct'}</span>
+                          </button>
+                        </div>
+
+                        {/* Mensagem de sucesso ao salvar alteração */}
+                        {targetScriptSavedSuccess && (
+                          <div className="p-2.5 bg-emerald-950/90 border border-emerald-500 rounded-xl flex items-center gap-2 text-xs font-bold text-emerald-300 animate-in fade-in">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                            <span>Script personalizado salvo com sucesso na nuvem Firebase e no navegador!</span>
+                          </div>
+                        )}
+
+                        {/* Orientações Claras de Envio da Foto + Texto no Direct */}
+                        <div className="p-3 bg-slate-950 border border-indigo-900/40 rounded-xl space-y-1.5 text-[11px] text-slate-300">
+                          <div className="flex items-center gap-1.5 font-bold text-indigo-300">
+                            <ImageIcon className="w-3.5 h-3.5 text-pink-400" />
+                            <span>Como a imagem e o texto aparecem juntos no Instagram Direct:</span>
+                          </div>
+                          <p className="text-slate-400 leading-relaxed">
+                            No Instagram Web e WhatsApp, o campo de digitação recebe texto, e arquivos de foto são anexados via <strong>Ctrl+V</strong>. Para enviar os dois:<br/>
+                            1. Clique em <strong>"Copiar Script"</strong> e cole no chat (Ctrl+V) ➔ Enviar.<br/>
+                            2. Clique em <strong>"Copiar Foto (Ctrl+V no Chat)"</strong> e aperte <strong>Ctrl+V</strong> dentro da conversa. A foto oficial do produto aparecerá anexada no chat!
+                          </p>
+                        </div>
+
+                        {/* Mockup Realista de Prévia do Instagram Direct */}
+                        {showDirectMockup && (
+                          <div className="p-4 bg-slate-950 rounded-2xl border-2 border-pink-600/40 space-y-3 animate-in fade-in">
+                            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                              <div className="flex items-center gap-2">
+                                <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-amber-500 via-rose-500 to-purple-600 flex items-center justify-center text-white text-[10px] font-bold">
+                                  {currentProfile.name.charAt(0)}
+                                </div>
+                                <div>
+                                  <span className="text-xs font-bold text-white block">{currentProfile.name}</span>
+                                  <span className="text-[10px] text-slate-400 block font-mono">{currentProfile.handle}</span>
+                                </div>
+                              </div>
+                              <span className="text-[10px] text-slate-400">Instagram Direct</span>
+                            </div>
+
+                            {/* Chat Bubbles: Foto Anexada + Texto */}
+                            <div className="flex flex-col items-end space-y-2 max-w-md ml-auto">
+                              {/* Foto Anexada no Direct */}
+                              <div className="rounded-2xl overflow-hidden border border-slate-700 bg-slate-900 max-w-[240px] shadow-lg">
+                                <img
+                                  src={activeCampaign.imageUrl || '/assets/aistudio/image_e9e67204.png'}
+                                  alt="Capa Oficial"
+                                  className="w-full h-auto object-cover aspect-[4/3]"
+                                />
+                                <div className="p-1.5 bg-slate-900 text-right">
+                                  <span className="text-[9px] text-slate-400">Foto anexada • {activeCampaign.title}</span>
+                                </div>
+                              </div>
+
+                              {/* Balão de Texto do Direct */}
+                              <div className="bg-gradient-to-r from-pink-600 to-purple-600 text-white rounded-2xl rounded-tr-sm p-3.5 text-xs font-normal leading-relaxed shadow-lg max-w-sm">
+                                <p className="whitespace-pre-wrap">{effectiveScript}</p>
+                                <div className="text-right pt-1">
+                                  <span className="text-[9px] text-pink-200">Enviado agora • Entregue</span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     )}
-                  </button>
-                </div>
-                <p className="text-xs text-slate-300 italic bg-slate-950 p-3 rounded-lg border border-slate-800 leading-relaxed">
-                  "{currentProfile.script}"
-                </p>
-              </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </div>
@@ -2131,24 +2606,45 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
                     </div>
 
                     {/* Botões de Imagem */}
-                    <div className="space-y-1.5 pt-1 border-t border-slate-800">
+                    <div className="space-y-2 pt-1 border-t border-slate-800">
+                      {/* Botão Principal: Copiar Imagem para o Clipboard (Ctrl+V) */}
                       <button
                         type="button"
-                        onClick={handleDownloadProductImage}
-                        className="w-full py-1.5 px-2.5 bg-slate-800 hover:bg-slate-750 text-slate-200 hover:text-white rounded-lg text-[11px] font-bold border border-slate-700 transition flex items-center justify-center gap-1.5 cursor-pointer"
+                        onClick={() => handleCopyImageToClipboard(generatorImagePreviewUrl)}
+                        className="w-full py-2 px-2.5 bg-gradient-to-r from-emerald-500 to-green-500 hover:from-emerald-400 hover:to-green-400 text-slate-950 font-black rounded-xl text-xs transition flex items-center justify-center gap-1.5 cursor-pointer shadow-md shadow-emerald-500/20"
+                        title="Copia a imagem direto para a área de transferência para colar no Instagram Direct ou WhatsApp (Ctrl+V)"
                       >
-                        <Download className="w-3.5 h-3.5 text-indigo-400" />
-                        <span>Baixar Foto para Anexar no Chat</span>
+                        <ImageIcon className="w-3.5 h-3.5" />
+                        <span>
+                          {copiedId === 'copy-img-clipboard' || copyImageSuccess
+                            ? '✅ Foto Copiada! (Cole com Ctrl+V)'
+                            : 'Copiar Foto (Ctrl+V no Chat)'}
+                        </span>
                       </button>
 
-                      <button
-                        type="button"
-                        onClick={handleCopyImageLink}
-                        className="w-full py-1.5 px-2.5 bg-slate-950 hover:bg-slate-900 text-slate-400 hover:text-slate-200 rounded-lg text-[10px] font-medium border border-slate-800 transition flex items-center justify-center gap-1 cursor-pointer"
-                      >
-                        <Copy className="w-3 h-3" />
-                        <span>{copiedId === 'copy-product-image-url' ? 'Link Copiado!' : 'Copiar Link da Imagem'}</span>
-                      </button>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <button
+                          type="button"
+                          onClick={handleDownloadProductImage}
+                          className="py-1.5 px-2 bg-slate-800 hover:bg-slate-750 text-slate-200 hover:text-white rounded-lg text-[10px] font-bold border border-slate-700 transition flex items-center justify-center gap-1 cursor-pointer"
+                        >
+                          <Download className="w-3 h-3 text-indigo-400" />
+                          <span>Baixar Arquivo</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={handleCopyImageLink}
+                          className="py-1.5 px-2 bg-slate-950 hover:bg-slate-900 text-slate-400 hover:text-slate-200 rounded-lg text-[10px] font-medium border border-slate-800 transition flex items-center justify-center gap-1 cursor-pointer"
+                        >
+                          <Copy className="w-3 h-3" />
+                          <span>{copiedId === 'copy-product-image-url' ? 'Link OK!' : 'Copiar Link'}</span>
+                        </button>
+                      </div>
+
+                      <div className="p-2 bg-slate-950/80 rounded-lg border border-slate-800 text-[10px] text-slate-400 leading-snug">
+                        💡 <strong>Como funciona:</strong> Clique em <em>"Copiar Foto"</em> e, na conversa do Instagram ou WhatsApp, aperte <strong>Ctrl+V</strong> para a capa aparecer anexada no chat!
+                      </div>
                     </div>
                   </div>
                 </div>

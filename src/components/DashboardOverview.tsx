@@ -125,6 +125,39 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
         </div>
       </div>
 
+      {/* Meta Ads Active Campaign Detected Banner */}
+      <div className="bg-gradient-to-r from-blue-950 via-slate-900 to-indigo-950 border-2 border-blue-500/60 rounded-2xl p-5 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className="w-10 h-10 rounded-2xl bg-blue-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/30 shrink-0">
+            <Zap className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-black text-white">
+                Campanha no Meta Ads Ativa: FluentImmersion (71542...)
+              </span>
+              <span className="text-[10px] bg-blue-900 text-blue-200 border border-blue-700 px-2 py-0.5 rounded-full font-bold">
+                3 Criativos Mapeados
+              </span>
+              <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded-full font-bold">
+                Auto-DM nos Anúncios
+              </span>
+            </div>
+            <p className="text-xs text-slate-300 mt-0.5">
+              Multiplique as vendas dos seus anúncios respondendo comentários no Direct em 3 segundos e rastreando conversões no Radar.
+            </p>
+          </div>
+        </div>
+
+        <button
+          onClick={() => onNavigateTab('meta_ads')}
+          className="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-blue-900/40 flex items-center gap-1.5 shrink-0 transition cursor-pointer"
+        >
+          <span>Abrir Alavanca Meta Ads</span>
+          <ArrowUpRight className="w-4 h-4" />
+        </button>
+      </div>
+
       {/* KPI Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Card 1: Faturamento & Renda Familiar */}

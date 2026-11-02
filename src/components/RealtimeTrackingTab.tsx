@@ -462,9 +462,22 @@ export const RealtimeTrackingTab: React.FC<RealtimeTrackingTabProps> = ({
                     </td>
                     <td className="py-3 text-slate-300">{evt.ageBracket} anos</td>
                     <td className="py-3">
-                      <span className="px-2 py-0.5 rounded text-[11px] font-medium capitalize bg-slate-800 text-indigo-300 border border-slate-700">
-                        {evt.source}
-                      </span>
+                      {evt.source === 'meta_ads' ? (
+                        <div className="flex flex-col gap-0.5">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-950 text-blue-300 border border-blue-700/80 inline-block w-fit">
+                            🔵 Meta Ads (Pago)
+                          </span>
+                          {evt.adCreativeName && (
+                            <span className="text-[9px] text-slate-400 font-mono truncate max-w-[140px]" title={evt.adCreativeName}>
+                              {evt.adCreativeName}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded text-[11px] font-medium capitalize bg-slate-800 text-indigo-300 border border-slate-700">
+                          {evt.source}
+                        </span>
+                      )}
                     </td>
                     <td className="py-3 text-slate-300 max-w-[180px] truncate">
                       {evt.campaignTitle}

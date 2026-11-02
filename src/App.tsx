@@ -21,6 +21,7 @@ import { NotificationsModal } from './components/NotificationsModal';
 import { SupabaseModal } from './components/SupabaseModal';
 import { VercelModal } from './components/VercelModal';
 import { CustomerLeadsModal } from './components/CustomerLeadsModal';
+import { MetaAdsBoosterTab } from './components/MetaAdsBoosterTab';
 import { getCampaignSlug } from './utils/campaignSlug';
 import { INITIAL_CAMPAIGNS } from './data/defaultCampaigns';
 import { Campaign, TrackingEvent, PainPointData, PushNotification, CustomerLead } from './types';
@@ -482,6 +483,70 @@ export default function App() {
     });
   };
 
+  // Simulate or record conversion specifically originating from Meta Ads (e.g. from the 3 user creatives)
+  const handleSimulateMetaAdSale = (creativeName?: string) => {
+    const targetCampaign = campaigns[0] || {
+      id: 'camp-tarefinhas-autismo',
+      title: '+ 100 Tarefinha Educação Infantil e Autismo',
+      price: 9.99,
+      niche: 'psicopedagogia',
+    };
+
+    const sampleMetaBuyers = [
+      { name: 'Fernanda Martins (Instagram Ad)', phone: '(11) 98234-5512' },
+      { name: 'Juliana Pedagoga (Reels 9:16)', phone: '(41) 99128-4421' },
+      { name: 'Patricia Costa (Comentou no Anúncio)', phone: '(31) 97102-9934' },
+      { name: 'Camila Rocha (Stories Meta)', phone: '(21) 98877-3310' },
+    ];
+    const b = sampleMetaBuyers[Math.floor(Math.random() * sampleMetaBuyers.length)];
+    const adName = creativeName || 'Criativo 01 - Oferta 46 paginas R$9,90';
+
+    const newLead: CustomerLead = {
+      id: `lead-meta-${Date.now()}`,
+      campaignId: targetCampaign.id,
+      campaignTitle: targetCampaign.title,
+      name: b.name,
+      phone: b.phone,
+      status: 'comprador_aprovado',
+      amount: targetCampaign.price,
+      source: 'meta_ads',
+      createdAt: new Date().toISOString(),
+      notes: `Venda gerada pelo Meta Ads • ${adName}`,
+      adCreativeName: adName,
+    };
+    saveCustomerLeadToFirebase(newLead).catch(console.warn);
+    setCustomerLeads((prev) => [newLead, ...prev]);
+
+    handleAddTrackingEvent({
+      campaignId: targetCampaign.id,
+      campaignTitle: targetCampaign.title,
+      niche: targetCampaign.niche,
+      type: 'conversion',
+      amount: targetCampaign.price,
+      geo: { city: 'São Paulo', state: 'SP', country: 'Brasil' },
+      device: 'mobile',
+      ageBracket: '25-34',
+      source: 'meta_ads',
+      leadScore: 99,
+      durationSeconds: 90,
+      isSimulation: true,
+      customerName: b.name,
+      customerPhone: b.phone,
+      adCreativeName: adName,
+      utmContent: adName.toLowerCase().replace(/[^a-z0-9]/g, '_'),
+    });
+
+    const notif: PushNotification = {
+      id: `notif-meta-${Date.now()}`,
+      title: '🎯 Venda Confirmada pelo Meta Ads!',
+      message: `${b.name} comprou "${targetCampaign.title}" (R$ ${targetCampaign.price.toFixed(2)}) via "${adName}".`,
+      time: 'Agora mesmo',
+      type: 'sale',
+      read: false,
+    };
+    setNotifications((prev) => [notif, ...prev]);
+  };
+
   const handleDeleteCustomer = (id: string) => {
     deleteCustomerLeadFromFirebase(id).catch(console.warn);
     setCustomerLeads((prev) => prev.filter((c) => c.id !== id));
@@ -785,6 +850,15 @@ export default function App() {
             onSimulateConversion={handleSimulateQuickConversion}
             onResetAllMetrics={handleResetToRealMode}
             onOpenCustomerModal={() => setIsCustomerModalOpen(true)}
+          />
+        )}
+
+        {activeTab === 'meta_ads' && (
+          <MetaAdsBoosterTab
+            campaigns={campaigns}
+            onAddTrackingEvent={handleAddTrackingEvent}
+            onSimulateMetaSale={handleSimulateMetaAdSale}
+            onNavigateTab={(tab) => setActiveTab(tab)}
           />
         )}
 

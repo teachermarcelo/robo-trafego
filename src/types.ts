@@ -87,7 +87,7 @@ export interface TrackingEvent {
   };
   device: 'mobile' | 'desktop' | 'tablet';
   ageBracket: '18-24' | '25-34' | '35-44' | '45-54' | '55+';
-  source: 'tiktok' | 'pinterest' | 'instagram' | 'whatsapp' | 'google_organic';
+  source: 'tiktok' | 'pinterest' | 'instagram' | 'whatsapp' | 'google_organic' | 'meta_ads';
   amount?: number;
   leadScore?: number;
   durationSeconds?: number;
@@ -96,6 +96,8 @@ export interface TrackingEvent {
   customerPhone?: string;
   customerEmail?: string;
   customerHandle?: string;
+  adCreativeName?: string;
+  utmContent?: string;
 }
 
 export interface CustomerLead {
@@ -108,9 +110,10 @@ export interface CustomerLead {
   instagramHandle?: string;
   status: 'comprador_aprovado' | 'pix_gerado' | 'carrinho_abandonado' | 'duvida_whatsapp' | 'amostra_gratis';
   amount?: number;
-  source: 'hotmart_webhook' | 'landing_page_whatsapp' | 'landing_sample' | 'direct_chat';
+  source: 'hotmart_webhook' | 'landing_page_whatsapp' | 'landing_sample' | 'direct_chat' | 'meta_ads';
   createdAt: string;
   notes?: string;
+  adCreativeName?: string;
 }
 
 export interface AIReport {

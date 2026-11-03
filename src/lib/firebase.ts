@@ -494,3 +494,46 @@ export function subscribeCustomerLeads(
   );
 }
 
+/**
+ * Meta Ads and ManyChat / Instagram Graph API Configuration
+ */
+export interface MetaAdsApiConfig {
+  adAccountId: string;
+  accountName: string;
+  accessToken?: string;
+  instagramBusinessId?: string;
+  webhookSecret?: string;
+  isConnected: boolean;
+  autoResponderActive: boolean;
+  lastSyncAt?: string;
+}
+
+export async function saveMetaAdsConfigToFirebase(config: MetaAdsApiConfig): Promise<void> {
+  const path = `${SETTINGS_COLLECTION}/meta_ads_config`;
+  try {
+    await setDoc(doc(db, SETTINGS_COLLECTION, 'meta_ads_config'), {
+      ...config,
+      updatedAt: new Date().toISOString(),
+    }, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export function subscribeMetaAdsConfig(onUpdate: (config: MetaAdsApiConfig | null) => void): () => void {
+  const docRef = doc(db, SETTINGS_COLLECTION, 'meta_ads_config');
+  return onSnapshot(
+    docRef,
+    (snap) => {
+      if (snap.exists()) {
+        onUpdate(snap.data() as MetaAdsApiConfig);
+      } else {
+        onUpdate(null);
+      }
+    },
+    (err) => {
+      console.warn('Meta Ads config subscription error:', err);
+    }
+  );
+}
+

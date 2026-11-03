@@ -2462,6 +2462,266 @@ export const MetaAdsBoosterTab: React.FC<MetaAdsBoosterTabProps> = ({
               </div>
             </div>
           </div>
+
+          {/* TWO CLARITY CARDS: HOW TO CREATE TRAFFIC & WHERE ARE THE ALGORITHMS */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Card 1: How to create traffic */}
+            <div className="p-5 bg-gradient-to-br from-blue-950/70 via-slate-900 to-slate-950 border-2 border-blue-500/60 rounded-3xl space-y-3 shadow-xl">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-blue-500/20 border border-blue-400 flex items-center justify-center shrink-0">
+                  <Play className="w-4 h-4 text-blue-400 fill-blue-400" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-black text-white">
+                    🚀 Como Criar Tráfego Pago por Aqui (Meta Ads)
+                  </h4>
+                  <span className="text-[10px] text-emerald-400 font-bold">
+                    ● Conta {accountName} está ATIVA e Pronta
+                  </span>
+                </div>
+              </div>
+
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Agora que sua conta <strong>act_{adAccountId.replace('act_', '')}</strong> conectou com sucesso na Meta Graph API, você pode gerar tráfego de <strong>2 formas práticas</strong>:
+              </p>
+
+              <div className="space-y-1.5 text-xs text-slate-200">
+                <div className="p-2 bg-slate-950/80 rounded-xl border border-slate-800 flex items-start gap-2">
+                  <span className="text-blue-400 font-bold">1.</span>
+                  <div>
+                    <strong className="text-white">Impulsionar Post / Reels Direto:</strong> Selecione qualquer post abaixo e clique em <em>"Impulsionar com Tráfego"</em>. O robô da Meta direciona pessoas para comentar no post, ativando as respostas automáticas.
+                  </div>
+                </div>
+                <div className="p-2 bg-slate-950/80 rounded-xl border border-slate-800 flex items-start gap-2">
+                  <span className="text-blue-400 font-bold">2.</span>
+                  <div>
+                    <strong className="text-white">Anúncios com Rastreamento UTM:</strong> Na <strong>Aba 2 (Anúncios Ativos & Links UTM)</strong>, você tem os links pré-configurados para colar no Gerenciador de Anúncios.
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveSubTab('creatives')}
+                  className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl transition shadow flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Layers className="w-3.5 h-3.5" />
+                  <span>Ir para Aba 2 (Anúncios & Links UTM)</span>
+                </button>
+                <a
+                  href={`https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=${adAccountId.replace('act_', '')}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl transition border border-slate-700 flex items-center gap-1 cursor-pointer shrink-0"
+                >
+                  <span>Gerenciador Meta</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+            </div>
+
+            {/* Card 2: Where are the algorithms & how they work */}
+            <div className="p-5 bg-gradient-to-br from-indigo-950/70 via-slate-900 to-slate-950 border-2 border-indigo-500/60 rounded-3xl space-y-3 shadow-xl">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-indigo-500/20 border border-indigo-400 flex items-center justify-center shrink-0">
+                  <Sparkles className="w-4 h-4 text-indigo-400" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-black text-white">
+                    🧠 Onde Estão os Algoritmos & Como Funcionam
+                  </h4>
+                  <span className="text-[10px] text-indigo-300 font-bold">
+                    IA de Segmentação Cirúrgica + Roteador de Dores
+                  </span>
+                </div>
+              </div>
+
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Você tem <strong>2 algoritmos poderosos</strong> integrados no sistema:
+              </p>
+
+              <div className="space-y-1.5 text-xs text-slate-200">
+                <div className="p-2 bg-slate-950/80 rounded-xl border border-slate-800 flex items-start gap-2">
+                  <span className="text-purple-400 font-bold">A.</span>
+                  <div>
+                    <strong className="text-purple-300">Algoritmo de Dores & Interesses (Aba 4):</strong> Mapeia as 4 maiores dores emocionais das pessoas (ex: autismo infantil, medo de falar inglês, renda extra) e descobre os códigos exatos de segmentação na Meta (Interesses, Comportamentos e Pais de Crianças).
+                  </div>
+                </div>
+                <div className="p-2 bg-slate-950/80 rounded-xl border border-slate-800 flex items-start gap-2">
+                  <span className="text-emerald-400 font-bold">B.</span>
+                  <div>
+                    <strong className="text-emerald-300">Roteador por Dores (Aba 5):</strong> Quando alguém comenta ou manda direct, o algoritmo lê as palavras e envia no mesmo segundo a oferta e a foto do produto exato para aquela dor.
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveSubTab('audiences')}
+                  className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl transition shadow flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Ver Algoritmo de Dores (Aba 4)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveSubTab('multi_product_router')}
+                  className="px-3 py-2 bg-teal-800 hover:bg-teal-700 text-white font-bold text-xs rounded-xl transition flex items-center gap-1 cursor-pointer shrink-0"
+                >
+                  <Target className="w-3 h-3" />
+                  <span>Roteador (Aba 5)</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* DEDICATED SECTION: POSTS OF THE SELECTED ACCOUNT & PER-POST AUTOMATION */}
+          <div className="p-6 bg-slate-950 border-2 border-pink-500/60 rounded-3xl space-y-5 shadow-2xl">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+              <div>
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-pink-950 text-pink-300 text-xs font-bold border border-pink-700/50 mb-1">
+                  <Share2 className="w-3.5 h-3.5 text-pink-400" />
+                  <span>POSTAGENS DA CONTA SELECIONADA: {instagramAccount}</span>
+                </div>
+                <h3 className="text-lg font-black text-white">
+                  Postagens do Instagram & Fluxo Individual por Post
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Veja as postagens da sua conta selecionada e configure a automação exclusiva de cada post (opcional). Você pode ligar ou pausar o robô post a post!
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={fetchInstagramPosts}
+                  className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition border border-slate-700 cursor-pointer shadow"
+                >
+                  <RefreshCw className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Sincronizar Posts</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveSubTab('posts_automation')}
+                  className="px-3 py-2 bg-pink-600 hover:bg-pink-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow"
+                >
+                  <span>Abrir Aba 1 Completa</span>
+                  <ExternalLink className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+
+            {/* Posts Cards Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+              {instagramPosts.map((post) => (
+                <div
+                  key={post.id}
+                  className={`bg-slate-900 rounded-2xl border-2 transition shadow-xl overflow-hidden flex flex-col justify-between ${
+                    post.automationActive ? 'border-pink-500/80 shadow-pink-950/20' : 'border-slate-800 opacity-80'
+                  }`}
+                >
+                  <div>
+                    {/* Media Thumbnail */}
+                    <div className="relative aspect-video bg-slate-950 overflow-hidden">
+                      <img
+                        src={post.mediaUrl}
+                        alt="Post do Instagram"
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          (e.target as HTMLElement).style.display = 'none';
+                        }}
+                      />
+                      <div className="absolute top-2.5 left-2.5">
+                        <span className="px-2 py-0.5 rounded-md bg-slate-950/80 backdrop-blur text-[10px] font-bold text-white uppercase border border-slate-700">
+                          {post.mediaType === 'VIDEO' ? '🎥 Reels' : '📸 Imagem'}
+                        </span>
+                      </div>
+                      <div className="absolute top-2.5 right-2.5">
+                        <button
+                          type="button"
+                          onClick={() => handleTogglePostAutomation(post.id)}
+                          className={`px-2.5 py-1 rounded-full text-[10px] font-bold cursor-pointer transition flex items-center gap-1.5 ${
+                            post.automationActive
+                              ? 'bg-emerald-500 text-slate-950 font-black shadow-md'
+                              : 'bg-slate-800 text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          <span className={`w-1.5 h-1.5 rounded-full ${post.automationActive ? 'bg-slate-950' : 'bg-slate-500'}`} />
+                          <span>{post.automationActive ? 'Robô LIGADO' : 'Robô PAUSADO'}</span>
+                        </button>
+                      </div>
+                      <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between text-[11px] text-white/90 bg-slate-950/70 backdrop-blur px-2.5 py-1 rounded-lg">
+                        <span>💬 <strong>{post.commentsCount}</strong> comentários</span>
+                        <span>❤️ <strong>{post.likeCount}</strong> curtidas</span>
+                      </div>
+                    </div>
+
+                    {/* Post Content & Automation Settings */}
+                    <div className="p-4 space-y-3">
+                      <p className="text-xs text-slate-300 line-clamp-2 leading-relaxed">
+                        {post.caption}
+                      </p>
+
+                      <div className="p-3 bg-slate-950 rounded-xl space-y-2 border border-slate-800 text-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] uppercase font-bold text-slate-400">Palavra-Gatilho:</span>
+                          <span className="font-mono font-bold text-amber-300 text-[11px]">
+                            {post.triggerKeyword}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] uppercase font-bold text-slate-400">Produto Vinculado:</span>
+                          <span className="text-emerald-400 font-bold truncate max-w-[160px]">
+                            {post.productLinked}
+                          </span>
+                        </div>
+
+                        <div className="space-y-0.5 pt-1 border-t border-slate-800/60">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block">Resposta no Direct:</span>
+                          <p className="text-[11px] text-slate-300 italic line-clamp-2">
+                            "{post.dmMessage}"
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-4 pt-0 space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedPostForFlow(post);
+                        setIsEditingFlowModalOpen(true);
+                      }}
+                      className="w-full py-2.5 bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition shadow-md shadow-pink-900/30 cursor-pointer"
+                    >
+                      <Settings className="w-3.5 h-3.5" />
+                      <span>Configurar Automação deste Post</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleGenerateAudienceAlgorithm(
+                          post.productId === 'prod-ingles' ? 'Inglês & Idiomas' : post.productId === 'prod-confeitaria' ? 'Confeitaria & Doces' : 'Educação Infantil & Autismo (TEA)',
+                          post.productLinked
+                        );
+                        setActiveSubTab('audiences');
+                      }}
+                      className="w-full py-2 bg-slate-950 hover:bg-slate-800 text-indigo-300 border border-indigo-900/50 hover:border-indigo-600 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
+                    >
+                      <Sparkles className="w-3 h-3 text-indigo-400" />
+                      <span>Impulsionar com Algoritmo de Dores</span>
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       )}
 

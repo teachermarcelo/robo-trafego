@@ -199,58 +199,38 @@ export const MetaAdsBoosterTab: React.FC<MetaAdsBoosterTabProps> = ({
       id: 'act_715423177709804',
       rawId: '715423177709804',
       name: 'FluentImmersion (Principal - Ativa)',
-      portfolio: 'FluentImmersion',
+      portfolio: 'FluentImmersion (Portfólio 1939178839837287)',
       portfolioId: '1939178839837287',
       status: 'active',
       activeCreatives: 3,
       cpr: 'R$ 0,50',
+      description: 'Conta ativa principal onde rodam as campanhas de Tarefinhas TEA (R$ 9,99), Inglês (R$ 47) e Confeitaria (R$ 19,90)',
     },
     {
       id: 'act_58331048119639',
       rawId: '58331048119639',
-      name: 'fluentimmersion (Reserva)',
+      name: 'fluentimmersion (Reserva / Backup)',
       portfolio: 'FluentImmersion',
       portfolioId: '1939178839837287',
       status: 'standby',
       activeCreatives: 0,
       cpr: '-',
-    },
-    {
-      id: 'act_tarefinhas_pedagogicas',
-      rawId: 'tarefinhas_pedagogicas',
-      name: 'Tarefinhas Pedagogicas (TEA / R$ 9,99)',
-      portfolio: 'Tarefinhas Pedagogicas',
-      portfolioId: '1939178839837287',
-      status: 'ready',
-      activeCreatives: 1,
-      cpr: 'R$ 0,48',
-    },
-    {
-      id: 'act_greensphere',
-      rawId: 'greensphere',
-      name: 'Lesson Plans Greensphere (Inglês)',
-      portfolio: 'Lesson Plans Greensphere',
-      portfolioId: '1939178839837287',
-      status: 'ready',
-      activeCreatives: 0,
-      cpr: '-',
-    },
-    {
-      id: 'act_dpam_atelie',
-      rawId: 'dpam_atelie',
-      name: "D'pam ATelie (Doces & Confeitaria)",
-      portfolio: "D'pam ATelie",
-      portfolioId: '1939178839837287',
-      status: 'ready',
-      activeCreatives: 0,
-      cpr: '-',
+      description: 'Conta de contingência pronta no portfólio',
     },
   ];
 
   // Meta & Instagram Graph API credentials (defaults pre-filled from user's real accounts)
   const [metaAppId] = useState<string>('3245332218999480'); // App VIRAL SALES AI
   const [metaBusinessId] = useState<string>('1939178839837287'); // Business Portfolio
-  const [adAccountId, setAdAccountId] = useState<string>('act_715423177709804');
+  const [adAccountId, setAdAccountId] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('meta_ad_account_id');
+      if (saved && /^\d+$/.test(saved.replace(/^act_/, ''))) {
+        return saved.startsWith('act_') ? saved : `act_${saved}`;
+      }
+    }
+    return 'act_715423177709804';
+  });
   const [accountName, setAccountName] = useState<string>('FluentImmersion (715423177709804)');
   const [instagramAccount, setInstagramAccount] = useState<string>('@fluentimmersion');
   const [senderProfile, setSenderProfile] = useState<string>('@marcellospropaganda');
@@ -578,7 +558,15 @@ export const MetaAdsBoosterTab: React.FC<MetaAdsBoosterTabProps> = ({
   const handleOpenInspector = async () => {
     setIsInspectorOpen(true);
     setIsLoadingInspector(true);
-    const cleanAccountId = (adAccountId || '715423177709804').replace(/^act_/, '');
+    let cleanAccountId = (adAccountId || '715423177709804').replace(/^act_/, '');
+    if (!/^\d+$/.test(cleanAccountId)) {
+      cleanAccountId = '715423177709804';
+      setAdAccountId('act_715423177709804');
+      setAccountName('FluentImmersion (715423177709804)');
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('meta_ad_account_id', 'act_715423177709804');
+      }
+    }
 
     try {
       let data: any = null;
@@ -590,7 +578,7 @@ export const MetaAdsBoosterTab: React.FC<MetaAdsBoosterTabProps> = ({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             accessToken: graphApiToken,
-            adAccountId,
+            adAccountId: `act_${cleanAccountId}`,
           }),
         });
         const text = await resp.text();
@@ -656,9 +644,6 @@ export const MetaAdsBoosterTab: React.FC<MetaAdsBoosterTabProps> = ({
           adAccounts: [
             { id: 'act_715423177709804', name: 'FluentImmersion (Principal - Ativa)', status: 1 },
             { id: 'act_58331048119639', name: 'fluentimmersion (Reserva)', status: 1 },
-            { id: 'act_tarefinhas_pedagogicas', name: 'Tarefinhas Pedagogicas (TEA)', status: 1 },
-            { id: 'act_greensphere', name: 'Lesson Plans Greensphere', status: 1 },
-            { id: 'act_dpam_atelie', name: "D'pam ATelie", status: 1 },
           ],
           liveCampaigns: [
             { id: 'camp-01', name: 'Campanha de Tráfego - Criativos TEA & Produtos', status: 'ACTIVE' },
@@ -733,7 +718,15 @@ export const MetaAdsBoosterTab: React.FC<MetaAdsBoosterTabProps> = ({
 
     setIsPinging(true);
     setApiPingStatus(null);
-    const cleanAccountId = (adAccountId || '715423177709804').replace(/^act_/, '');
+    let cleanAccountId = (adAccountId || '715423177709804').replace(/^act_/, '');
+    if (!/^\d+$/.test(cleanAccountId)) {
+      cleanAccountId = '715423177709804';
+      setAdAccountId('act_715423177709804');
+      setAccountName('FluentImmersion (715423177709804)');
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('meta_ad_account_id', 'act_715423177709804');
+      }
+    }
 
     try {
       let data: any = null;
@@ -745,7 +738,7 @@ export const MetaAdsBoosterTab: React.FC<MetaAdsBoosterTabProps> = ({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             accessToken: tokenToUse,
-            adAccountId,
+            adAccountId: `act_${cleanAccountId}`,
           }),
         });
         const text = await resp.text();
@@ -921,8 +914,15 @@ export const MetaAdsBoosterTab: React.FC<MetaAdsBoosterTabProps> = ({
   // Save Config to Firebase
   const handleSaveConfig = async () => {
     try {
+      const validAccountId = /^\d+$/.test(adAccountId.replace(/^act_/, '')) ? adAccountId : 'act_715423177709804';
+      if (validAccountId !== adAccountId) {
+        setAdAccountId(validAccountId);
+      }
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('meta_ad_account_id', validAccountId);
+      }
       await saveMetaAdsConfigToFirebase({
-        adAccountId,
+        adAccountId: validAccountId,
         accountName,
         accessToken: graphApiToken,
         instagramBusinessId: instagramAccount,
@@ -1103,18 +1103,18 @@ export const MetaAdsBoosterTab: React.FC<MetaAdsBoosterTabProps> = ({
           </div>
         )}
 
-        {/* Portfolio Accounts Switcher (The 5 real accounts from user's Ads Manager) */}
-        <div className="pt-2 border-t border-slate-800/80 space-y-2">
-          <div className="flex items-center justify-between">
+        {/* Portfolio Accounts Switcher (Real accounts from user's Ads Manager) */}
+        <div className="pt-2 border-t border-slate-800/80 space-y-3">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
             <span className="text-[11px] font-bold uppercase text-slate-400">
-              Alternar entre as Contas Reais do seu Portfólio Empresarial ({REAL_META_ACCOUNTS.length} contas mapeadas):
+              Contas de Anúncios Reais no Portfólio Empresarial (BM 1939178839837287):
             </span>
             <span className="text-[10px] text-emerald-400 font-mono">
               ● Conta Ativa: {accountName}
             </span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {REAL_META_ACCOUNTS.map((acc) => {
               const isSelected = adAccountId === acc.id;
               return (
@@ -1124,32 +1124,64 @@ export const MetaAdsBoosterTab: React.FC<MetaAdsBoosterTabProps> = ({
                   onClick={() => {
                     setAdAccountId(acc.id);
                     setAccountName(`${acc.name} (${acc.rawId})`);
+                    if (typeof window !== 'undefined') {
+                      localStorage.setItem('meta_ad_account_id', acc.id);
+                    }
                   }}
-                  className={`p-2.5 rounded-xl text-left border transition cursor-pointer flex flex-col justify-between ${
+                  className={`p-3.5 rounded-2xl text-left border transition cursor-pointer flex flex-col justify-between ${
                     isSelected
-                      ? 'bg-blue-950 border-blue-500 shadow-md shadow-blue-950'
+                      ? 'bg-blue-950/80 border-cyan-400 shadow-lg shadow-cyan-950/50 ring-1 ring-cyan-500/30'
                       : 'bg-slate-950 border-slate-800 hover:border-slate-700'
                   }`}
                 >
-                  <div className="space-y-0.5">
-                    <span className="text-[10px] text-slate-400 font-mono block truncate">
-                      {acc.portfolio}
-                    </span>
-                    <span className="text-xs font-bold text-white block truncate">
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-slate-400 font-mono block">
+                        {acc.portfolio}
+                      </span>
+                      <span className={acc.status === 'active' ? 'text-emerald-400 font-bold text-[10px]' : 'text-slate-400 text-[10px]'}>
+                        {acc.status === 'active' ? '● Conta Principal Ativa' : '● Standby / Contingência'}
+                      </span>
+                    </div>
+                    <span className="text-sm font-bold text-white block">
                       {acc.name}
                     </span>
+                    <p className="text-[11px] text-slate-400">
+                      {acc.description}
+                    </p>
                   </div>
-                  <div className="flex items-center justify-between pt-1.5 mt-1 border-t border-slate-800/60 text-[10px]">
-                    <span className="font-mono text-cyan-300">
-                      ID: {acc.rawId.slice(0, 8)}...
+                  <div className="flex items-center justify-between pt-2.5 mt-2.5 border-t border-slate-800/60 text-[11px]">
+                    <span className="font-mono text-cyan-300 font-bold">
+                      ID: {acc.id}
                     </span>
-                    <span className={acc.status === 'active' ? 'text-emerald-400 font-bold' : 'text-slate-400'}>
-                      {acc.status === 'active' ? '● Em Anúncio' : 'Pronto'}
+                    <span className={`text-xs font-bold ${isSelected ? 'text-cyan-400' : 'text-slate-500'}`}>
+                      {isSelected ? '✓ Selecionada para API' : 'Clique para Selecionar'}
                     </span>
                   </div>
                 </button>
               );
             })}
+          </div>
+
+          {/* Active Campaigns inside the Primary Account */}
+          <div className="p-3 bg-slate-950/90 rounded-xl border border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+              <span className="text-slate-300">
+                <strong>3 Campanhas & Produtos Ativos nesta Conta ({adAccountId}):</strong>
+              </span>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap text-[11px]">
+              <span className="px-2.5 py-1 rounded-lg bg-pink-950/80 text-pink-300 border border-pink-700/50 font-bold">
+                🌸 Tarefinhas TEA (R$ 9,99)
+              </span>
+              <span className="px-2.5 py-1 rounded-lg bg-blue-950/80 text-blue-300 border border-blue-700/50 font-bold">
+                🇺🇸 FluentImmersion Inglês (R$ 47,00)
+              </span>
+              <span className="px-2.5 py-1 rounded-lg bg-purple-950/80 text-purple-300 border border-purple-700/50 font-bold">
+                🧁 Doces & Confeitaria (R$ 19,90)
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -2640,8 +2672,11 @@ export const MetaAdsBoosterTab: React.FC<MetaAdsBoosterTabProps> = ({
                   type="text"
                   value={adAccountId}
                   onChange={(e) => setAdAccountId(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono text-cyan-300 focus:outline-none focus:border-cyan-500"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono text-cyan-300 focus:outline-none focus:border-cyan-500 font-bold"
                 />
+                <span className="text-[10px] text-slate-400 block">
+                  💡 Deve ser numérico com ou sem prefixo (ex: <code className="text-cyan-300 font-bold">act_715423177709804</code>). Campanhas de Tarefinhas TEA, Inglês e Confeitaria rodam dentro desta conta!
+                </span>
               </div>
 
               <div className="space-y-1.5">

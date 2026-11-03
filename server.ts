@@ -1219,7 +1219,10 @@ app.post('/api/meta/verify-credentials', async (req, res) => {
       return res.status(400).json({ error: 'Access token é obrigatório' });
     }
 
-    const cleanAccountId = (adAccountId || '715423177709804').replace(/^act_/, '');
+    let cleanAccountId = (adAccountId || '715423177709804').replace(/^act_/, '');
+    if (!/^\d+$/.test(cleanAccountId)) {
+      cleanAccountId = '715423177709804';
+    }
 
     // Call real Meta Graph API v19.0 to inspect token & ad account
     const metaUrl = `https://graph.facebook.com/v19.0/act_${cleanAccountId}?fields=name,account_status,currency,amount_spent,balance,business_name&access_token=${accessToken}`;
@@ -1272,7 +1275,10 @@ app.post('/api/meta/inspect-full-hierarchy', async (req, res) => {
       return res.status(400).json({ error: 'Access token é obrigatório' });
     }
 
-    const cleanAccountId = (adAccountId || '715423177709804').replace(/^act_/, '');
+    let cleanAccountId = (adAccountId || '715423177709804').replace(/^act_/, '');
+    if (!/^\d+$/.test(cleanAccountId)) {
+      cleanAccountId = '715423177709804';
+    }
 
     // 1. Query authenticated user
     let userProfile = { id: 'me', name: 'Usuário Meta Autenticado' };
@@ -1367,9 +1373,6 @@ app.post('/api/meta/inspect-full-hierarchy', async (req, res) => {
       adAccounts: adAccounts.length > 0 ? adAccounts : [
         { id: 'act_715423177709804', name: 'FluentImmersion (Principal - Ativa)', status: 1 },
         { id: 'act_58331048119639', name: 'fluentimmersion (Reserva)', status: 1 },
-        { id: 'act_tarefinhas_pedagogicas', name: 'Tarefinhas Pedagogicas (TEA)', status: 1 },
-        { id: 'act_greensphere', name: 'Lesson Plans Greensphere', status: 1 },
-        { id: 'act_dpam_atelie', name: "D'pam ATelie", status: 1 },
       ],
       liveCampaigns: liveCampaigns.length > 0 ? liveCampaigns : [
         { id: 'camp-01', name: 'Campanha de Tráfego - Criativos TEA & Produtos', status: 'ACTIVE' }
@@ -1385,7 +1388,10 @@ app.post('/api/meta/inspect-full-hierarchy', async (req, res) => {
 app.post('/api/meta/fetch-live-ads', async (req, res) => {
   try {
     const { accessToken, adAccountId } = req.body;
-    const cleanAccountId = (adAccountId || '715423177709804').replace(/^act_/, '');
+    let cleanAccountId = (adAccountId || '715423177709804').replace(/^act_/, '');
+    if (!/^\d+$/.test(cleanAccountId)) {
+      cleanAccountId = '715423177709804';
+    }
 
     if (!accessToken) {
       // Return known live baseline from the user's screenshot

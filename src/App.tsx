@@ -23,6 +23,7 @@ import { VercelModal } from './components/VercelModal';
 import { CustomerLeadsModal } from './components/CustomerLeadsModal';
 import { MetaAdsBoosterTab } from './components/MetaAdsBoosterTab';
 import { RoboDivulgadorCidades } from './components/RoboDivulgadorCidades';
+import { BrevoEmailWhatsAppTab } from './components/BrevoEmailWhatsAppTab';
 import { getCampaignSlug } from './utils/campaignSlug';
 import { INITIAL_CAMPAIGNS } from './data/defaultCampaigns';
 import { Campaign, TrackingEvent, PainPointData, PushNotification, CustomerLead } from './types';
@@ -872,6 +873,13 @@ export default function App() {
               };
               setNotifications((prev) => [notif, ...prev]);
             }}
+            onNavigateTab={(tab) => setActiveTab(tab)}
+          />
+        )}
+
+        {activeTab === 'brevo_disparador' && (
+          <BrevoEmailWhatsAppTab
+            campaigns={campaigns}
             onNavigateTab={(tab) => setActiveTab(tab)}
           />
         )}

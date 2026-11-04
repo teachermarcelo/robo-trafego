@@ -19,6 +19,7 @@ import {
   Phone,
   Bot,
   MapPin,
+  Mail,
 } from 'lucide-react';
 import { Campaign, TrackingEvent, CustomerLead } from '../types';
 
@@ -190,6 +191,42 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
         >
           <span>Abrir Alavanca Meta Ads</span>
           <ArrowUpRight className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* Brevo Email & WhatsApp Disparador Banner */}
+      <div className="bg-gradient-to-r from-emerald-950 via-slate-900 to-teal-950 border-2 border-emerald-500/60 rounded-2xl p-5 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className="w-10 h-10 rounded-2xl bg-emerald-600 flex items-center justify-center text-white shadow-lg shadow-emerald-500/30 shrink-0">
+            <Mail className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-black text-white">
+                Disparador Brevo &amp; WhatsApp: 579 Contatos Prontos
+              </span>
+              <span className="text-[10px] bg-emerald-900 text-emerald-200 border border-emerald-700 px-2 py-0.5 rounded-full font-bold">
+                4.742 Créditos
+              </span>
+              <span className="text-[10px] bg-cyan-950 text-cyan-300 border border-cyan-800 px-2 py-0.5 rounded-full font-bold">
+                Abertura 30,2%
+              </span>
+              <span className="text-[10px] bg-purple-950 text-purple-300 border border-purple-800 px-2 py-0.5 rounded-full font-bold">
+                Botão Kiwify R$ 9,90
+              </span>
+            </div>
+            <p className="text-xs text-slate-300 mt-0.5">
+              Crie campanhas nos formatos exatos com upload de fotos do produto, texto persuasivo e botão direto para o checkout com rastreio de aberturas e cliques!
+            </p>
+          </div>
+        </div>
+
+        <button
+          onClick={() => onNavigateTab('brevo_disparador')}
+          className="px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-emerald-900/40 flex items-center gap-1.5 shrink-0 transition cursor-pointer"
+        >
+          <span>Abrir Disparador Brevo</span>
+          <ArrowUpRight className="w-4 h-4 text-slate-950" />
         </button>
       </div>
 

@@ -87,7 +87,7 @@ export interface TrackingEvent {
   };
   device: 'mobile' | 'desktop' | 'tablet';
   ageBracket: '18-24' | '25-34' | '35-44' | '45-54' | '55+';
-  source: 'tiktok' | 'pinterest' | 'instagram' | 'whatsapp' | 'google_organic' | 'meta_ads';
+  source: 'tiktok' | 'pinterest' | 'instagram' | 'whatsapp' | 'google_organic' | 'meta_ads' | 'brevo_email';
   amount?: number;
   leadScore?: number;
   durationSeconds?: number;

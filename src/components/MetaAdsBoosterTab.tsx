@@ -1379,6 +1379,16 @@ export const MetaAdsBoosterTab: React.FC<MetaAdsBoosterTabProps> = ({
 
       <div className="flex items-center gap-2 bg-slate-900 p-2 rounded-2xl border border-slate-800 overflow-x-auto">
         <button
+          onClick={() => onNavigateTab('robo_cidades')}
+          className="px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 transition whitespace-nowrap cursor-pointer bg-gradient-to-r from-emerald-600 via-teal-600 to-indigo-600 text-white shadow-lg hover:brightness-110 active:scale-95"
+          title="Abrir o Robô Divulgador com segmentação por cidades e saldo integrado"
+        >
+          <Bot className="w-4 h-4 text-emerald-300" />
+          <span>🤖 Robô Divulgador & Cidades</span>
+          <span className="px-1.5 py-0.2 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black">1ª Venda</span>
+        </button>
+
+        <button
           onClick={() => setActiveSubTab('posts_automation')}
           className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 transition whitespace-nowrap cursor-pointer ${
             activeSubTab === 'posts_automation'

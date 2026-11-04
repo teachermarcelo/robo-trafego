@@ -22,6 +22,7 @@ import { SupabaseModal } from './components/SupabaseModal';
 import { VercelModal } from './components/VercelModal';
 import { CustomerLeadsModal } from './components/CustomerLeadsModal';
 import { MetaAdsBoosterTab } from './components/MetaAdsBoosterTab';
+import { RoboDivulgadorCidades } from './components/RoboDivulgadorCidades';
 import { getCampaignSlug } from './utils/campaignSlug';
 import { INITIAL_CAMPAIGNS } from './data/defaultCampaigns';
 import { Campaign, TrackingEvent, PainPointData, PushNotification, CustomerLead } from './types';
@@ -850,6 +851,25 @@ export default function App() {
             onSimulateConversion={handleSimulateQuickConversion}
             onResetAllMetrics={handleResetToRealMode}
             onOpenCustomerModal={() => setIsCustomerModalOpen(true)}
+          />
+        )}
+
+        {activeTab === 'robo_cidades' && (
+          <RoboDivulgadorCidades
+            campaigns={campaigns}
+            onAddTrackingEvent={handleAddTrackingEvent}
+            onSimulateSale={(customerName, city, amount) => {
+              const notif: PushNotification = {
+                id: `notif-${Date.now()}`,
+                title: '🎉 1ª Venda Aprovada no Pix!',
+                message: `Comprador: ${customerName} (${city}) • R$ ${amount.toFixed(2).replace('.', ',')}. Material enviado!`,
+                time: 'Agora mesmo',
+                type: 'sale',
+                read: false,
+              };
+              setNotifications((prev) => [notif, ...prev]);
+            }}
+            onNavigateTab={(tab) => setActiveTab(tab)}
           />
         )}
 

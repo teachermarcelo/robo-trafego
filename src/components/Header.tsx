@@ -12,6 +12,7 @@ import {
   LayoutTemplate,
   Target,
   Zap,
+  Bot,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -43,6 +44,7 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const tabs = [
     { id: 'dashboard', label: 'Dashboard & Métricas', icon: TrendingUp },
+    { id: 'robo_cidades', label: '🤖 Robô Divulgador & Cidades', icon: Bot, badge: '🔥 Destravar 1ª Venda' },
     { id: 'meta_ads', label: 'Alavanca Meta Ads', icon: Zap, badge: '🚀 10x Vendas' },
     { id: 'landing_builder', label: 'Criar / Editar Landing Page', icon: LayoutTemplate, badge: 'Editar R$' },
     { id: 'lead_finder', label: 'Achar Pessoas & Disparo Anti-Bloqueio', icon: Target, badge: 'Prospecção' },

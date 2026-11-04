@@ -17,6 +17,8 @@ import {
   Target,
   MessageSquare,
   Phone,
+  Bot,
+  MapPin,
 } from 'lucide-react';
 import { Campaign, TrackingEvent, CustomerLead } from '../types';
 
@@ -123,6 +125,39 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
             )}
           </div>
         </div>
+      </div>
+
+      {/* Robô Divulgador por Cidades & Saldo Integrado (Destravar 1ª Venda) */}
+      <div className="bg-gradient-to-r from-emerald-950 via-slate-900 to-indigo-950 border-2 border-emerald-500/80 rounded-2xl p-5 shadow-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center text-white shadow-lg shadow-emerald-500/30 shrink-0">
+            <Bot className="w-6 h-6 animate-pulse" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-black text-white">
+                🤖 Robô Divulgador Autônomo & Disparo por Cidades
+              </span>
+              <span className="text-[10px] bg-amber-950 text-amber-300 border border-amber-700 px-2 py-0.5 rounded-full font-bold">
+                🔥 Destravar 1ª Venda no Pix
+              </span>
+              <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded-full font-bold">
+                Pague Direto Aqui
+              </span>
+            </div>
+            <p className="text-xs text-slate-300 mt-1">
+              O robô entra nas contas (@fluentimmersion), localiza mães e pedagogas em <strong>Curitiba, São Paulo, Rio, BH</strong> e envia Direct com a foto da apostila de R$ 9,90. Acompanhe os envios ao vivo!
+            </p>
+          </div>
+        </div>
+
+        <button
+          onClick={() => onNavigateTab('robo_cidades')}
+          className="px-5 py-3 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-emerald-900/40 flex items-center gap-2 shrink-0 transition cursor-pointer transform hover:scale-105 active:scale-95"
+        >
+          <span>Ligar Robô por Cidades</span>
+          <ArrowUpRight className="w-4 h-4 text-slate-950" />
+        </button>
       </div>
 
       {/* Meta Ads Active Campaign Detected Banner */}

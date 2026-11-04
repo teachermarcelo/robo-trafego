@@ -1361,18 +1361,55 @@ export const MetaAdsBoosterTab: React.FC<MetaAdsBoosterTabProps> = ({
         )}
 
         {apiPingStatus && (
-          <div className="p-3 bg-emerald-950/80 border border-emerald-600/60 rounded-xl text-xs text-emerald-300 flex items-center justify-between gap-2 animate-in fade-in">
-            <div className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span>{apiPingStatus}</span>
+          <div
+            className={`p-4 rounded-xl text-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-3 animate-in fade-in ${
+              apiPingStatus.includes('SUCESSO') || apiPingStatus.includes('✅')
+                ? 'bg-emerald-950/90 border-2 border-emerald-500/80 text-emerald-200'
+                : apiPingStatus.includes('Session has expired') || apiPingStatus.includes('expirado') || apiPingStatus.includes('expired')
+                ? 'bg-gradient-to-r from-amber-950/90 via-slate-900 to-rose-950/80 border-2 border-amber-500 text-amber-200 shadow-xl'
+                : 'bg-rose-950/90 border-2 border-rose-500/80 text-rose-200'
+            }`}
+          >
+            <div className="flex items-start gap-2.5">
+              {apiPingStatus.includes('SUCESSO') || apiPingStatus.includes('✅') ? (
+                <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+              ) : (
+                <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5 animate-bounce" />
+              )}
+              <div className="space-y-1">
+                <div className="font-semibold leading-relaxed">
+                  {apiPingStatus}
+                </div>
+                {(apiPingStatus.includes('Session has expired') || apiPingStatus.includes('expirado')) && (
+                  <p className="text-[11px] text-amber-300/90">
+                    💡 <strong>Por que isso acontece?</strong> Os tokens temporários gerados no Graph API Explorer têm validade de 1 a 2 horas por segurança da Meta. Para voltar a disparar e ler dados, basta gerar um novo token ou usar um Token de Sistema Permanente.
+                  </p>
+                )}
+              </div>
             </div>
-            <button
-              type="button"
-              onClick={() => setApiPingStatus(null)}
-              className="text-emerald-400 hover:text-white font-bold text-xs px-2 cursor-pointer"
-            >
-              ✕
-            </button>
+
+            <div className="flex items-center gap-2 self-end md:self-center shrink-0">
+              {(apiPingStatus.includes('Session has expired') || apiPingStatus.includes('expirado') || apiPingStatus.includes('expired')) && (
+                <a
+                  href={`https://developers.facebook.com/tools/explorer/?method=GET&path=act_${adAccountId.replace('act_', '')}&version=v19.0`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-md transition"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Renovar Token Agora</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              )}
+              <button
+                type="button"
+                onClick={() => setApiPingStatus(null)}
+                className="text-slate-400 hover:text-white font-bold text-xs p-1 cursor-pointer"
+                title="Fechar aviso"
+              >
+                ✕
+              </button>
+            </div>
           </div>
         )}
       </div>

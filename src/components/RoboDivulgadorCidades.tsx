@@ -1037,6 +1037,84 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
         </div>
       </div>
 
+      {/* GUIA DE DISPAROS REAIS & COMO ACONTECEM AS VENDAS VERDADEIRAS */}
+      <div className="bg-gradient-to-r from-blue-950/80 via-slate-900 to-indigo-950/80 border-2 border-cyan-500/80 rounded-3xl p-6 shadow-2xl space-y-4">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-cyan-800/40 pb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-cyan-500/20 border border-cyan-400 flex items-center justify-center text-cyan-300">
+              <HelpCircle className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-base sm:text-lg font-black text-white">
+                Como Funcionam os Disparos Reais? Por que o Instagram não envia sozinho para desconhecidos?
+              </h3>
+              <p className="text-xs text-cyan-200/90">
+                Entenda a engenharia real de tráfego, anti-bloqueio da Meta e como a 1ª venda é destravada:
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => onNavigateTab('meta_ads')}
+            className="px-3 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs flex items-center gap-1.5 transition shadow"
+          >
+            <span>Ver Alavanca Meta Ads</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+          {/* Pillar 1: Meta Ads Auto-DM */}
+          <div className="p-4 bg-slate-950/90 rounded-2xl border border-slate-800 space-y-2 flex flex-col justify-between">
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2 text-pink-400 font-bold">
+                <Bot className="w-4 h-4" />
+                <span>1. Disparo Automático (ManyChat)</span>
+              </div>
+              <p className="text-slate-300 leading-relaxed text-[11px]">
+                <strong>100% Automático no Direct:</strong> Quando alguém comenta <em>"EU QUERO"</em> ou <em>"VALOR"</em> em um anúncio ou post seu no Instagram, o robô responde o comentário em 3 segundos e <strong>dispara mensagem privada no Direct</strong> com o link da Kiwify de R$ 9,90!
+              </p>
+            </div>
+            <div className="p-2.5 rounded-xl bg-amber-950/40 border border-amber-800/50 text-[10px] text-amber-200">
+              ⚠️ <strong>Atenção:</strong> Seu Token da Meta expirou às 10h de ontem. Para esse disparo automático voltar a funcionar, renove o token na aba <em>"Alavanca Meta Ads"</em>.
+            </div>
+          </div>
+
+          {/* Pillar 2: 1-Click Outreach */}
+          <div className="p-4 bg-slate-950/90 rounded-2xl border border-slate-800 space-y-2 flex flex-col justify-between">
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2 text-emerald-400 font-bold">
+                <Send className="w-4 h-4" />
+                <span>2. Prospecção 1-Clique (Comunidades)</span>
+              </div>
+              <p className="text-slate-300 leading-relaxed text-[11px]">
+                <strong>Anti-Bloqueio Seguro:</strong> A Meta proíbe robôs de invadirem contas de estranhos enviando mensagens frias não solicitadas (bloqueia o perfil em 10 minutos). Por isso, na seção <em>"Comunidades Verificadas"</em>, ao clicar em <strong>"Abrir Instagram Real"</strong>, o robô já copia o script pronto e abre o perfil para você colar diretamente.
+              </p>
+            </div>
+            <div className="p-2.5 rounded-xl bg-emerald-950/40 border border-emerald-800/50 text-[10px] text-emerald-200">
+              🛡️ <strong>100% Seguro:</strong> Usa a sua própria sessão legítima do Instagram, sem risco algum de banimento.
+            </div>
+          </div>
+
+          {/* Pillar 3: Kiwify Webhook */}
+          <div className="p-4 bg-slate-950/90 rounded-2xl border border-slate-800 space-y-2 flex flex-col justify-between">
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2 text-cyan-400 font-bold">
+                <DollarSign className="w-4 h-4" />
+                <span>3. Venda Real Aprovada (Kiwify)</span>
+              </div>
+              <p className="text-slate-300 leading-relaxed text-[11px]">
+                <strong>Captura Instantânea:</strong> Seu Webhook da Kiwify (<code>/api/webhook/kiwify</code>) já está no ar. No segundo em que uma mãe passar o cartão ou pagar o Pix de R$ 9,90 no seu link oficial, a Kiwify avisa este sistema na hora, toca o sino de venda e libera o material!
+              </p>
+            </div>
+            <div className="p-2.5 rounded-xl bg-blue-950/40 border border-blue-800/50 text-[10px] text-cyan-200">
+              💳 <strong>Link Oficial Cadastrado:</strong> <span className="font-mono text-white">pay.kiwify.com.br/HE5xbnp</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* SECTION 5: ROBOT CONTROLS & LIVE TERMINAL FEED */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column: Robot Switch & Config */}

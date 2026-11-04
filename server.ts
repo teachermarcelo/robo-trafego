@@ -856,9 +856,10 @@ interface ServerCustomerLead {
   instagramHandle?: string;
   status: 'comprador_aprovado' | 'pix_gerado' | 'carrinho_abandonado' | 'duvida_whatsapp' | 'amostra_gratis';
   amount?: number;
-  source: 'hotmart_webhook' | 'landing_page_whatsapp' | 'landing_sample' | 'direct_chat';
+  source: 'hotmart_webhook' | 'kiwify_webhook' | 'landing_page_whatsapp' | 'landing_sample' | 'direct_chat';
   createdAt: string;
   notes?: string;
+  isReal?: boolean;
 }
 
 let serverCustomerLeads: ServerCustomerLead[] = [
@@ -1038,6 +1039,87 @@ app.post('/api/hotmart/webhook', (req, res) => {
   } catch (err: any) {
     console.error('Error processing Hotmart webhook:', err);
     return res.status(500).json({ error: 'Erro ao processar webhook da Hotmart' });
+  }
+});
+
+// POST: Official Kiwify Webhook Listener (Real Sales)
+app.post(['/api/webhook/kiwify', '/api/kiwify/webhook'], (req, res) => {
+  try {
+    const body = req.body || {};
+    console.log('Kiwify Webhook Received:', JSON.stringify(body));
+
+    const orderStatus = (body.order_status || body.status || 'paid').toLowerCase();
+    const customer = body.Customer || body.customer || {};
+    const commissions = body.Commissions || body.commissions || {};
+    const product = body.Product || body.product || {};
+
+    const fullName = customer.full_name || customer.name || body.name || 'Comprador Kiwify';
+    const email = customer.email || body.email;
+    let phone = String(customer.mobile || customer.phone || body.mobile || '').replace(/\D/g, '');
+    if (phone && !phone.startsWith('55') && phone.length <= 11) {
+      phone = `55${phone}`;
+    }
+
+    let price = 9.90;
+    if (commissions.charge_amount) {
+      price = Number(commissions.charge_amount) / 100;
+    } else if (body.amount) {
+      price = Number(body.amount) > 100 ? Number(body.amount) / 100 : Number(body.amount);
+    }
+
+    const isPaid = orderStatus === 'paid' || orderStatus === 'approved' || orderStatus === 'complete';
+
+    const newLead: ServerCustomerLead = {
+      id: `kiwify-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      campaignId: 'camp-tarefinhas-autismo',
+      campaignTitle: product.product_name || body.product_name || '+ 100 Tarefinha Educação Infantil e Também para Criança Autista',
+      name: fullName,
+      phone: phone || '5541998778348',
+      email,
+      status: isPaid ? 'comprador_aprovado' : 'pix_gerado',
+      amount: price,
+      source: 'kiwify_webhook',
+      createdAt: new Date().toISOString(),
+      notes: `Venda Real Kiwify • Status: ${orderStatus} • Pedido: ${body.order_id || 'KW-' + Date.now().toString().slice(-6)}`,
+      isReal: true,
+    };
+
+    serverCustomerLeads.unshift(newLead);
+
+    // Conversion tracking event
+    const conversionEvent: TrackingEvent = {
+      id: `evt-conv-kw-${Date.now()}`,
+      campaignId: 'camp-tarefinhas-autismo',
+      campaignTitle: newLead.campaignTitle,
+      niche: 'psicopedagogia',
+      type: 'conversion',
+      timestamp: new Date().toISOString(),
+      geo: {
+        state: 'PR',
+        city: 'Kiwify Real',
+        country: 'Brasil',
+      },
+      device: 'mobile',
+      ageBracket: '25-34',
+      source: 'instagram',
+      amount: price,
+      leadScore: 100,
+      customerName: newLead.name,
+      customerPhone: newLead.phone,
+      customerEmail: newLead.email,
+    };
+    trackingEvents.unshift(conversionEvent);
+
+    return res.status(200).json({
+      status: 200,
+      received: true,
+      message: 'Kiwify Webhook processado com sucesso!',
+      orderId: body.order_id,
+      leadId: newLead.id,
+    });
+  } catch (err: any) {
+    console.error('Error processing Kiwify webhook:', err);
+    return res.status(500).json({ error: 'Erro ao processar webhook da Kiwify' });
   }
 });
 

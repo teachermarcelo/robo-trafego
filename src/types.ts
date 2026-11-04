@@ -110,10 +110,11 @@ export interface CustomerLead {
   instagramHandle?: string;
   status: 'comprador_aprovado' | 'pix_gerado' | 'carrinho_abandonado' | 'duvida_whatsapp' | 'amostra_gratis';
   amount?: number;
-  source: 'hotmart_webhook' | 'landing_page_whatsapp' | 'landing_sample' | 'direct_chat' | 'meta_ads';
+  source: 'hotmart_webhook' | 'kiwify_webhook' | 'landing_page_whatsapp' | 'landing_sample' | 'direct_chat' | 'meta_ads';
   createdAt: string;
   notes?: string;
   adCreativeName?: string;
+  isReal?: boolean;
 }
 
 export interface AIReport {
@@ -132,4 +133,6 @@ export interface PushNotification {
   time: string;
   type: 'sale' | 'traffic' | 'security' | 'tip';
   read: boolean;
+  isReal?: boolean;
 }
+

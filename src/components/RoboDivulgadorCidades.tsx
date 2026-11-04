@@ -32,7 +32,12 @@ import {
   BellRing,
   HelpCircle,
   Clock,
-  ArrowRight
+  ArrowRight,
+  Terminal,
+  Crosshair,
+  Radar,
+  Share2,
+  Volume2
 } from 'lucide-react';
 import { Campaign, TrackingEvent, CustomerLead } from '../types';
 import { getCampaignSlug } from '../utils/campaignSlug';
@@ -68,9 +73,24 @@ interface DispatchLog {
   messagePreview: string;
   status: 'enviado' | 'lido' | 'interagiu' | 'converteu';
   amount?: number;
+  isReal?: boolean;
 }
 
-// Web Audio API Cash Register sound synthesizer (zero external dependencies)
+interface HotLead {
+  id: string;
+  name: string;
+  handle: string;
+  phone: string;
+  city: string;
+  state: string;
+  detectedPain: string;
+  sourceCommunity: string;
+  detectedTime: string;
+  leadScore: number;
+  recommendedScript: string;
+}
+
+// Web Audio API Cash Register sound synthesizer
 const playSaleCelebrationSound = () => {
   try {
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
@@ -84,7 +104,7 @@ const playSaleCelebrationSound = () => {
     osc1.type = 'triangle';
     osc1.frequency.setValueAtTime(987.77, now); // B5
     osc1.frequency.exponentialRampToValueAtTime(1318.51, now + 0.15); // E6
-    gain1.gain.setValueAtTime(0.3, now);
+    gain1.gain.setValueAtTime(0.35, now);
     gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.8);
     osc1.connect(gain1);
     gain1.connect(ctx.destination);
@@ -97,7 +117,7 @@ const playSaleCelebrationSound = () => {
     osc2.type = 'sine';
     osc2.frequency.setValueAtTime(1567.98, now + 0.12); // G6
     osc2.frequency.exponentialRampToValueAtTime(2093.00, now + 0.25); // C7
-    gain2.gain.setValueAtTime(0.35, now + 0.12);
+    gain2.gain.setValueAtTime(0.4, now + 0.12);
     gain2.gain.exponentialRampToValueAtTime(0.001, now + 1.2);
     osc2.connect(gain2);
     gain2.connect(ctx.destination);
@@ -183,27 +203,60 @@ const DEFAULT_CITIES: TargetCity[] = [
   },
 ];
 
-const SAMPLE_LEAD_NAMES: { [key: string]: { name: string; handle: string; phone: string }[] } = {
-  Curitiba: [
-    { name: 'Patrícia Medeiros (Mãe do Theo)', handle: '@paty_cwb_maedotheo', phone: '5541998778348' },
-    { name: 'Juliana Ferreira (Psicopedagoga)', handle: '@ju.psicopedagoga.pr', phone: '5541991234567' },
-    { name: 'Camila Alcantara', handle: '@camila_atividades_cwb', phone: '5541988223344' },
-    { name: 'Luciana Batel Kids', handle: '@lu_kids_curitiba', phone: '5541977665544' },
-  ],
-  'São Paulo (Capital & ABC)': [
-    { name: 'Renata Albuquerque (Mãe Atípica)', handle: '@renata.mae.atipica.sp', phone: '5511987654321' },
-    { name: 'Professora Débora Lima', handle: '@prof.debora.educainfantil', phone: '5511976541234' },
-    { name: 'Mariana Duarte (Mãe de 2)', handle: '@mariana_maternidadesp', phone: '5511999887766' },
-  ],
-  'Rio de Janeiro': [
-    { name: 'Beatriz Vasconcelos', handle: '@bia_maedobe_rio', phone: '5521998887766' },
-    { name: 'Carla Nogueira (Tia Carla)', handle: '@tiacarla_alfabetizacao', phone: '5521981234567' },
-  ],
-  'Belo Horizonte': [
-    { name: 'Fernanda Silveira (Mãe BH)', handle: '@fernandamaebh', phone: '5531992223344' },
-    { name: 'Tatiana Rezende', handle: '@tati_pedagogia_mg', phone: '5531988887711' },
-  ],
-};
+const INITIAL_HOT_LEADS: HotLead[] = [
+  {
+    id: 'lead-hot-1',
+    name: 'Patrícia Medeiros (Mãe do Theo)',
+    handle: 'paty_cwb_maedotheo',
+    phone: '5541998778348',
+    city: 'Curitiba',
+    state: 'PR',
+    detectedPain: '"Meu filho de 4 anos não para sentado na mesinha para fazer atividade... alguém indica algo sem tela?"',
+    sourceCommunity: '#autismocuritiba • Comentário recente',
+    detectedTime: 'Há 8 min',
+    leadScore: 99,
+    recommendedScript: 'Olá Patrícia! Vi que seu pequeno tem dificuldade de focar nas atividades. O segredo é estímulo visual lúdico sem sobrecarga: liberamos a apostila com 46 páginas por apenas R$ 9,90 no Pix hoje! Imprime na hora: https://pay.kiwify.com.br/HE5xbnp',
+  },
+  {
+    id: 'lead-hot-2',
+    name: 'Prof. Renata Albuquerque',
+    handle: 'profa.renata.pedagogasp',
+    phone: '5511976543210',
+    city: 'São Paulo',
+    state: 'SP',
+    detectedPain: '"Preciso urgente de 50 atividades lúdicas adaptadas para autismo para a turma da semana que vem! Onde acho barato?"',
+    sourceCommunity: '@pedagogiainclusivabr • Post viral',
+    detectedTime: 'Há 18 min',
+    leadScore: 100,
+    recommendedScript: 'Olá Profe Renata! Temos o pacote completo com +100 tarefinhas inclusivas prontas em PDF com gabarito por R$ 9,90 no Pix. Economize horas de planejamento no fim de semana: https://pay.kiwify.com.br/HE5xbnp',
+  },
+  {
+    id: 'lead-hot-3',
+    name: 'Mariana Duarte (Mãe de 2)',
+    handle: 'mariana_maternidadesp',
+    phone: '5511999887766',
+    city: 'Campinas',
+    state: 'SP',
+    detectedPain: '"Alguém já comprou a apostila de R$ 9,90 de tarefinhas? Vale a pena para prender a atenção?"',
+    sourceCommunity: '#maternidadereal • Stories engajados',
+    detectedTime: 'Há 32 min',
+    leadScore: 98,
+    recommendedScript: 'Oi Mariana! A apostila é 100% prática, com 46 páginas lúdicas que prendem o foco longe do celular. Apenas R$ 9,90 para imprimir quantas vezes quiser. Qualquer dúvida me chama no WhatsApp: (41) 99877-8348!',
+  },
+  {
+    id: 'lead-hot-4',
+    name: 'Fernanda Silveira',
+    handle: 'fernandamaebh',
+    phone: '5531992223344',
+    city: 'Belo Horizonte',
+    state: 'MG',
+    detectedPain: '"Socorro, não sei mais o que inventar para distrair meu pequeno sem deixar ele o dia todo no YouTube!"',
+    sourceCommunity: '@maesdebh • Grupo de acolhimento',
+    detectedTime: 'Há 45 min',
+    leadScore: 97,
+    recommendedScript: 'Oi Fernanda! As crianças cansam fácil quando o material não é lúdico. Nosso caderno de 46 tarefinhas reduz o tempo de tela em 80%. Acesso imediato em PDF por R$ 9,90: https://pay.kiwify.com.br/HE5xbnp',
+  },
+];
 
 export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
   campaigns,
@@ -218,6 +271,7 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
     price: 9.90,
     imageUrl: '/assets/aistudio/image_e9e67204.png',
     whatsappNumber: '5541998778348',
+    checkoutUrl: 'https://pay.kiwify.com.br/HE5xbnp',
   };
 
   const [selectedCampaignId, setSelectedCampaignId] = useState(defaultCampaign.id);
@@ -232,6 +286,24 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
     }
   });
 
+  // Hacker Mode Agressivo (Growth Hacker do Bem)
+  const [isHackerModeActive, setIsHackerModeActive] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('autoviral_hacker_mode') !== 'false'; // Default TRUE
+    } catch {
+      return true;
+    }
+  });
+
+  // Operation Mode: Real vs Simulation
+  const [operationMode, setOperationMode] = useState<'real_only' | 'simulation'>(() => {
+    try {
+      return (localStorage.getItem('autoviral_op_mode') as any) || 'real_only';
+    } catch {
+      return 'real_only';
+    }
+  });
+
   // Safe Speed / Anti-Ban Delay
   const [botSpeed, setBotSpeed] = useState<'safe' | 'balanced' | 'turbo'>('safe');
 
@@ -239,7 +311,7 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
   const [walletBalance, setWalletBalance] = useState<number>(() => {
     try {
       const saved = localStorage.getItem('autoviral_wallet_balance');
-      return saved ? parseFloat(saved) : 35.00; // Starts with R$ 35,00 courtesy balance
+      return saved ? parseFloat(saved) : 35.00;
     } catch {
       return 35.00;
     }
@@ -254,6 +326,14 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
   });
   const [pixCopied, setPixCopied] = useState(false);
   const [pixConfirmedSuccess, setPixConfirmedSuccess] = useState(false);
+
+  // Webhook Test State
+  const [isTestingWebhook, setIsTestingWebhook] = useState(false);
+  const [webhookTestFeedback, setWebhookTestFeedback] = useState<string | null>(null);
+  const [copiedWebhookUrl, setCopiedWebhookUrl] = useState(false);
+
+  // Copied Script feedback
+  const [copiedLeadId, setCopiedLeadId] = useState<string | null>(null);
 
   // Target Cities List
   const [cities, setCities] = useState<TargetCity[]>(() => {
@@ -279,23 +359,25 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
     return [
       {
         id: 'log-1',
-        time: '10:14:02',
+        time: '14:15:10',
         city: 'Curitiba',
         state: 'PR',
         handle: '@paty_cwb_maedotheo',
         actionType: 'dm_envio',
-        messagePreview: 'Olá Paty! Vi seu perfil e preparei a apostila com 46 atividades lúdicas sem telas por apenas R$ 9,90...',
+        messagePreview: '🥷 [HACKER DO BEM] Prospecção de dor: "Meu filho não foca". Enviado script neuro-lúdico R$ 9,90...',
         status: 'lido',
+        isReal: false,
       },
       {
         id: 'log-2',
-        time: '10:18:45',
+        time: '14:18:22',
         city: 'São Paulo',
         state: 'SP',
-        handle: '@renata.mae.atipica.sp',
+        handle: '@profa.renata.pedagogasp',
         actionType: 'link_clicado',
-        messagePreview: 'Lead acessou o checkout da apostila no Kiwify via Instagram Direct.',
+        messagePreview: '🔗 Lead clicou no link oficial do checkout da Kiwify (pay.kiwify.com.br/HE5xbnp).',
         status: 'interagiu',
+        isReal: false,
       },
     ];
   });
@@ -308,9 +390,10 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
     amount: number;
     phone: string;
     time: string;
+    isReal?: boolean;
   } | null>(null);
 
-  // New Custom City Form
+  // Custom City Form
   const [newCityName, setNewCityName] = useState('');
   const [newCityState, setNewCityState] = useState('PR');
   const [newCityAudience, setNewCityAudience] = useState('Mães com filhos de 2 a 8 anos');
@@ -320,11 +403,13 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
   useEffect(() => {
     try {
       localStorage.setItem('autoviral_bot_running', String(isBotRunning));
+      localStorage.setItem('autoviral_hacker_mode', String(isHackerModeActive));
+      localStorage.setItem('autoviral_op_mode', operationMode);
       localStorage.setItem('autoviral_wallet_balance', String(walletBalance));
       localStorage.setItem('autoviral_target_cities', JSON.stringify(cities));
       localStorage.setItem('autoviral_dispatch_logs', JSON.stringify(logs.slice(0, 100)));
     } catch {}
-  }, [isBotRunning, walletBalance, cities, logs]);
+  }, [isBotRunning, isHackerModeActive, operationMode, walletBalance, cities, logs]);
 
   // Bot Auto Dispatch Interval
   const intervalRef = useRef<any>(null);
@@ -335,7 +420,6 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
       return;
     }
 
-    // Interval based on speed: Safe (35s), Balanced (20s), Turbo (12s)
     const delayMs = botSpeed === 'safe' ? 35000 : botSpeed === 'balanced' ? 20000 : 12000;
 
     intervalRef.current = setInterval(() => {
@@ -345,18 +429,16 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [isBotRunning, botSpeed, cities, walletBalance, activeCampaign]);
+  }, [isBotRunning, botSpeed, cities, walletBalance, activeCampaign, isHackerModeActive]);
 
   // Auto Dispatch Core Logic
   const handlePerformAutoDispatch = () => {
-    // 1. Check wallet balance
     if (walletBalance < 0.08) {
       setIsBotRunning(false);
       alert('⚠️ Seu saldo para divulgações acabou. Recarregue no botão "Recarregar Saldo" para continuar os envios automáticos por cidade!');
       return;
     }
 
-    // 2. Select an active city
     const activeCities = cities.filter((c) => c.active);
     if (activeCities.length === 0) {
       setIsBotRunning(false);
@@ -365,14 +447,8 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
     }
 
     const targetCity = activeCities[Math.floor(Math.random() * activeCities.length)];
+    const lead = INITIAL_HOT_LEADS[Math.floor(Math.random() * INITIAL_HOT_LEADS.length)];
 
-    // 3. Find/generate lead profile in this city
-    const pool = SAMPLE_LEAD_NAMES[targetCity.name] || [
-      { name: `Mãe de ${targetCity.name}`, handle: `@mae_${targetCity.name.toLowerCase().replace(/[^a-z]/g, '')}`, phone: '5541998778348' },
-    ];
-    const pickedLead = pool[Math.floor(Math.random() * pool.length)];
-
-    // 4. Randomize action
     const actions: ('dm_envio' | 'comentario' | 'link_clicado' | 'pix_gerado')[] = [
       'dm_envio',
       'dm_envio',
@@ -388,13 +464,15 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
     let status: 'enviado' | 'lido' | 'interagiu' | 'converteu' = 'enviado';
 
     if (chosenAction === 'dm_envio') {
-      preview = `Olá ${pickedLead.name.split(' ')[0]}! Vi que você tem interesse em atividades infantis. Liberamos a apostila com 46 páginas por apenas R$ ${activeCampaign.price.toFixed(2).replace('.', ',')} para imprimir. Quer receber o PDF de amostra?`;
+      preview = isHackerModeActive
+        ? `🥷 [HACKER DO BEM] @${lead.handle} (${targetCity.name}) ➔ Disparado script persuasivo R$ 9,90 atacando dor: "${lead.detectedPain.slice(0, 50)}..."`
+        : `Olá ${lead.name.split(' ')[0]}! Vi seu interesse em atividades infantis. Liberamos o PDF por R$ ${activeCampaign.price.toFixed(2).replace('.', ',')}.`;
       status = 'enviado';
     } else if (chosenAction === 'comentario') {
-      preview = `Comentou em post sobre birras & foco em ${targetCity.name}: "Aqui em casa o caderno de 46 tarefinhas ajudou muito a acalmar sem precisar dar celular! Vale muito a pena."`;
+      preview = `💬 Comentou em comunidade infantil de ${targetCity.name}: "O caderno de 46 tarefinhas sem tela acalmou muito a rotina aqui em casa! Vale cada centavo de R$ 9,90."`;
       status = 'lido';
     } else if (chosenAction === 'link_clicado') {
-      preview = `${pickedLead.name} abriu a página oficial do lead e clicou no botão "Comprar Apostila no Pix".`;
+      preview = `🔗 @${lead.handle} abriu o link oficial de checkout da Kiwify (pay.kiwify.com.br/HE5xbnp).`;
       status = 'interagiu';
     }
 
@@ -403,16 +481,15 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
       time: timeStr,
       city: targetCity.name,
       state: targetCity.state,
-      handle: pickedLead.handle,
+      handle: `@${lead.handle}`,
       actionType: chosenAction,
       messagePreview: preview,
       status,
+      isReal: false,
     };
 
-    // Deduct dispatch cost from wallet (R$ 0,08 per dispatch)
     setWalletBalance((prev) => Math.max(0, parseFloat((prev - 0.08).toFixed(2))));
 
-    // Update city stats
     setCities((prev) =>
       prev.map((c) => {
         if (c.id === targetCity.id) {
@@ -428,7 +505,6 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
 
     setLogs((prev) => [newLog, ...prev.slice(0, 99)]);
 
-    // Record tracking event
     if (onAddTrackingEvent) {
       onAddTrackingEvent({
         campaignId: activeCampaign.id,
@@ -438,22 +514,23 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
         source: 'instagram',
         geo: { city: targetCity.name, state: targetCity.state, country: 'Brasil' },
         device: 'mobile',
-        customerName: pickedLead.name,
+        customerName: lead.name,
       });
     }
 
-    // Small chance (1 in 8) of converting into a real sale during auto run!
-    if (Math.random() < 0.12 && chosenAction === 'link_clicado') {
-      triggerSaleConversion(pickedLead.name, pickedLead.handle, pickedLead.phone, targetCity);
+    // In simulation mode, small chance of simulated conversion
+    if (operationMode === 'simulation' && Math.random() < 0.12 && chosenAction === 'link_clicado') {
+      triggerSaleConversion(lead.name, `@${lead.handle}`, lead.phone, targetCity, false);
     }
   };
 
-  // Immediate Sale Conversion Generator (Triggers celebration & audio)
+  // Sale Conversion Trigger
   const triggerSaleConversion = (
     buyerName: string,
     buyerHandle: string,
     phone: string,
-    city: TargetCity
+    city: TargetCity,
+    isRealSale = false
   ) => {
     playSaleCelebrationSound();
 
@@ -468,19 +545,20 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
       state: city.state,
       handle: buyerHandle,
       actionType: 'venda_confirmada',
-      messagePreview: `🎉 VENDA APROVADA NO PIX! Comprador: ${buyerName}. Material enviado automaticamente no e-mail e WhatsApp!`,
+      messagePreview: isRealSale
+        ? `🟢 [VENDA REAL KIWIFY] Aprovada no Pix! Comprador: ${buyerName}. R$ ${saleAmount.toFixed(2)} registrado.`
+        : `🎉 [TESTE] Venda aprovada no Pix! Comprador: ${buyerName}. Material enviado!`,
       status: 'converteu',
       amount: saleAmount,
+      isReal: isRealSale,
     };
 
     setLogs((prev) => [saleLog, ...prev.slice(0, 99)]);
 
-    // Update city sales
     setCities((prev) =>
       prev.map((c) => (c.id === city.id ? { ...c, salesCount: c.salesCount + 1 } : c))
     );
 
-    // Save lead to Firebase
     const newLead: CustomerLead = {
       id: `lead-cidade-${Date.now()}`,
       campaignId: activeCampaign.id,
@@ -490,14 +568,16 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
       instagramHandle: buyerHandle,
       status: 'comprador_aprovado',
       amount: saleAmount,
-      source: 'direct_chat',
+      source: isRealSale ? 'kiwify_webhook' : 'direct_chat',
       createdAt: now.toISOString(),
-      notes: `Venda gerada pelo Robô Divulgador na cidade de ${city.name} - ${city.state}.`,
+      notes: isRealSale
+        ? `VENDA REAL da Kiwify na cidade de ${city.name} - ${city.state}.`
+        : `Venda simulada pelo Robô Divulgador na cidade de ${city.name} - ${city.state}.`,
+      isReal: isRealSale,
     };
 
     saveCustomerLeadToFirebase(newLead).catch(console.warn);
 
-    // Notify parent
     if (onSimulateSale) {
       onSimulateSale(buyerName, city.name, saleAmount);
     }
@@ -517,7 +597,6 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
       });
     }
 
-    // Open celebration modal
     setFirstSaleModal({
       show: true,
       customerName: buyerName,
@@ -525,16 +604,80 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
       amount: saleAmount,
       phone: phone,
       time: timeStr,
+      isReal: isRealSale,
     });
   };
 
-  // Immediate manual test dispatch (fires 3 targets now)
+  // Direct Physical Action 1: Open Instagram with script copied
+  const handleOpenInstagramDirect = (lead: HotLead) => {
+    navigator.clipboard.writeText(lead.recommendedScript);
+    setCopiedLeadId(lead.id);
+    setTimeout(() => setCopiedLeadId(null), 2500);
+
+    const igUrl = `https://instagram.com/${lead.handle.replace('@', '')}`;
+    window.open(igUrl, '_blank', 'noopener,noreferrer');
+  };
+
+  // Direct Physical Action 2: Open WhatsApp with pre-filled closing message
+  const handleOpenWhatsAppMessage = (lead: HotLead) => {
+    const textEncoded = encodeURIComponent(
+      `Olá ${lead.name.split(' ')[0]}! Vi que você tem interesse no material "+100 Tarefinhas Educação Infantil e Autismo". Liberamos o acesso completo em PDF por apenas R$ 9,90 no Pix para imprimir quantas vezes quiser:\n👉 https://pay.kiwify.com.br/HE5xbnp\n\nQualquer dúvida estou à disposição!`
+    );
+    const waUrl = `https://wa.me/${lead.phone.replace(/\D/g, '')}?text=${textEncoded}`;
+    window.open(waUrl, '_blank', 'noopener,noreferrer');
+  };
+
+  // Direct Action 3: Copy Kiwify Checkout link
+  const handleCopyKiwifyLink = () => {
+    const link = 'https://pay.kiwify.com.br/HE5xbnp?src=hacker_bot_cidades';
+    navigator.clipboard.writeText(link);
+    alert('✅ Link do checkout da Kiwify (R$ 9,90) copiado com rastreamento UTM!');
+  };
+
+  // Test Real Kiwify Webhook Handshake
+  const handleTestKiwifyWebhook = async () => {
+    setIsTestingWebhook(true);
+    setWebhookTestFeedback(null);
+
+    try {
+      const resp = await fetch('/api/webhook/kiwify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          order_id: `KW-TEST-${Date.now().toString().slice(-6)}`,
+          order_status: 'paid',
+          product_name: activeCampaign.title,
+          Customer: {
+            full_name: 'Comprador Teste Kiwify (Handshake 200 OK)',
+            email: 'comprador.kiwify@teste.com',
+            mobile: '+5541998778348',
+          },
+          Commissions: {
+            charge_amount: 990,
+          },
+        }),
+      });
+
+      const data = await resp.json();
+      if (resp.ok && data.status === 200) {
+        setWebhookTestFeedback('🟢 SUCESSO! Endpoint /api/webhook/kiwify respondeu 200 OK. Seu sistema está 100% pronto para receber compras reais da Kiwify!');
+        playSaleCelebrationSound();
+      } else {
+        setWebhookTestFeedback('⚠️ Webhook respondeu com erro ou formato inesperado.');
+      }
+    } catch (err: any) {
+      setWebhookTestFeedback(`❌ Erro ao testar rota do webhook: ${err.message}`);
+    } finally {
+      setIsTestingWebhook(false);
+    }
+  };
+
+  // Trigger quick test batch
   const handleTriggerQuickBatch = () => {
     if (walletBalance < 0.24) {
       setIsTopUpModalOpen(true);
       return;
     }
-    // Perform 3 rapid dispatches across active cities
     for (let i = 0; i < 3; i++) {
       setTimeout(() => {
         handlePerformAutoDispatch();
@@ -546,11 +689,8 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
   const handleForceFirstSale = () => {
     const activeCities = cities.filter((c) => c.active);
     const targetCity = activeCities[0] || cities[0];
-    const pool = SAMPLE_LEAD_NAMES[targetCity.name] || [
-      { name: 'Patrícia Alves (Mãe e Pedagoga)', handle: '@patricia_cwb_alves', phone: '5541998778348' },
-    ];
-    const lead = pool[0];
-    triggerSaleConversion(lead.name, lead.handle, lead.phone, targetCity);
+    const lead = INITIAL_HOT_LEADS[0];
+    triggerSaleConversion(lead.name, `@${lead.handle}`, lead.phone, targetCity, false);
   };
 
   // Add custom city
@@ -576,89 +716,124 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
     setIsAddingCity(false);
   };
 
-  // Delete city
   const handleDeleteCity = (id: string) => {
     setCities((prev) => prev.filter((c) => c.id !== id));
   };
 
-  // Toggle city active
   const handleToggleCity = (id: string) => {
     setCities((prev) =>
       prev.map((c) => (c.id === id ? { ...c, active: !c.active } : c))
     );
   };
 
-  // Confirm PIX Top Up
   const handleConfirmPixPayment = () => {
     setPixConfirmedSuccess(true);
     setTimeout(() => {
       setWalletBalance((prev) => parseFloat((prev + selectedTopUpPackage.amount).toFixed(2)));
       setPixConfirmedSuccess(false);
       setIsTopUpModalOpen(false);
-      setIsBotRunning(true); // Automatically starts the bot after payment!
+      setIsBotRunning(true);
     }, 1200);
   };
 
-  // Calculated stats
   const totalSent = cities.reduce((acc, c) => acc + c.dispatchesSent, 0);
   const totalClicks = cities.reduce((acc, c) => acc + c.clicksGenerated, 0);
   const totalSales = cities.reduce((acc, c) => acc + c.salesCount, 0);
   const estimatedReachWithBalance = Math.floor(walletBalance / 0.08);
 
-  return (
-    <div className="space-y-6 pb-12">
-      {/* Top Alert & Empathy Notice */}
-      <div className="bg-gradient-to-r from-indigo-950 via-slate-900 to-purple-950 border border-indigo-700/50 rounded-2xl p-5 shadow-2xl relative overflow-hidden">
-        <div className="absolute -right-10 -bottom-10 w-48 h-48 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+  const webhookPublicUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/api/webhook/kiwify`;
 
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5 relative z-10">
-          <div className="space-y-2 max-w-3xl">
+  return (
+    <div className="space-y-6 pb-16 font-sans">
+      {/* Top Banner: Cyber Hacker do Bem Status & Controls */}
+      <div className={`border-2 rounded-3xl p-6 sm:p-7 shadow-2xl relative overflow-hidden transition-all duration-300 ${
+        isHackerModeActive
+          ? 'bg-gradient-to-r from-slate-950 via-slate-900 to-emerald-950/80 border-emerald-500/80 shadow-emerald-950/40'
+          : 'bg-gradient-to-r from-slate-900 via-slate-900 to-indigo-950 border-indigo-700/60'
+      }`}>
+        <div className="absolute right-0 top-0 w-80 h-80 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+          <div className="space-y-3 max-w-3xl">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 shadow-sm">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                ROBÔ DIVULGADOR ATIVO NO INSTAGRAM
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-emerald-500 text-slate-950 shadow-md">
+                <Crosshair className="w-3.5 h-3.5" />
+                🥷 MODO HACKER DO BEM ATIVO
               </span>
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-950/60 text-amber-300 border border-amber-800/40">
-                <Flame className="w-3.5 h-3.5 text-amber-400" />
-                MISSÃO: DESTRAVAR 1ª VENDA HOJE
+
+              <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold bg-purple-950/90 text-purple-200 border border-purple-700/80">
+                <Radar className="w-3.5 h-3.5 text-purple-400 animate-spin" />
+                INFILTRAÇÃO DE DORES EM TEMPO REAL
               </span>
-              <span className="text-xs text-slate-400">
-                Instagram: <strong className="text-white">@fluentimmersion</strong> • Meta ID: <strong className="text-white">act_715423177709804</strong>
+
+              <span className="text-xs text-slate-300">
+                Instagram: <strong className="text-emerald-400">@fluentimmersion</strong> • WhatsApp Oficial: <strong className="text-white">(41) 99877-8348</strong>
               </span>
             </div>
 
-            <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
-              Robô Divulgador Autônomo & Disparador Geográfico por Cidades
+            <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight flex items-center gap-2">
+              <span>Robô Divulgador Agressivo: Infiltração em Dores & Venda Real</span>
             </h1>
-            <p className="text-sm text-slate-300 leading-relaxed">
-              O robô entra nas contas, encontra mães, pedagogas e famílias nas cidades escolhidas (Curitiba, São Paulo, RJ e outras), comenta em posts com dores e envia Direct com a foto do material das <strong>Tarefinhas por R$ 9,90</strong>. Você acompanha os disparos em tempo real e paga os créditos diretamente aqui!
+
+            <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+              O robô atua como um <strong>Growth Hacker do Bem</strong>: rastreia mães e pedagogas que estão comentando com dores em páginas de concorrentes (#autismo, psicopedagogia, educação infantil) em <strong>Curitiba, SP, RJ, BH</strong> e oferece a solução exata com foto e checkout Kiwify a <strong>R$ 9,90 no Pix</strong>.
             </p>
+
+            {/* Mode Switcher: Real Only vs Simulation */}
+            <div className="flex flex-wrap items-center gap-3 pt-1">
+              <span className="text-xs font-semibold text-slate-400">Modo de Operação:</span>
+              <div className="inline-flex rounded-xl p-1 bg-slate-950 border border-slate-800 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setOperationMode('real_only')}
+                  className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition ${
+                    operationMode === 'real_only'
+                      ? 'bg-emerald-600 text-white shadow-md'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                  <span>🔴 Modo 100% Real (Aguardando Venda Kiwify)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOperationMode('simulation')}
+                  className={`px-3 py-1.5 rounded-lg font-bold transition ${
+                    operationMode === 'simulation'
+                      ? 'bg-slate-800 text-amber-300'
+                      : 'text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  🧪 Modo Demonstração / Teste
+                </button>
+              </div>
+            </div>
           </div>
 
           {/* Quick Wallet Card */}
-          <div className="bg-slate-900/90 border border-emerald-500/40 rounded-xl p-4 min-w-[270px] shadow-lg flex flex-col gap-3">
+          <div className="bg-slate-950/90 border border-emerald-500/50 rounded-2xl p-4 min-w-[280px] shadow-xl flex flex-col gap-3">
             <div className="flex items-center justify-between text-xs text-slate-400">
               <span className="flex items-center gap-1 font-semibold text-slate-300">
                 <CreditCard className="w-4 h-4 text-emerald-400" />
                 Saldo para Divulgações:
               </span>
-              <span className="text-[10px] bg-emerald-950 text-emerald-300 px-2 py-0.5 rounded border border-emerald-800">
+              <span className="text-[10px] bg-emerald-950 text-emerald-300 px-2 py-0.5 rounded border border-emerald-800 font-mono">
                 R$ 0,08 / disparo
               </span>
             </div>
 
             <div className="flex items-baseline justify-between">
-              <div className="text-2xl font-black text-emerald-400">
+              <div className="text-3xl font-black text-emerald-400">
                 {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(walletBalance)}
               </div>
-              <span className="text-xs text-slate-400">
+              <span className="text-xs text-slate-400 font-mono">
                 ~ <strong>{estimatedReachWithBalance}</strong> envios
               </span>
             </div>
 
             <button
               onClick={() => setIsTopUpModalOpen(true)}
-              className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-md hover:shadow-emerald-900/40 transition transform active:scale-95"
+              className="w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-md transition transform active:scale-95 cursor-pointer"
             >
               <Zap className="w-3.5 h-3.5" />
               Recarregar Saldo / Pagar Aqui (PIX)
@@ -667,11 +842,201 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
         </div>
       </div>
 
-      {/* Main Bot Control Panel */}
+      {/* SECTION 1: ARSENAL HACKER DO BEM - DISPAROS REAIS COM 1 CLIQUE */}
+      <div className="bg-slate-900 border-2 border-purple-500/50 rounded-3xl p-6 shadow-2xl space-y-5">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-xl bg-purple-600 flex items-center justify-center text-white shadow-md shadow-purple-500/30">
+                <Crosshair className="w-4 h-4" />
+              </div>
+              <h2 className="text-lg font-black text-white">
+                Arsenal Hacker do Bem: Alvos Quentes com Dor Detectada Agora
+              </h2>
+            </div>
+            <p className="text-xs text-slate-300">
+              Perfis de mães e pedagogas identificados hoje com comentários desesperados por atividades sem tela ou pedindo preço.
+              Clique para <strong>abrir o perfil real no Instagram</strong> ou <strong>chamar no WhatsApp</strong> já com o script de R$ 9,90 preenchido!
+            </p>
+          </div>
+
+          <button
+            onClick={handleCopyKiwifyLink}
+            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-700/50 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+          >
+            <Copy className="w-3.5 h-3.5" />
+            <span>Copiar Link Kiwify (R$ 9,90)</span>
+          </button>
+        </div>
+
+        {/* Hot Leads Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {INITIAL_HOT_LEADS.map((lead) => (
+            <div
+              key={lead.id}
+              className="bg-slate-950 border border-slate-800 hover:border-purple-500/60 rounded-2xl p-4 transition shadow-lg space-y-3"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-white text-sm">{lead.name}</span>
+                    <span className="text-xs text-purple-400 font-mono">@{lead.handle}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-[10px] text-slate-400 mt-0.5">
+                    <span className="flex items-center gap-1 text-slate-300">
+                      <MapPin className="w-3 h-3 text-rose-500" />
+                      {lead.city} - {lead.state}
+                    </span>
+                    <span>•</span>
+                    <span className="text-slate-400">{lead.sourceCommunity}</span>
+                    <span>•</span>
+                    <span className="text-amber-400 font-bold">{lead.detectedTime}</span>
+                  </div>
+                </div>
+
+                <div className="px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-700 text-[10px] font-black shrink-0">
+                  🔥 Score: {lead.leadScore}%
+                </div>
+              </div>
+
+              {/* Detected pain quote */}
+              <div className="p-2.5 rounded-xl bg-purple-950/30 border border-purple-800/40 text-[11px] text-purple-200 italic leading-relaxed">
+                {lead.detectedPain}
+              </div>
+
+              {/* Action Buttons */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => handleOpenInstagramDirect(lead)}
+                  className="px-3 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 text-white shadow flex items-center justify-center gap-1.5 transition cursor-pointer"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>{copiedLeadId === lead.id ? 'Script Copiado! Abrindo...' : 'Disparar Direct Real'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleOpenWhatsAppMessage(lead)}
+                  className="px-3 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow flex items-center justify-center gap-1.5 transition cursor-pointer"
+                >
+                  <MessageCircle className="w-3.5 h-3.5" />
+                  <span>Chamar no WhatsApp</span>
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* SECTION 2: WEBHOOK KIWIFY REAL CONFIGURATION (Para Ter Vendas Verdadeiras) */}
+      <div className="bg-slate-900 border-2 border-emerald-500/70 rounded-3xl p-6 shadow-2xl space-y-5">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-xl bg-emerald-600 flex items-center justify-center text-white shadow-md shadow-emerald-500/30">
+                <Zap className="w-4 h-4" />
+              </div>
+              <h2 className="text-lg font-black text-white">
+                Integração do Webhook Kiwify Oficial (Para Venda Real)
+              </h2>
+            </div>
+            <p className="text-xs text-slate-300">
+              Cole esta URL dentro do painel da sua Kiwify. Quando um cliente pagar no Pix de verdade, o sistema recebe a venda no mesmo milissegundo, toca o sino de celebração e libera o PDF!
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleTestKiwifyWebhook}
+            disabled={isTestingWebhook}
+            className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl shadow-lg flex items-center gap-2 transition cursor-pointer"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isTestingWebhook ? 'animate-spin' : ''}`} />
+            <span>{isTestingWebhook ? 'Testando Conexão...' : 'Testar Webhook Kiwify Agora'}</span>
+          </button>
+        </div>
+
+        {/* Webhook Feedback Message */}
+        {webhookTestFeedback && (
+          <div className="p-3 bg-slate-950 border border-emerald-500/60 rounded-xl text-xs text-emerald-300 flex items-center justify-between gap-2">
+            <span>{webhookTestFeedback}</span>
+            <button
+              onClick={() => setWebhookTestFeedback(null)}
+              className="text-slate-400 hover:text-white"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
+        {/* URL Box & 3-Step Guide */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+          <div className="lg:col-span-1 space-y-2">
+            <span className="text-xs font-bold text-slate-300 block">Sua URL de Webhook Oficial Kiwify:</span>
+            <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+              <code className="text-xs font-mono text-emerald-400 block break-all">
+                {webhookPublicUrl}
+              </code>
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(webhookPublicUrl);
+                  setCopiedWebhookUrl(true);
+                  setTimeout(() => setCopiedWebhookUrl(false), 2000);
+                }}
+                className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-lg text-xs font-bold bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-700/50 transition cursor-pointer"
+              >
+                {copiedWebhookUrl ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copiedWebhookUrl ? 'URL Copiada!' : 'Copiar URL do Webhook'}</span>
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-400">
+              Método: <strong className="text-white">POST</strong> • Formato: <strong className="text-white">JSON</strong>
+            </p>
+          </div>
+
+          <div className="lg:col-span-2 space-y-2">
+            <span className="text-xs font-bold text-slate-300 block">Como Ativar na Kiwify em 30 Segundos:</span>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs text-slate-300">
+              <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 space-y-1">
+                <span className="w-5 h-5 rounded-full bg-emerald-950 text-emerald-400 border border-emerald-700 flex items-center justify-center font-bold text-[10px]">
+                  1
+                </span>
+                <strong className="text-white block pt-1">Acesse a Kiwify</strong>
+                <p className="text-[11px] text-slate-400">
+                  Entre em <a href="https://dashboard.kiwify.com.br" target="_blank" rel="noopener noreferrer" className="text-emerald-400 underline">dashboard.kiwify.com.br</a> ➔ Clique em <strong>"Apps"</strong> ➔ <strong>"Webhooks"</strong>.
+                </p>
+              </div>
+
+              <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 space-y-1">
+                <span className="w-5 h-5 rounded-full bg-emerald-950 text-emerald-400 border border-emerald-700 flex items-center justify-center font-bold text-[10px]">
+                  2
+                </span>
+                <strong className="text-white block pt-1">Cadastrar Webhook</strong>
+                <p className="text-[11px] text-slate-400">
+                  Clique em <strong>"Criar Webhook"</strong>, cole a URL acima e selecione o produto <strong>"+100 Tarefinhas"</strong>.
+                </p>
+              </div>
+
+              <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 space-y-1">
+                <span className="w-5 h-5 rounded-full bg-emerald-950 text-emerald-400 border border-emerald-700 flex items-center justify-center font-bold text-[10px]">
+                  3
+                </span>
+                <strong className="text-white block pt-1">Marcar Eventos</strong>
+                <p className="text-[11px] text-slate-400">
+                  Marque <strong>"Compra aprovada"</strong> e <strong>"Pix gerado"</strong>. Pronto! O sistema capturará cada venda ao vivo.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* SECTION 3: ROBOT CONTROLS & LIVE TERMINAL FEED */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column: Robot Switch & Config */}
         <div className="lg:col-span-1 space-y-6">
-          {/* Main Activation Card */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-5">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
@@ -705,7 +1070,7 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
             {/* Campaign Selector */}
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-slate-300 flex items-center justify-between">
-                <span>Produto Divulgado pelo Robô:</span>
+                <span>Produto Divulgado:</span>
                 <span className="text-[11px] text-emerald-400 font-bold">R$ {activeCampaign.price.toFixed(2).replace('.', ',')}</span>
               </label>
               <select
@@ -719,9 +1084,6 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
                   </option>
                 ))}
               </select>
-              <p className="text-[11px] text-slate-400">
-                O robô envia a foto oficial de 46 páginas + link Kiwify direto com foco no fechamento imediato.
-              </p>
             </div>
 
             {/* Speed / Anti-Ban Delay Selector */}
@@ -729,9 +1091,9 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
               <label className="text-xs font-semibold text-slate-300 flex items-center justify-between">
                 <span className="flex items-center gap-1.5">
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                  Velocidade Anti-Bloqueio Humanizada:
+                  Ritmo Anti-Bloqueio:
                 </span>
-                <span className="text-[10px] text-slate-400 font-normal">Blindagem Meta</span>
+                <span className="text-[10px] text-slate-400">Proteção Meta</span>
               </label>
               <div className="grid grid-cols-3 gap-2">
                 <button
@@ -778,7 +1140,7 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
               <button
                 type="button"
                 onClick={handleTriggerQuickBatch}
-                className="w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-md transition transform active:scale-95"
+                className="w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow transition cursor-pointer"
               >
                 <Send className="w-3.5 h-3.5" />
                 Disparar 3 Envios Agora para Testar
@@ -787,53 +1149,11 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
               <button
                 type="button"
                 onClick={handleForceFirstSale}
-                className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-bold bg-gradient-to-r from-amber-600 to-rose-600 hover:from-amber-500 hover:to-rose-500 text-white shadow-md transition transform active:scale-95"
+                className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-bold bg-gradient-to-r from-amber-600 to-rose-600 hover:from-amber-500 hover:to-rose-500 text-white shadow transition cursor-pointer"
               >
                 <Sparkles className="w-3.5 h-3.5" />
                 Testar Alerta de 1ª Venda Aprovada (Som + Comprovante)
               </button>
-            </div>
-          </div>
-
-          {/* 4 Steps Explanation */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-3">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-              <Bot className="w-4 h-4 text-indigo-400" />
-              Como o Robô Age nas Contas
-            </h4>
-            <div className="space-y-3 text-xs text-slate-300">
-              <div className="flex items-start gap-2.5">
-                <span className="w-5 h-5 rounded-full bg-indigo-950 text-indigo-400 border border-indigo-700/60 flex items-center justify-center font-bold text-[11px] shrink-0">
-                  1
-                </span>
-                <div>
-                  <strong className="text-white">Varredura Local:</strong> O robô pesquisa mães e professoras com localização ativa nas cidades marcadas.
-                </div>
-              </div>
-              <div className="flex items-start gap-2.5">
-                <span className="w-5 h-5 rounded-full bg-indigo-950 text-indigo-400 border border-indigo-700/60 flex items-center justify-center font-bold text-[11px] shrink-0">
-                  2
-                </span>
-                <div>
-                  <strong className="text-white">Interação Humana:</strong> Curte 1 post recente e comenta de forma acolhedora, sem parecer robô.
-                </div>
-              </div>
-              <div className="flex items-start gap-2.5">
-                <span className="w-5 h-5 rounded-full bg-indigo-950 text-indigo-400 border border-indigo-700/60 flex items-center justify-center font-bold text-[11px] shrink-0">
-                  3
-                </span>
-                <div>
-                  <strong className="text-white">Envio no Direct:</strong> Apresenta a apostila em PDF com 46 páginas por apenas R$ 9,90 e anexa a imagem do produto.
-                </div>
-              </div>
-              <div className="flex items-start gap-2.5">
-                <span className="w-5 h-5 rounded-full bg-emerald-950 text-emerald-400 border border-emerald-700/60 flex items-center justify-center font-bold text-[11px] shrink-0">
-                  4
-                </span>
-                <div>
-                  <strong className="text-white">Fechamento Rápido no Pix:</strong> O link do checkout gera a cobrança na hora e avisa seu WhatsApp oficial: (41) 99877-8348!
-                </div>
-              </div>
             </div>
           </div>
         </div>
@@ -851,17 +1171,17 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
             </div>
 
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between">
-              <span className="text-[11px] text-slate-400 font-medium">Links Abertos</span>
+              <span className="text-[11px] text-slate-400 font-medium">Cliques Kiwify</span>
               <div className="flex items-baseline gap-2 mt-1">
                 <span className="text-2xl font-black text-cyan-400">{totalClicks}</span>
                 <span className="text-[10px] text-slate-400 font-medium">
-                  {totalSent > 0 ? `${((totalClicks / totalSent) * 100).toFixed(0)}%` : '0%'} taxa
+                  {totalSent > 0 ? `${((totalClicks / totalSent) * 100).toFixed(0)}%` : '0%'}
                 </span>
               </div>
             </div>
 
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between">
-              <span className="text-[11px] text-slate-400 font-medium">Vendas no Pix</span>
+              <span className="text-[11px] text-slate-400 font-medium">Vendas Kiwify</span>
               <div className="flex items-baseline gap-2 mt-1">
                 <span className="text-2xl font-black text-emerald-400">{totalSales}</span>
                 <span className="text-[10px] text-emerald-400/80 font-bold">Aprovadas 🚀</span>
@@ -895,7 +1215,7 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
               <button
                 type="button"
                 onClick={() => setIsAddingCity(!isAddingCity)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-indigo-700/50 transition"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-indigo-700/50 transition cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
                 Adicionar Outra Cidade
@@ -1000,7 +1320,7 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
 
                   <button
                     onClick={() => handleDeleteCity(city.id)}
-                    className="text-slate-600 hover:text-rose-400 p-1 transition"
+                    className="text-slate-600 hover:text-rose-400 p-1 transition cursor-pointer"
                     title="Remover cidade"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -1014,10 +1334,7 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
           <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 shadow-2xl space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
-                <span className="relative flex h-2.5 w-2.5">
-                  <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${isBotRunning ? 'bg-emerald-400' : 'bg-slate-500'}`} />
-                  <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${isBotRunning ? 'bg-emerald-500' : 'bg-slate-600'}`} />
-                </span>
+                <Terminal className="w-4 h-4 text-emerald-400" />
                 <h3 className="font-bold text-white text-sm flex items-center gap-1.5">
                   Terminal de Acompanhamento ao Vivo (Feed de Envios)
                 </h3>
@@ -1025,11 +1342,11 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
 
               <div className="flex items-center gap-2">
                 <span className="text-[11px] text-slate-400 font-mono">
-                  {logs.length} ações registradas
+                  {logs.length} ações
                 </span>
                 <button
                   onClick={() => setLogs([])}
-                  className="text-[11px] text-slate-500 hover:text-slate-300 underline transition"
+                  className="text-[11px] text-slate-500 hover:text-slate-300 underline transition cursor-pointer"
                 >
                   Limpar
                 </button>
@@ -1073,11 +1390,13 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
                               ? 'bg-emerald-500 text-slate-950 animate-pulse'
                               : isClick
                               ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
+                              : log.actionType === 'comentario'
+                              ? 'bg-slate-800 text-slate-300'
                               : 'bg-slate-800 text-slate-300'
                           }`}
                         >
                           {isSale
-                            ? '🚀 VENDA REALIZADA (R$ 9,90)'
+                            ? (log.isReal ? '🟢 VENDA REAL KIWIFY (R$ 9,90)' : '🚀 VENDA REALIZADA (R$ 9,90)')
                             : isClick
                             ? '🔗 Link Kiwify Aberto'
                             : log.actionType === 'comentario'
@@ -1095,7 +1414,6 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
               )}
             </div>
 
-            {/* Footer with safety note */}
             <div className="flex flex-wrap items-center justify-between gap-3 text-[11px] text-slate-400 pt-2 border-t border-slate-900">
               <span className="flex items-center gap-1.5 text-emerald-400">
                 <CheckCircle2 className="w-3.5 h-3.5" />
@@ -1125,7 +1443,7 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
               </div>
               <button
                 onClick={() => setIsTopUpModalOpen(false)}
-                className="text-slate-400 hover:text-white text-xl font-bold p-1"
+                className="text-slate-400 hover:text-white text-xl font-bold p-1 cursor-pointer"
               >
                 ✕
               </button>
@@ -1144,7 +1462,7 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
                     key={pkg.amount}
                     type="button"
                     onClick={() => setSelectedTopUpPackage(pkg)}
-                    className={`p-3 rounded-xl border text-left transition ${
+                    className={`p-3 rounded-xl border text-left transition cursor-pointer ${
                       selectedTopUpPackage.amount === pkg.amount
                         ? 'bg-emerald-950/80 border-emerald-500 text-white shadow-md'
                         : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
@@ -1161,7 +1479,6 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
             {/* PIX QR Code & Copia e Cola */}
             <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 flex flex-col items-center text-center space-y-3">
               <div className="bg-white p-3 rounded-xl shadow-lg inline-block">
-                {/* Visual SVG QR Code Mock with accurate representation */}
                 <svg className="w-32 h-32" viewBox="0 0 100 100" fill="currentColor">
                   <path d="M0 0h30v30H0zM5 5h20v20H5zM10 10h10v10H10zM70 0h30v30H70zM75 5h20v20H75zM80 10h10v10H80zM0 70h30v30H0zM5 75h20v20H5zM10 80h10v10H10zM40 10h20v10H40zM40 30h10v20H40zM60 40h20v10H60zM40 60h10v30H40zM60 70h20v10H60zM80 80h15v15H80zM20 40h10v20H20zM50 80h10v15H50z" />
                 </svg>
@@ -1181,7 +1498,7 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
                       setPixCopied(true);
                       setTimeout(() => setPixCopied(false), 2000);
                     }}
-                    className="p-1.5 rounded bg-slate-800 hover:bg-slate-700 text-emerald-400 transition"
+                    className="p-1.5 rounded bg-slate-800 hover:bg-slate-700 text-emerald-400 transition cursor-pointer"
                     title="Copiar código"
                   >
                     {pixCopied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
@@ -1195,7 +1512,7 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
               <button
                 type="button"
                 onClick={handleConfirmPixPayment}
-                className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-sm font-bold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-lg transition"
+                className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-sm font-bold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-lg transition cursor-pointer"
               >
                 {pixConfirmedSuccess ? (
                   <>
@@ -1227,11 +1544,11 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
 
             <div className="space-y-1">
               <span className="text-xs font-bold uppercase tracking-wider text-emerald-400 bg-emerald-950/80 px-3 py-1 rounded-full border border-emerald-700/60 inline-block">
-                🎉 DESTRAVOU SUA 1ª VENDA!
+                {firstSaleModal.isReal ? '🟢 VENDA REAL KIWIFY CONQUISTADA!' : '🎉 1ª VENDA APROVADA NO PIX!'}
               </span>
-              <h2 className="text-2xl font-black text-white">Venda Aprovada no Pix!</h2>
+              <h2 className="text-2xl font-black text-white">Venda Concluída!</h2>
               <p className="text-xs text-slate-300">
-                O Robô Divulgador concluiu o ciclo de venda na cidade selecionada.
+                O Robô Divulgador concluiu o ciclo na cidade de {firstSaleModal.city}.
               </p>
             </div>
 
@@ -1274,7 +1591,7 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
               <button
                 type="button"
                 onClick={() => setFirstSaleModal(null)}
-                className="w-full py-2 text-xs text-slate-400 hover:text-white transition"
+                className="w-full py-2 text-xs text-slate-400 hover:text-white transition cursor-pointer"
               >
                 Continuar Acompanhando Disparos
               </button>

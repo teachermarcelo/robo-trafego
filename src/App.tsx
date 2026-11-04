@@ -747,15 +747,18 @@ export default function App() {
       }
     }
 
-    const notif: PushNotification = {
-      id: `notif-${Date.now()}`,
-      title: '🎯 Modo 100% Real Ativado!',
-      message: 'Todas as métricas de demonstração foram zeradas (R$ 0,00). Suas campanhas continuam salvas e você acompanhará exclusivamente suas visitas e vendas reais.',
-      time: 'Agora mesmo',
-      type: 'tip',
-      read: false,
-    };
-    setNotifications((prev) => [notif, ...prev]);
+    // Clear all demo notifications to start completely fresh
+    setNotifications([
+      {
+        id: `notif-${Date.now()}`,
+        title: '🎯 Modo 100% Real Ativado!',
+        message: 'Todas as notificações de teste foram limpas. Agora o sistema só apitará quando uma VENDA REAL chegar pelo Webhook da Kiwify / Hotmart ou WhatsApp!',
+        time: 'Agora mesmo',
+        type: 'tip',
+        read: false,
+        isReal: true,
+      },
+    ]);
   };
 
 
@@ -1025,6 +1028,10 @@ export default function App() {
         onMarkAllAsRead={() =>
           setNotifications((prev) => prev.map((n) => ({ ...n, read: true })))
         }
+        onClearDemoNotifications={() => {
+          setNotifications((prev) => prev.filter((n) => n.isReal === true));
+        }}
+        onNavigateTab={(tab) => setActiveTab(tab)}
       />
 
       <SupabaseModal

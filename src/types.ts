@@ -87,7 +87,7 @@ export interface TrackingEvent {
   };
   device: 'mobile' | 'desktop' | 'tablet';
   ageBracket: '18-24' | '25-34' | '35-44' | '45-54' | '55+';
-  source: 'tiktok' | 'pinterest' | 'instagram' | 'whatsapp' | 'google_organic' | 'meta_ads' | 'brevo_email';
+  source: 'tiktok' | 'pinterest' | 'instagram' | 'whatsapp' | 'google_organic' | 'meta_ads' | 'brevo_email' | 'facebook_groups';
   amount?: number;
   leadScore?: number;
   durationSeconds?: number;
@@ -134,5 +134,65 @@ export interface PushNotification {
   type: 'sale' | 'traffic' | 'security' | 'tip';
   read: boolean;
   isReal?: boolean;
+}
+
+export interface FacebookGroup {
+  id: string;
+  name: string;
+  url: string;
+  membersCount: number;
+  privacy: 'Público' | 'Privado';
+  niche: string;
+  mappedAt: string;
+  lastDispatchedAt?: string;
+  dispatchCount: number;
+  status: 'ready' | 'cooling_down' | 'posted';
+  categoryBadge?: string;
+}
+
+export interface FacebookAudience {
+  id: string;
+  name: string;
+  description: string;
+  groupIds: string[];
+  groupsCount: number;
+  estimatedMembers: number;
+  niche: string;
+  targetProductId: string;
+  createdAt: string;
+}
+
+export interface FacebookPostLog {
+  id: string;
+  groupId: string;
+  groupName: string;
+  groupUrl: string;
+  postedAt: string;
+  headline: string;
+  status: 'success' | 'cooling_down' | 'error';
+  intervalWaitedSeconds: number;
+  checkoutUrl: string;
+}
+
+export interface FacebookGroupPostCampaign {
+  id: string;
+  name: string;
+  audienceId: string;
+  audienceName: string;
+  productId: string;
+  productName: string;
+  productPrice: number;
+  productCheckoutUrl: string;
+  productImageUrl?: string;
+  postHeadline: string;
+  postCopy: string;
+  intervalSeconds: number; // 120, 300, 400
+  totalGroupsCount: number;
+  completedGroupsCount: number;
+  status: 'idle' | 'running' | 'paused' | 'completed';
+  currentGroupIndex: number;
+  nextDispatchCountdown: number;
+  logs: FacebookPostLog[];
+  createdAt: string;
 }
 

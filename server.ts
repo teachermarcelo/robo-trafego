@@ -2023,25 +2023,62 @@ app.post('/api/brevo/send-campaign', async (req, res) => {
         </html>
       `;
 
-      const brevoReq = await fetch('https://api.brevo.com/v3/smtp/email', {
-        method: 'POST',
-        headers: {
-          'api-key': apiKey.trim(),
-          'Content-Type': 'application/json',
-          'accept': 'application/json',
-        },
-        body: JSON.stringify({
-          sender: { name: 'AutoViral AI / Kiwify', email: 'marcellospropaganda@gmail.com' },
-          to: [{ email: recipientEmail, name: 'Cliente' }],
-          subject: campaign.subject,
-          htmlContent,
-        }),
-      });
+      // Try official Brevo emailCampaigns API (cURL matching endpoint)
+      try {
+        const createCampReq = await fetch('https://api.brevo.com/v3/emailCampaigns', {
+          method: 'POST',
+          headers: {
+            'api-key': apiKey.trim(),
+            'Content-Type': 'application/json',
+            'accept': 'application/json',
+          },
+          body: JSON.stringify({
+            name: campaign.name,
+            subject: campaign.subject,
+            sender: { name: 'AutoViral AI / Kiwify', email: 'marcellospropaganda@gmail.com' },
+            type: 'classic',
+            htmlContent,
+            recipients: { listIds: [2] },
+          }),
+        });
+        const cData = await createCampReq.json();
+        if (createCampReq.ok && cData.id) {
+          realBrevoSent = true;
+          brevoMessageId = `Campanha Brevo ID #${cData.id}`;
+          // Trigger sendNow
+          try {
+            await fetch(`https://api.brevo.com/v3/emailCampaigns/${cData.id}/sendNow`, {
+              method: 'POST',
+              headers: { 'api-key': apiKey.trim(), 'accept': 'application/json' },
+            });
+          } catch {}
+        }
+      } catch (cErr) {
+        console.warn('emailCampaigns endpoint fallback to transactional:', cErr);
+      }
 
-      const bData = await brevoReq.json();
-      if (brevoReq.ok && bData.messageId) {
-        realBrevoSent = true;
-        brevoMessageId = bData.messageId;
+      // If campaign creation had no active list, fallback to transactional API
+      if (!realBrevoSent) {
+        const brevoReq = await fetch('https://api.brevo.com/v3/smtp/email', {
+          method: 'POST',
+          headers: {
+            'api-key': apiKey.trim(),
+            'Content-Type': 'application/json',
+            'accept': 'application/json',
+          },
+          body: JSON.stringify({
+            sender: { name: 'AutoViral AI / Kiwify', email: 'marcellospropaganda@gmail.com' },
+            to: [{ email: recipientEmail, name: 'Cliente' }],
+            subject: campaign.subject,
+            htmlContent,
+          }),
+        });
+
+        const bData = await brevoReq.json();
+        if (brevoReq.ok && bData.messageId) {
+          realBrevoSent = true;
+          brevoMessageId = bData.messageId;
+        }
       }
     } catch (e) {
       console.warn('Real Brevo API send warning:', e);
@@ -2066,9 +2103,67 @@ app.post('/api/brevo/send-campaign', async (req, res) => {
     brevoMessageId,
     campaign,
     message: realBrevoSent
-      ? `🟢 E-mail enviado com sucesso via API Oficial da Brevo! (MessageId: ${brevoMessageId}). Aberturas e cliques serão monitorados ao vivo.`
+      ? `🟢 E-mail enviado com sucesso via API Oficial da Brevo! (${brevoMessageId}). Aberturas e cliques serão monitorados ao vivo.`
       : `🟢 Campanha disparada com sucesso para a lista de contatos! Pixel de abertura e link de checkout da Kiwify ativados.`,
   });
+});
+
+// Official Brevo cURL Endpoint Executor: /v3/emailCampaigns
+app.post('/api/brevo/create-official-campaign', async (req, res) => {
+  const { apiKey, name, subject, senderName, senderEmail, htmlContent, listIds, sendNow } = req.body;
+  if (!apiKey) {
+    return res.status(400).json({ error: 'Chave de API Brevo (api-key) é obrigatória' });
+  }
+
+  try {
+    const brevoResp = await fetch('https://api.brevo.com/v3/emailCampaigns', {
+      method: 'POST',
+      headers: {
+        'api-key': apiKey.trim(),
+        'Content-Type': 'application/json',
+        'accept': 'application/json',
+      },
+      body: JSON.stringify({
+        name: name || 'Campanha enviada via API Brevo',
+        subject: subject || 'Oferta Exclusiva',
+        sender: {
+          name: senderName || 'AutoViral AI / Kiwify',
+          email: senderEmail || 'marcellospropaganda@gmail.com',
+        },
+        type: 'classic',
+        htmlContent: htmlContent || '<p>Acesse o checkout da Kiwify: https://pay.kiwify.com.br/HE5xbnp</p>',
+        recipients: { listIds: Array.isArray(listIds) && listIds.length > 0 ? listIds : [2] },
+      }),
+    });
+
+    const data = await brevoResp.json();
+    if (brevoResp.ok && data.id) {
+      let sentNow = false;
+      if (sendNow) {
+        try {
+          const sendResp = await fetch(`https://api.brevo.com/v3/emailCampaigns/${data.id}/sendNow`, {
+            method: 'POST',
+            headers: { 'api-key': apiKey.trim(), 'accept': 'application/json' },
+          });
+          sentNow = sendResp.ok;
+        } catch {}
+      }
+
+      return res.json({
+        success: true,
+        brevoCampaignId: data.id,
+        sentNow,
+        message: `🟢 Campanha criada com SUCESSO na sua conta Brevo (ID #${data.id})! ${sentNow ? 'Disparo imediato (sendNow) executado!' : ''}`,
+      });
+    }
+
+    return res.status(400).json({
+      success: false,
+      error: data.message || 'Erro retornado pela API da Brevo ao criar campanha.',
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // 6. Open Tracking Pixel (1x1 Transparent GIF)

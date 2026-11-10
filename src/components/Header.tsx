@@ -14,6 +14,7 @@ import {
   Zap,
   Bot,
   Mail,
+  Share2,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -45,7 +46,8 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const tabs = [
     { id: 'dashboard', label: 'Dashboard & Métricas', icon: TrendingUp },
-    { id: 'robo_cidades', label: '🤖 Robô Divulgador & Cidades', icon: Bot, badge: '🔥 Destravar 1ª Venda' },
+    { id: 'chrome_fb_groups', label: 'Extensão Chrome & Mapeador FB', icon: Share2, badge: '🔥 Grupos & Anti-Bloqueio' },
+    { id: 'robo_cidades', label: '🤖 Robô Divulgador & Cidades', icon: Bot, badge: 'Destravar 1ª Venda' },
     { id: 'brevo_disparador', label: 'Disparador E-mail & WhatsApp', icon: Mail, badge: 'Brevo 579 Contatos' },
     { id: 'meta_ads', label: 'Alavanca Meta Ads', icon: Zap, badge: '🚀 10x Vendas' },
     { id: 'landing_builder', label: 'Criar / Editar Landing Page', icon: LayoutTemplate, badge: 'Editar R$' },

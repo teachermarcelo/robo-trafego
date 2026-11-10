@@ -20,6 +20,7 @@ import {
   Bot,
   MapPin,
   Mail,
+  Share2,
 } from 'lucide-react';
 import { Campaign, TrackingEvent, CustomerLead } from '../types';
 
@@ -227,6 +228,39 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
         >
           <span>Abrir Disparador Brevo</span>
           <ArrowUpRight className="w-4 h-4 text-slate-950" />
+        </button>
+      </div>
+
+      {/* Chrome Extension & Facebook Groups Mapeador Banner */}
+      <div className="bg-gradient-to-r from-blue-950 via-slate-900 to-indigo-950 border-2 border-blue-500/60 rounded-2xl p-5 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className="w-10 h-10 rounded-2xl bg-blue-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/30 shrink-0">
+            <Share2 className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-black text-white">
+                Extensão Chrome &amp; Mapeador de Grupos Facebook
+              </span>
+              <span className="text-[10px] bg-blue-900 text-blue-200 border border-blue-700 px-2 py-0.5 rounded-full font-bold">
+                Novo Recurso
+              </span>
+              <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded-full font-bold">
+                Intervalo 120s / 300s / 400s
+              </span>
+            </div>
+            <p className="text-xs text-slate-300 mt-0.5">
+              Mapeie grupos abertos com o Facebook aberto, crie públicos personalizados e ative o robô divulgador com intervalos anti-bloqueio programados!
+            </p>
+          </div>
+        </div>
+
+        <button
+          onClick={() => onNavigateTab('chrome_fb_groups')}
+          className="px-4 py-2.5 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 text-white font-black text-xs rounded-xl shadow-lg shadow-blue-900/40 flex items-center gap-1.5 shrink-0 transition cursor-pointer"
+        >
+          <span>Abrir Mapeador &amp; Extensão</span>
+          <ArrowUpRight className="w-4 h-4 text-white" />
         </button>
       </div>
 

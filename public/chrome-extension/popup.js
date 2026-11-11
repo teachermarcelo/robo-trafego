@@ -1,22 +1,26 @@
-// AutoViral AI Chrome Extension - Popup Controller
+// AutoViral AI Chrome Extension - Popup Controller V1.1.0
+
 document.addEventListener('DOMContentLoaded', () => {
   const fbStatusEl = document.getElementById('fb-status');
+  const ytStatusEl = document.getElementById('yt-status');
   const groupsCountEl = document.getElementById('groups-count');
   const btnScan = document.getElementById('btn-scan');
   const btnSync = document.getElementById('btn-sync');
+  const btnOpenPlatform = document.getElementById('btn-open-platform');
   const groupsContainer = document.getElementById('groups-container');
   const groupsItems = document.getElementById('groups-items');
   const intervalBtns = document.querySelectorAll('.interval-btn');
 
-  let selectedInterval = 300;
+  let selectedInterval = 350;
   let currentMappedGroups = [];
+  let detectedFbTab = null;
 
   // Interval selection
   intervalBtns.forEach(btn => {
     btn.addEventListener('click', () => {
       intervalBtns.forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
-      selectedInterval = parseInt(btn.dataset.time || '300', 10);
+      selectedInterval = parseInt(btn.dataset.time || '350', 10);
       if (chrome.storage && chrome.storage.local) {
         chrome.storage.local.set({ autoviral_interval: selectedInterval });
       }
@@ -39,66 +43,90 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Check active tab
-  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-    if (!tabs || !tabs[0]) return;
-    const tab = tabs[0];
-    const url = tab.url || '';
+  // Search across ALL open tabs for Facebook and YouTube
+  chrome.tabs.query({}, (tabs) => {
+    if (!tabs || tabs.length === 0) return;
 
-    if (url.includes('facebook.com/groups')) {
-      fbStatusEl.textContent = 'Grupo Aberto Detectado!';
-      fbStatusEl.style.color = '#10b981';
-    } else if (url.includes('facebook.com')) {
-      fbStatusEl.textContent = 'Facebook Aberto';
-      fbStatusEl.style.color = '#38bdf8';
+    const fbTab = tabs.find(t => (t.url || '').includes('facebook.com'));
+    const ytTab = tabs.find(t => (t.url || '').includes('youtube.com'));
+
+    if (fbTab) {
+      detectedFbTab = fbTab;
+      const url = fbTab.url || '';
+      if (url.includes('groups/search') || url.includes('groups_home')) {
+        fbStatusEl.textContent = 'Busca de Grupos Aberta!';
+        fbStatusEl.style.color = '#10b981';
+      } else if (url.includes('groups/')) {
+        fbStatusEl.textContent = 'Grupo Aberto Detectado!';
+        fbStatusEl.style.color = '#10b981';
+      } else {
+        fbStatusEl.textContent = 'Facebook Conectado';
+        fbStatusEl.style.color = '#38bdf8';
+      }
+
+      // Automatically query groups from that Facebook tab
+      chrome.tabs.sendMessage(fbTab.id, { action: 'AUTOVIRAL_MAP_GROUPS' }, (res) => {
+        if (res && res.groups && Array.isArray(res.groups)) {
+          saveAndRenderGroups(res.groups);
+        }
+      });
     } else {
-      fbStatusEl.textContent = 'Abra o Facebook';
+      fbStatusEl.textContent = 'Abra o Facebook (ex: facebook.com/groups)';
       fbStatusEl.style.color = '#f59e0b';
+    }
+
+    if (ytTab) {
+      ytStatusEl.textContent = 'Aba YouTube Detectada!';
+      ytStatusEl.style.color = '#10b981';
+    } else {
+      ytStatusEl.textContent = 'Aguardando YouTube';
+      ytStatusEl.style.color = '#94a3b8';
     }
   });
 
-  // Scan groups in current tab
+  // Manual Scan button
   btnScan.addEventListener('click', () => {
-    btnScan.textContent = '⏳ Escaneando Grupo(s)...';
+    btnScan.textContent = '⏳ Escaneando Rolagem do FB...';
     btnScan.disabled = true;
 
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (!tabs || !tabs[0]) {
-        alert('Abra uma aba do Facebook com grupos para mapear.');
-        btnScan.textContent = '🔍 Mapear Grupos Desta Aba FB';
+    chrome.tabs.query({}, (tabs) => {
+      const fbTab = tabs.find(t => (t.url || '').includes('facebook.com'));
+
+      if (!fbTab) {
+        alert('Abra uma aba do Facebook com grupos ou a busca de grupos (como você abriu em facebook.com/groups/search/groups_home/?q=pedagogia) e role a página para mapear!');
+        btnScan.textContent = '🔍 Mapear Grupos da Aba Aberta do FB';
         btnScan.disabled = false;
         return;
       }
 
-      const activeTab = tabs[0];
-      chrome.tabs.sendMessage(activeTab.id, { action: 'AUTOVIRAL_MAP_GROUPS' }, (response) => {
-        btnScan.textContent = '🔍 Mapear Grupos Desta Aba FB';
+      chrome.tabs.sendMessage(fbTab.id, { action: 'AUTOVIRAL_MAP_GROUPS' }, (response) => {
+        btnScan.textContent = '🔍 Mapear Grupos da Aba Aberta do FB';
         btnScan.disabled = false;
 
-        if (chrome.runtime.lastError || !response || !response.groups) {
-          // If content script wasn't injected or failed, do fallback extraction or script execution
+        if (response && response.groups && Array.isArray(response.groups) && response.groups.length > 0) {
+          saveAndRenderGroups(response.groups);
+          alert(`✅ ${response.groups.length} grupos foram capturados na sua rolagem do Facebook!`);
+        } else {
+          // Fallback script injection if content script was dormant
           chrome.scripting.executeScript({
-            target: { tabId: activeTab.id },
-            func: extractFacebookGroupDetails
+            target: { tabId: fbTab.id },
+            func: extractGroupsFromDOM
           }, (results) => {
-            if (results && results[0] && results[0].result) {
-              const group = results[0].result;
-              saveAndRenderGroups([group]);
+            if (results && results[0] && results[0].result && results[0].result.length > 0) {
+              saveAndRenderGroups(results[0].result);
+              alert(`✅ ${results[0].result.length} grupos foram mapeados com sucesso!`);
             } else {
-              alert('Não foi possível extrair dados desta página. Certifique-se de estar em um Grupo do Facebook (ex: facebook.com/groups/...).');
+              alert('Role um pouco a página de busca do Facebook para que os grupos apareçam na tela, depois clique em mapear novamente.');
             }
           });
-          return;
         }
-
-        saveAndRenderGroups(response.groups);
       });
     });
   });
 
   // Sync with AutoViral AI Platform
   btnSync.addEventListener('click', () => {
-    btnSync.textContent = '⏳ Sincronizando...';
+    btnSync.textContent = '⏳ Sincronizando com Plataforma...';
     btnSync.disabled = true;
 
     chrome.tabs.query({}, (tabs) => {
@@ -111,7 +139,7 @@ document.addEventListener('DOMContentLoaded', () => {
           url.includes('localhost') ||
           url.includes('vercel.app') ||
           url.includes('run.app') ||
-          tab.title.includes('AutoViral')
+          (tab.title && tab.title.includes('AutoViral'))
         ) {
           platformTabFound = true;
           chrome.tabs.sendMessage(tab.id, {
@@ -124,16 +152,23 @@ document.addEventListener('DOMContentLoaded', () => {
       });
 
       setTimeout(() => {
-        btnSync.textContent = '📡 Enviar Grupos para Plataforma AutoViral';
+        btnSync.textContent = '📡 Enviar Todos os Grupos para o Painel AutoViral';
         btnSync.disabled = false;
         if (platformTabFound) {
-          alert('✅ Sucesso! Grupos mapeados foram enviados para a aba aberta da plataforma AutoViral AI.');
+          alert(`✅ Sucesso! ${currentMappedGroups.length} grupos mapeados foram sincronizados com a aba aberta da plataforma AutoViral AI.`);
         } else {
-          alert('ℹ️ Abra a aba da plataforma AutoViral AI no navegador para sincronizar em tempo real, ou acesse a aba "Extensão Chrome & Mapeador FB" para ver os grupos.');
+          alert('ℹ️ Abra ou atualize a aba da plataforma AutoViral AI no seu navegador para ver os grupos no painel.');
         }
-      }, 600);
+      }, 500);
     });
   });
+
+  // Open platform button
+  if (btnOpenPlatform) {
+    btnOpenPlatform.addEventListener('click', () => {
+      chrome.tabs.create({ url: 'https://ais-dev-fdvdpr73jbu2hzpbbibxp5-395073471759.us-west2.run.app' });
+    });
+  }
 
   function saveAndRenderGroups(newGroups) {
     if (!newGroups || newGroups.length === 0) return;
@@ -162,52 +197,45 @@ document.addEventListener('DOMContentLoaded', () => {
 
     groupsContainer.style.display = 'block';
     groupsItems.innerHTML = '';
-    groups.slice(0, 10).forEach(g => {
+    groups.slice(0, 15).forEach(g => {
       const item = document.createElement('div');
       item.className = 'group-item';
       item.innerHTML = `
         <div>
           <div class="group-name" title="${g.name}">${g.name}</div>
-          <div class="group-members">${g.membersCount ? g.membersCount.toLocaleString('pt-BR') + ' membros' : 'Membros detectados'} • ${g.privacy || 'Público'}</div>
+          <div class="group-meta">${g.membersCount ? g.membersCount.toLocaleString('pt-BR') + ' membros' : 'Membros detectados'} • ${g.postsPerDay || '10+ posts/dia'}</div>
         </div>
-        <span style="color: #10b981; font-size: 10px; font-weight: 700;">OK</span>
+        <span style="color: #10b981; font-size: 10px; font-weight: 800;">MAPEADO</span>
       `;
       groupsItems.appendChild(item);
     });
   }
 });
 
-// Function injected into Facebook tab if content script isn't responsive
-function extractFacebookGroupDetails() {
-  try {
-    const titleEl = document.querySelector('h1') || document.querySelector('title');
-    const name = titleEl ? titleEl.innerText.replace(' | Facebook', '').trim() : document.title;
-    const url = window.location.href.split('?')[0];
-
-    // Try finding members count in text
-    let membersCount = 18500;
-    const allText = document.body.innerText;
-    const memberMatch = allText.match(/([0-9.,]+)\s*(mil|k)?\s*membros/i);
-    if (memberMatch) {
-      let num = parseFloat(memberMatch[1].replace('.', '').replace(',', '.'));
-      if (memberMatch[2] && (memberMatch[2].toLowerCase() === 'mil' || memberMatch[2].toLowerCase() === 'k')) {
-        num = num * 1000;
+function extractGroupsFromDOM() {
+  const detected = [];
+  const links = document.querySelectorAll('a[href*="/groups/"]');
+  links.forEach(link => {
+    const href = link.href || '';
+    if (href.includes('/create') || href.includes('/feed') || href.includes('/joins')) return;
+    const cleanUrl = href.split('?')[0];
+    const text = (link.innerText || '').trim();
+    if (text.length >= 3 && !text.includes('Participar') && !text.includes('Ver mais')) {
+      const exists = detected.some(d => d.url === cleanUrl || d.name === text);
+      if (!exists) {
+        detected.push({
+          id: 'fb-grp-' + Math.random().toString(36).substring(2, 9),
+          name: text,
+          url: cleanUrl,
+          membersCount: 25000,
+          postsPerDay: '10+ posts/dia',
+          privacy: 'Público',
+          mappedAt: new Date().toLocaleDateString('pt-BR'),
+          dispatchCount: 0,
+          status: 'ready'
+        });
       }
-      membersCount = Math.round(num);
     }
-
-    return {
-      id: 'fb-grp-' + Math.random().toString(36).substring(2, 9),
-      name: name || 'Grupo do Facebook',
-      url: url,
-      membersCount: membersCount,
-      privacy: allText.includes('Privado') ? 'Privado' : 'Público',
-      mappedAt: new Date().toLocaleDateString('pt-BR'),
-      niche: name.toLowerCase().includes('autista') || name.toLowerCase().includes('tea') || name.toLowerCase().includes('mãe') ? 'Mães & Autismo Infantil' : 'Educação & Vendas',
-      dispatchCount: 0,
-      status: 'ready'
-    };
-  } catch (e) {
-    return null;
-  }
+  });
+  return detected;
 }

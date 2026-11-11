@@ -46,7 +46,7 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const tabs = [
     { id: 'dashboard', label: 'Dashboard & Métricas', icon: TrendingUp },
-    { id: 'chrome_fb_groups', label: 'Extensão Chrome & Mapeador FB', icon: Share2, badge: '🔥 Grupos & Anti-Bloqueio' },
+    { id: 'chrome_fb_groups', label: 'Extensão Chrome • FB & YouTube', icon: Share2, badge: '🔥 Rolagem & Anti-Ban' },
     { id: 'robo_cidades', label: '🤖 Robô Divulgador & Cidades', icon: Bot, badge: 'Destravar 1ª Venda' },
     { id: 'brevo_disparador', label: 'Disparador E-mail & WhatsApp', icon: Mail, badge: 'Brevo 579 Contatos' },
     { id: 'meta_ads', label: 'Alavanca Meta Ads', icon: Zap, badge: '🚀 10x Vendas' },
@@ -80,6 +80,15 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         <div className="flex items-center gap-4">
+          <button
+            onClick={() => setActiveTab('chrome_fb_groups')}
+            className="hidden sm:flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-blue-950/80 border border-blue-700/60 text-blue-300 hover:text-white hover:border-blue-500 transition cursor-pointer"
+            title="Ver Robô de Grupos do Facebook & YouTube"
+          >
+            <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block animate-pulse" />
+            <span className="font-semibold">Robô FB &amp; YouTube Ativo</span>
+          </button>
+
           <div className="flex items-center gap-1.5 text-emerald-400 font-medium bg-emerald-950/60 px-2.5 py-1 rounded-full border border-emerald-800/40">
             <DollarSign className="w-3.5 h-3.5" />
             <span>Renda Familiar:</span>

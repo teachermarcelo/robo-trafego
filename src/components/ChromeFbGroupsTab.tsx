@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Share2,
   Download,
@@ -8,15 +8,12 @@ import {
   Zap,
   Play,
   Pause,
-  RotateCcw,
   Plus,
   Trash2,
   ExternalLink,
   CheckCircle2,
   AlertTriangle,
   FileCode,
-  FolderDown,
-  Layers,
   Sparkles,
   Search,
   Check,
@@ -27,10 +24,36 @@ import {
   ArrowRight,
   Filter,
   BarChart3,
-  Bot
+  Bot,
+  Video,
+  ThumbsUp,
+  MessageSquare,
+  Pin,
+  RefreshCw,
+  FolderOpen,
+  PieChart,
+  CheckCheck,
+  Activity,
+  Layers,
+  Repeat
 } from 'lucide-react';
 import JSZip from 'jszip';
-import { Campaign, FacebookGroup, FacebookAudience, FacebookGroupPostCampaign, FacebookPostLog } from '../types';
+import {
+  Campaign,
+  FacebookGroup,
+  FacebookAudience,
+  FacebookPostLog,
+  YouTubeTargetVideo,
+  YouTubeBotLog
+} from '../types';
+import {
+  CURITIBA_GROUPS,
+  PEDAGOGIA_GROUPS,
+  AUTISMO_GROUPS,
+  ALL_INITIAL_FACEBOOK_GROUPS,
+  INITIAL_SAVED_AUDIENCES
+} from '../data/facebookGroupsData';
+import { globalBotRunner } from '../utils/backgroundBotRunner';
 
 interface ChromeFbGroupsTabProps {
   campaigns: Campaign[];
@@ -38,106 +61,6 @@ interface ChromeFbGroupsTabProps {
   onSimulateSale?: (customerName: string, city: string, amount: number) => void;
   onNavigateTab?: (tab: string) => void;
 }
-
-const DEFAULT_FACEBOOK_GROUPS: FacebookGroup[] = [
-  {
-    id: 'fb-grp-1',
-    name: 'Mães Atípicas & Autismo Brasil (Apoio, Dicas & Atividades TEA)',
-    url: 'https://facebook.com/groups/maesatipicasautismobrasil',
-    membersCount: 148500,
-    privacy: 'Público',
-    niche: 'Autismo & Mães Atípicas',
-    mappedAt: '10/11/2026',
-    dispatchCount: 3,
-    status: 'ready',
-    categoryBadge: 'TEA & Maternidade'
-  },
-  {
-    id: 'fb-grp-2',
-    name: 'Pedagogia Prática, Educação Especial & Inclusão Escolar',
-    url: 'https://facebook.com/groups/pedagogiapraticaeeducacaoespecial',
-    membersCount: 92400,
-    privacy: 'Público',
-    niche: 'Pedagogia & Escolas',
-    mappedAt: '10/11/2026',
-    dispatchCount: 2,
-    status: 'ready',
-    categoryBadge: 'Professores & Apoio'
-  },
-  {
-    id: 'fb-grp-3',
-    name: 'Mães e Pais de Crianças Especiais - TDAH, Autismo & Desenvolvimento',
-    url: 'https://facebook.com/groups/maesepaisdecriancasespeciaisbrasil',
-    membersCount: 84200,
-    privacy: 'Público',
-    niche: 'Autismo & TDAH Infantil',
-    mappedAt: '10/11/2026',
-    dispatchCount: 1,
-    status: 'ready',
-    categoryBadge: 'Mães & Apoio'
-  },
-  {
-    id: 'fb-grp-4',
-    name: 'Desapego Infantil, Mães & Família Curitiba e Região Metropolitana',
-    url: 'https://facebook.com/groups/desapegoinfantilcwb',
-    membersCount: 68900,
-    privacy: 'Público',
-    niche: 'Mães Locais (Curitiba)',
-    mappedAt: '10/11/2026',
-    dispatchCount: 0,
-    status: 'ready',
-    categoryBadge: 'Região Curitiba'
-  },
-  {
-    id: 'fb-grp-5',
-    name: 'Atividades Psicopedagógicas, Coordenação Motora & Jogos Lúdicos',
-    url: 'https://facebook.com/groups/atividadespsicopedagogicascoordenacao',
-    membersCount: 57300,
-    privacy: 'Público',
-    niche: 'Coordenação Motora & TEA',
-    mappedAt: '10/11/2026',
-    dispatchCount: 1,
-    status: 'ready',
-    categoryBadge: 'Coordenação Fina'
-  },
-  {
-    id: 'fb-grp-6',
-    name: 'Lojistas de Roupas, Moda Infantil & Fornecedores no Atacado',
-    url: 'https://facebook.com/groups/lojistasmodainfantilatacado',
-    membersCount: 43100,
-    privacy: 'Público',
-    niche: 'Moda & Vendas WhatsApp',
-    mappedAt: '10/11/2026',
-    dispatchCount: 0,
-    status: 'ready',
-    categoryBadge: 'Lojas & Atacado'
-  }
-];
-
-const DEFAULT_AUDIENCES: FacebookAudience[] = [
-  {
-    id: 'aud-1',
-    name: 'Público 1: Mães Atípicas, Autismo & Apoio Escolar (325k Membros)',
-    description: 'Público de alta afinidade e dor latente. Mães exaustas buscando atividades em PDF para imprimir em casa sem sobrecarga sensorial.',
-    groupIds: ['fb-grp-1', 'fb-grp-3', 'fb-grp-4'],
-    groupsCount: 3,
-    estimatedMembers: 301600,
-    niche: 'Autismo & Maternidade Atípica',
-    targetProductId: 'camp-tarefinhas-autismo',
-    createdAt: '10/11/2026'
-  },
-  {
-    id: 'aud-2',
-    name: 'Público 2: Professoras, Pedagogas & Educação Especial (150k Membros)',
-    description: 'Educadoras procurando materiais prontos para poupar 10h de planejamento semanal de sala de aula e clínica.',
-    groupIds: ['fb-grp-2', 'fb-grp-5'],
-    groupsCount: 2,
-    estimatedMembers: 149700,
-    niche: 'Pedagogia & Sala de Aula',
-    targetProductId: 'camp-tarefinhas-autismo',
-    createdAt: '10/11/2026'
-  }
-];
 
 export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
   campaigns,
@@ -153,37 +76,46 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
     checkoutUrl: 'https://pay.kiwify.com.br/HE5xbnp',
   };
 
-  // Subtabs
-  const [activeSubTab, setActiveSubTab] = useState<'groups' | 'audiences' | 'campaign' | 'extension_guide'>('groups');
+  // Subtabs: groups | audiences | campaign | youtube | extension_guide
+  const [activeSubTab, setActiveSubTab] = useState<'groups' | 'audiences' | 'campaign' | 'youtube' | 'extension_guide'>('groups');
 
-  // Groups State
+  // Search folder filter: 'curitiba' | 'pedagogia' | 'autismo' | 'all'
+  const [activeSearchFolder, setActiveSearchFolder] = useState<'curitiba' | 'pedagogia' | 'autismo' | 'all'>('curitiba');
+
+  // All Mapped Groups State
   const [mappedGroups, setMappedGroups] = useState<FacebookGroup[]>(() => {
     try {
-      const saved = localStorage.getItem('autoviral_fb_mapped_groups');
+      const saved = localStorage.getItem('autoviral_fb_mapped_groups_v3');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       }
     } catch {}
-    return DEFAULT_FACEBOOK_GROUPS;
+    return ALL_INITIAL_FACEBOOK_GROUPS;
   });
 
-  const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>(['fb-grp-1', 'fb-grp-2', 'fb-grp-3']);
-  const [filterNiche, setFilterNiche] = useState<string>('all');
+  // Selected Group IDs for audience / campaign
+  const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>(() => {
+    return CURITIBA_GROUPS.slice(0, 10).map(g => g.id);
+  });
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // Audiences State
+  // Bulk import from text modal
+  const [isBulkImportModalOpen, setIsBulkImportModalOpen] = useState<boolean>(false);
+  const [bulkImportText, setBulkImportText] = useState<string>('');
+
+  // Saved Audiences Library (Display & Reusable)
   const [audiences, setAudiences] = useState<FacebookAudience[]>(() => {
     try {
-      const saved = localStorage.getItem('autoviral_fb_audiences');
+      const saved = localStorage.getItem('autoviral_fb_audiences_v3');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       }
     } catch {}
-    return DEFAULT_AUDIENCES;
+    return INITIAL_SAVED_AUDIENCES;
   });
-  const [selectedAudienceId, setSelectedAudienceId] = useState<string>('aud-1');
+  const [selectedAudienceId, setSelectedAudienceId] = useState<string>('aud-cwb-todos');
 
   // Create Audience Modal
   const [isAudienceModalOpen, setIsAudienceModalOpen] = useState(false);
@@ -194,50 +126,86 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
   const [isAddGroupModalOpen, setIsAddGroupModalOpen] = useState(false);
   const [manualGroupName, setManualGroupName] = useState('');
   const [manualGroupUrl, setManualGroupUrl] = useState('https://facebook.com/groups/');
-  const [manualMembersCount, setManualMembersCount] = useState(35000);
-  const [manualNiche, setManualNiche] = useState('Autismo & Mães Atípicas');
-  const [bulkUrlsText, setBulkUrlsText] = useState('');
+  const [manualMembersCount, setManualMembersCount] = useState(25000);
+  const [manualNiche, setManualNiche] = useState('Curitiba & Região');
+  const [manualPostsPerDay, setManualPostsPerDay] = useState('90+ posts por dia');
 
-  // Anti-Ban Interval Control (User requested: 120s, 300s, 400s)
-  const [intervalSeconds, setIntervalSeconds] = useState<number>(300); // Default 300s (5min)
-  const [isCustomInterval, setIsCustomInterval] = useState(false);
+  // Anti-Ban & Interval Controls (300s a 400s, max 500/dia)
+  const [intervalSeconds, setIntervalSeconds] = useState<number>(350);
+  const [dailyDispatchLimit, setDailyDispatchLimit] = useState<number>(500);
+  const [dailyDispatchesCompleted, setDailyDispatchesCompleted] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('autoviral_fb_daily_completed_v3');
+      if (saved) return parseInt(saved, 10);
+    } catch {}
+    return 24;
+  });
+  const [isRandomJitterActive, setIsRandomJitterActive] = useState<boolean>(true);
 
   // Campaign & Bot Execution State
   const [postHeadline, setPostHeadline] = useState(
-    '🌸 Mães, achei esse caderno de atividades adaptadas que salvou minha semana com meu filho autista!'
+    '🌸 Meninas e colegas de Curitiba, achei esse material de coordenação motora que facilitou demais minha rotina!'
   );
   const [postCopy, setPostCopy] = useState(
-    `Oi meninas! Passando pra compartilhar uma dica de mãe pra mãe... Meu filho tem muita resistência pra fazer tarefas convencionais e sobrecarga de estímulo visual. 
+    `Oi pessoal de Curitiba e região! Passando pra compartilhar uma dica que me ajudou muito.
 
-Consegui um caderno digital com mais de 100 tarefinhas lúdicas pensadas exatamente para coordenação motora fina, alfabetização e foco. Imprimi em casa e ele amou pintar e ligar os pontos!
+Quem trabalha com educação infantil ou tem filho com resistência a tarefas sabe o tempo que a gente gasta bolando atividades sem poluição visual.
 
-Está saindo por só R$ 9,90 no Pix (preço simbólico de mãe pra ajudar outras famílias). Quem quiser ver o material completo, deixei o link oficial aqui: https://pay.kiwify.com.br/HE5xbnp 
+Achei um caderno digital com mais de 100 atividades lúdicas de coordenação motora fina e alfabetização que funcionam perfeitamente para crianças típicas, com TDAH e autistas.
 
-Espero que ajude outras mães como me ajudou! ❤️`
+Dá pra imprimir em casa e o acesso sai por apenas R$ 9,90 no Pix pelo link oficial: https://pay.kiwify.com.br/HE5xbnp
+
+Espero que ajude outras pessoas como me ajudou! ❤️`
   );
   const [selectedProductId, setSelectedProductId] = useState<string>(defaultProduct.id);
   const [selectedCheckoutUrl, setSelectedCheckoutUrl] = useState<string>(defaultProduct.checkoutUrl || 'https://pay.kiwify.com.br/HE5xbnp');
   const [selectedPrice, setSelectedPrice] = useState<number>(defaultProduct.price || 9.90);
 
-  // Bot Running Engine
-  const [isBotRunning, setIsBotRunning] = useState<boolean>(false);
+  // Bot Running Engine & Countdown
+  const [isBotRunning, setIsBotRunning] = useState<boolean>(() => globalBotRunner.getIsRunning());
   const [currentPostingIndex, setCurrentPostingIndex] = useState<number>(0);
-  const [secondsRemaining, setSecondsRemaining] = useState<number>(intervalSeconds);
+  const [secondsRemaining, setSecondsRemaining] = useState<number>(() => {
+    const rem = globalBotRunner.getRemainingSeconds();
+    return rem > 0 ? rem : 350;
+  });
+
   const [botLogs, setBotLogs] = useState<FacebookPostLog[]>(() => {
     try {
-      const saved = localStorage.getItem('autoviral_fb_bot_logs');
+      const saved = localStorage.getItem('autoviral_fb_bot_logs_v3');
       if (saved) return JSON.parse(saved);
     } catch {}
     return [
       {
-        id: 'log-1',
-        groupId: 'fb-grp-1',
-        groupName: 'Mães Atípicas & Autismo Brasil (Apoio, Dicas & Atividades TEA)',
-        groupUrl: 'https://facebook.com/groups/maesatipicasautismobrasil',
-        postedAt: '10/11/2026 14:20',
-        headline: '🌸 Mães, achei esse caderno de atividades adaptadas...',
+        id: 'log-cwb-1',
+        groupId: 'fb-cwb-1',
+        groupName: 'ANUNCIE AQUI CURITIBA PR (5,9 mil membros)',
+        groupUrl: 'https://facebook.com/groups/anuncieaquicuritibapr',
+        postedAt: '10/11/2026 15:52',
+        headline: '🌸 Meninas e colegas de Curitiba, achei esse material...',
         status: 'success',
-        intervalWaitedSeconds: 300,
+        intervalWaitedSeconds: 345,
+        checkoutUrl: 'https://pay.kiwify.com.br/HE5xbnp'
+      },
+      {
+        id: 'log-cwb-2',
+        groupId: 'fb-cwb-2',
+        groupName: 'Anuncie e Venda, Curitiba e Região (21 mil membros)',
+        groupUrl: 'https://facebook.com/groups/anuncieevendacuritibaeregiao',
+        postedAt: '10/11/2026 15:46',
+        headline: '🌸 Meninas e colegas de Curitiba, achei esse material...',
+        status: 'success',
+        intervalWaitedSeconds: 372,
+        checkoutUrl: 'https://pay.kiwify.com.br/HE5xbnp'
+      },
+      {
+        id: 'log-cwb-5',
+        groupId: 'fb-cwb-5',
+        groupName: 'CURITIBA (40.712 membros)',
+        groupUrl: 'https://facebook.com/groups/curitibagrupogeral',
+        postedAt: '10/11/2026 15:40',
+        headline: '🌸 Meninas e colegas de Curitiba, achei esse material...',
+        status: 'success',
+        intervalWaitedSeconds: 318,
         checkoutUrl: 'https://pay.kiwify.com.br/HE5xbnp'
       }
     ];
@@ -245,25 +213,89 @@ Espero que ajude outras mães como me ajudou! ❤️`
 
   // Chrome Extension Bridge Status
   const [isExtensionDetected, setIsExtensionDetected] = useState<boolean>(false);
-  const [isScanningGroups, setIsScanningGroups] = useState<boolean>(false);
-  const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [isZipping, setIsZipping] = useState<boolean>(false);
 
-  // Sync to local storage
+  // YouTube Automation State
+  const [youtubeVideos, setYoutubeVideos] = useState<YouTubeTargetVideo[]>(() => {
+    try {
+      const saved = localStorage.getItem('autoviral_yt_videos_v2');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return [
+      {
+        id: 'yt-1',
+        url: 'https://www.youtube.com/watch?v=alfabetizacao-infantil-ludica',
+        title: 'Como Alfabetizar Criança Autista e com TDAH sem Choro nem Birra',
+        channelName: 'Pedagogia Prática com Amor (182 mil inscritos)',
+        viewsCount: '48.900 visualizações',
+        thumbnailUrl: 'https://images.unsplash.com/photo-1503676260728-1c00da094a0b?w=400&q=80',
+        actionLike: true,
+        actionComment: true,
+        actionPinCampaign: true,
+        commentText: 'Excelente vídeo, professora! Como mãe e pedagoga sei o quanto materiais lúdicos mudam tudo. Para quem também procura atividades de coordenação motora e alfabetização em PDF prontas para imprimir por R$ 9,90 no Pix, consegui com acesso imediato aqui: https://pay.kiwify.com.br/HE5xbnp ❤️ Parabéns pelo conteúdo!',
+        status: 'completed',
+        lastExecutedAt: '10/11/2026 15:10'
+      },
+      {
+        id: 'yt-2',
+        url: 'https://www.youtube.com/watch?v=coordenacao-motora-fina-tea',
+        title: '5 Atividades de Coordenação Motora Fina para Fazer em Casa (Fácil)',
+        channelName: 'Psicopedagogia Infantil & Terapia (94 mil inscritos)',
+        viewsCount: '32.100 visualizações',
+        thumbnailUrl: 'https://images.unsplash.com/photo-1544717305-2782549b5136?w=400&q=80',
+        actionLike: true,
+        actionComment: true,
+        actionPinCampaign: true,
+        commentText: 'Dica preciosa! Adotei essas atividades na minha rotina. O caderno com mais de 100 tarefinhas da Kiwify (R$ 9,90) encaixou perfeitamente com o que você ensinou nesse vídeo. Deixo a recomendação pras mães e profes: https://pay.kiwify.com.br/HE5xbnp',
+        status: 'ready'
+      }
+    ];
+  });
+
+  const [newYtUrl, setNewYtUrl] = useState('');
+  const [newYtTitle, setNewYtTitle] = useState('');
+  const [newYtChannel, setNewYtChannel] = useState('');
+  const [newYtComment, setNewYtComment] = useState(
+    'Maravilhoso vídeo! Adorei a explicação. Para quem busca caderno de atividades de coordenação motora em PDF por R$ 9,90 no Pix, peguei aqui: https://pay.kiwify.com.br/HE5xbnp'
+  );
+  const [isAddYtModalOpen, setIsAddYtModalOpen] = useState(false);
+  const [ytLogs, setYtLogs] = useState<YouTubeBotLog[]>([]);
+
+  // Persist State to LocalStorage
   useEffect(() => {
     try {
-      localStorage.setItem('autoviral_fb_mapped_groups', JSON.stringify(mappedGroups));
-      localStorage.setItem('autoviral_fb_audiences', JSON.stringify(audiences));
-      localStorage.setItem('autoviral_fb_bot_logs', JSON.stringify(botLogs));
+      localStorage.setItem('autoviral_fb_mapped_groups_v3', JSON.stringify(mappedGroups));
+      localStorage.setItem('autoviral_fb_audiences_v3', JSON.stringify(audiences));
+      localStorage.setItem('autoviral_fb_bot_logs_v3', JSON.stringify(botLogs));
+      localStorage.setItem('autoviral_fb_daily_completed_v3', dailyDispatchesCompleted.toString());
+      localStorage.setItem('autoviral_yt_videos_v2', JSON.stringify(youtubeVideos));
     } catch {}
-  }, [mappedGroups, audiences, botLogs]);
+  }, [mappedGroups, audiences, botLogs, dailyDispatchesCompleted, youtubeVideos]);
+
+  // Hook into Persistent Background Bot Runner
+  useEffect(() => {
+    globalBotRunner.setCallbacks(
+      () => {
+        handleExecuteGroupPost();
+      },
+      (remainingSecs, isExec) => {
+        setSecondsRemaining(remainingSecs);
+        if (isExec) {
+          // Handled inside handleExecuteGroupPost
+        }
+      }
+    );
+
+    // Initial check
+    setIsBotRunning(globalBotRunner.getIsRunning());
+  }, [currentPostingIndex, selectedGroupIds, mappedGroups, dailyDispatchesCompleted, dailyDispatchLimit]);
 
   // Listen for extension events
   useEffect(() => {
     const handleExtensionGroups = (event: any) => {
       if (event.detail && Array.isArray(event.detail.groups)) {
         setIsExtensionDetected(true);
-        const imported = event.detail.groups;
+        const imported: FacebookGroup[] = event.detail.groups;
         setMappedGroups(prev => {
           const merged = [...imported, ...prev];
           const unique = merged.filter((g, index, self) =>
@@ -276,7 +308,6 @@ Espero que ajude outras mães como me ajudou! ❤️`
 
     window.addEventListener('autoviral_extension_groups_received', handleExtensionGroups);
 
-    // Check if extension injected the attribute
     if (document.documentElement.getAttribute('data-autoviral-extension-installed') === 'true') {
       setIsExtensionDetected(true);
     }
@@ -286,50 +317,41 @@ Espero que ajude outras mães como me ajudou! ❤️`
     };
   }, []);
 
-  // Bot timer loop
-  useEffect(() => {
-    let timer: any = null;
-
-    if (isBotRunning) {
-      timer = setInterval(() => {
-        setSecondsRemaining(prev => {
-          if (prev <= 1) {
-            // Trigger dispatch for current group
-            handleExecuteGroupPost();
-            return intervalSeconds;
-          }
-          return prev - 1;
-        });
-      }, 1000);
+  // Execute Facebook post on current group
+  const handleExecuteGroupPost = () => {
+    if (dailyDispatchesCompleted >= dailyDispatchLimit) {
+      globalBotRunner.stop();
+      setIsBotRunning(false);
+      alert(`⚠️ Limite diário de segurança de ${dailyDispatchLimit} disparos atingido com sucesso!`);
+      return;
     }
 
-    return () => {
-      if (timer) clearInterval(timer);
-    };
-  }, [isBotRunning, currentPostingIndex, intervalSeconds, selectedGroupIds, mappedGroups]);
-
-  // Execute post on current group
-  const handleExecuteGroupPost = () => {
     const targetGroups = mappedGroups.filter(g => selectedGroupIds.includes(g.id));
     if (targetGroups.length === 0) {
+      globalBotRunner.stop();
       setIsBotRunning(false);
       return;
     }
 
     const currentGroup = targetGroups[currentPostingIndex % targetGroups.length];
+    const waited = isRandomJitterActive
+      ? Math.floor(Math.random() * (400 - 300 + 1)) + 300
+      : intervalSeconds;
+
     const newLog: FacebookPostLog = {
       id: `log-${Date.now()}`,
       groupId: currentGroup.id,
-      groupName: currentGroup.name,
+      groupName: `${currentGroup.name} (${currentGroup.membersCount.toLocaleString('pt-BR')} membros)`,
       groupUrl: currentGroup.url,
       postedAt: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-      headline: postHeadline.slice(0, 50) + '...',
+      headline: postHeadline.slice(0, 55) + '...',
       status: 'success',
-      intervalWaitedSeconds: intervalSeconds,
+      intervalWaitedSeconds: waited,
       checkoutUrl: selectedCheckoutUrl
     };
 
     setBotLogs(prev => [newLog, ...prev]);
+    setDailyDispatchesCompleted(prev => prev + 1);
 
     // Update group dispatch count
     setMappedGroups(prev =>
@@ -340,7 +362,7 @@ Espero que ajude outras mães como me ajudou! ❤️`
       )
     );
 
-    // Register tracking event
+    // Tracking event
     if (onAddTrackingEvent) {
       onAddTrackingEvent({
         id: `fb-evt-${Date.now()}`,
@@ -349,23 +371,153 @@ Espero que ajude outras mães como me ajudou! ❤️`
         niche: currentGroup.niche,
         type: 'impression',
         timestamp: new Date().toISOString(),
-        geo: { city: 'Curitiba', state: 'PR', country: 'Brasil' },
+        geo: { city: currentGroup.city || 'Curitiba', state: 'PR', country: 'Brasil' },
         device: 'mobile',
         ageBracket: '25-34',
         source: 'facebook_groups',
         adCreativeName: `Post no Grupo: ${currentGroup.name}`,
-        utmContent: `interval_${intervalSeconds}s`
+        utmContent: `interval_${waited}s`
       });
     }
 
     // Occasional simulated conversion
-    if (Math.random() < 0.25 && onSimulateSale) {
-      const names = ['Ana Paula (Mãe do Bento)', 'Luciana Castro (Pedagoga)', 'Mariana Ferreira (Curitiba)', 'Carla Souza'];
+    if (Math.random() < 0.28 && onSimulateSale) {
+      const names = [
+        'Claudia Silveira (Pedagoga - Curitiba)',
+        'Mãe do Bento (Curitiba CWB)',
+        'Prof. Elaine Santos (Educação Infantil)',
+        'Renata Oliveira (TEA Apoio)'
+      ];
       const chosenName = names[Math.floor(Math.random() * names.length)];
-      onSimulateSale(chosenName, 'Curitiba / Paraná', selectedPrice);
+      onSimulateSale(chosenName, currentGroup.city || 'Curitiba / PR', selectedPrice);
     }
 
     setCurrentPostingIndex(prev => (prev + 1) % targetGroups.length);
+  };
+
+  // Toggle Bot Execution with Background Persistence
+  const handleToggleBot = () => {
+    if (isBotRunning) {
+      globalBotRunner.stop();
+      setIsBotRunning(false);
+    } else {
+      globalBotRunner.start(
+        intervalSeconds,
+        isRandomJitterActive,
+        () => handleExecuteGroupPost(),
+        (remaining) => setSecondsRemaining(remaining)
+      );
+      setIsBotRunning(true);
+    }
+  };
+
+  // Filter groups according to active folder search tab
+  const getGroupsByFolder = (folder: 'curitiba' | 'pedagogia' | 'autismo' | 'all') => {
+    if (folder === 'curitiba') {
+      return mappedGroups.filter(g => (g.city === 'Curitiba' || g.searchTerm === 'curitiba' || g.name.toLowerCase().includes('curitiba')));
+    }
+    if (folder === 'pedagogia') {
+      return mappedGroups.filter(g => (g.searchTerm === 'pedagogia' || g.niche.includes('Pedagogia') || g.name.toLowerCase().includes('pedagog')));
+    }
+    if (folder === 'autismo') {
+      return mappedGroups.filter(g => (g.searchTerm === 'autismo' || g.niche.includes('Autismo') || g.name.toLowerCase().includes('autista') || g.name.toLowerCase().includes('tea')));
+    }
+    return mappedGroups;
+  };
+
+  const folderGroups = getGroupsByFolder(activeSearchFolder);
+
+  const filteredGroups = folderGroups.filter(g => {
+    const matchesSearch =
+      g.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      g.url.toLowerCase().includes(searchQuery.toLowerCase());
+    return matchesSearch;
+  });
+
+  // Toggle group selection
+  const handleToggleGroup = (id: string) => {
+    setSelectedGroupIds(prev =>
+      prev.includes(id) ? prev.filter(gid => gid !== id) : [...prev, id]
+    );
+  };
+
+  // Select all groups in current folder
+  const handleSelectAllFolder = () => {
+    const folderIds = folderGroups.map(g => g.id);
+    const allSelected = folderIds.every(id => selectedGroupIds.includes(id));
+
+    if (allSelected) {
+      setSelectedGroupIds(prev => prev.filter(id => !folderIds.includes(id)));
+    } else {
+      setSelectedGroupIds(prev => [...new Set([...prev, ...folderIds])]);
+    }
+  };
+
+  // Create Audience from selected groups and add to display library
+  const handleCreateAudience = () => {
+    if (selectedGroupIds.length === 0) {
+      alert('Selecione ao menos 1 grupo na lista abaixo para criar o público.');
+      return;
+    }
+
+    const selectedObjs = mappedGroups.filter(g => selectedGroupIds.includes(g.id));
+    const totalMembers = selectedObjs.reduce((acc, curr) => acc + curr.membersCount, 0);
+
+    const newAud: FacebookAudience = {
+      id: `aud-${Date.now()}`,
+      name:
+        newAudienceName ||
+        `Público Personalizado: ${activeSearchFolder.toUpperCase()} (${selectedGroupIds.length} Grupos - ${(totalMembers / 1000).toFixed(0)}k membros)`,
+      description:
+        newAudienceDesc ||
+        `Público segmentado contendo ${selectedGroupIds.length} grupos mapeados da busca "${activeSearchFolder}". Total de ${totalMembers.toLocaleString('pt-BR')} pessoas alcançáveis.`,
+      groupIds: selectedGroupIds,
+      groupsCount: selectedGroupIds.length,
+      estimatedMembers: totalMembers,
+      niche: selectedObjs[0]?.niche || 'Curitiba & Região',
+      targetProductId: selectedProductId,
+      createdAt: new Date().toLocaleDateString('pt-BR'),
+      lastUsedAt: 'Agora mesmo',
+      campaignUsageCount: 1,
+      groupNamesPreview: selectedObjs.slice(0, 5).map(g => g.name)
+    };
+
+    setAudiences(prev => [newAud, ...prev]);
+    setSelectedAudienceId(newAud.id);
+    setIsAudienceModalOpen(false);
+    setNewAudienceName('');
+    setNewAudienceDesc('');
+    setActiveSubTab('audiences');
+    alert('✅ Público salvo na sua Biblioteca de Públicos! Você pode reutilizá-lo a qualquer momento.');
+  };
+
+  // Reuse an existing saved audience
+  const handleReuseAudience = (aud: FacebookAudience) => {
+    setSelectedAudienceId(aud.id);
+    setSelectedGroupIds(aud.groupIds);
+
+    // Update audience usage stats
+    setAudiences(prev =>
+      prev.map(a =>
+        a.id === aud.id
+          ? {
+              ...a,
+              lastUsedAt: 'Agora mesmo',
+              campaignUsageCount: (a.campaignUsageCount || 0) + 1
+            }
+          : a
+      )
+    );
+
+    setActiveSubTab('campaign');
+    alert(`🚀 Público "${aud.name}" carregado com sucesso no Robô Divulgador!`);
+  };
+
+  // Delete an audience
+  const handleDeleteAudience = (id: string) => {
+    if (confirm('Tem certeza que deseja excluir este público salvo?')) {
+      setAudiences(prev => prev.filter(a => a.id !== id));
+    }
   };
 
   // Download complete Chrome Extension as .ZIP
@@ -374,7 +526,6 @@ Espero que ajude outras mães como me ajudou! ❤️`
     try {
       const zip = new JSZip();
 
-      // Read extension files
       const manifestRes = await fetch('/chrome-extension/manifest.json');
       const manifestText = await manifestRes.text();
 
@@ -393,153 +544,38 @@ Espero que ajude outras mães como me ajudou! ❤️`
       const readmeRes = await fetch('/chrome-extension/README.md');
       const readmeText = await readmeRes.text();
 
-      // Add files to zip
       zip.file('manifest.json', manifestText);
       zip.file('popup.html', popupHtmlText);
       zip.file('popup.js', popupJsText);
       zip.file('content.js', contentJsText);
       zip.file('background.js', backgroundJsText);
       zip.file('README.md', readmeText);
-      zip.file('COMO-INSTALAR.txt', `INSTRUÇÕES RÁPIDAS DE INSTALAÇÃO NO GOOGLE CHROME:\n\n1. Descompacte este arquivo ZIP em uma pasta (ex: em Downloads ou na Área de Trabalho).\n2. Abra o Chrome e digite na barra de endereços: chrome://extensions\n3. No topo direito, ative a opção "Modo do desenvolvedor".\n4. No topo esquerdo, clique em "Carregar sem compactação" (Load unpacked).\n5. Selecione a pasta descompactada.\n6. Pronto! A extensão AutoViral AI estará ativa no seu navegador.`);
+      zip.file(
+        'COMO-INSTALAR.txt',
+        `INSTRUÇÕES DE INSTALAÇÃO NO GOOGLE CHROME:\n\n1. Descompacte este arquivo ZIP.\n2. No Chrome, abra chrome://extensions\n3. Ative a chave "Modo do desenvolvedor" (topo direito).\n4. Clique em "Carregar sem compactação" (topo esquerdo) e escolha a pasta descompactada.\n5. Abra o Facebook e o YouTube: o robô mapeia e engaja automaticamente!`
+      );
 
       const blob = await zip.generateAsync({ type: 'blob' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = 'extensao-autoviral-facebook-grupos.zip';
+      link.download = 'extensao-autoviral-facebook-youtube.zip';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
     } catch (err) {
       console.error('Error generating extension zip:', err);
-      alert('Iniciando download dos arquivos da extensão...');
       window.open('/chrome-extension/manifest.json', '_blank');
     } finally {
       setIsZipping(false);
     }
   };
 
-  // Scan open Facebook groups simulator / bridge
-  const handleScanFacebookGroups = () => {
-    setIsScanningGroups(true);
-    setTimeout(() => {
-      const newDiscoveredGroups: FacebookGroup[] = [
-        {
-          id: `fb-disc-${Date.now()}-1`,
-          name: 'Mães e Filhos Especiais - Estimulação Infantil & Brincadeiras',
-          url: 'https://facebook.com/groups/maesefilhosespeciaisbr',
-          membersCount: 78400,
-          privacy: 'Público',
-          niche: 'Autismo & Mães Atípicas',
-          mappedAt: new Date().toLocaleDateString('pt-BR'),
-          dispatchCount: 0,
-          status: 'ready',
-          categoryBadge: 'Mães & Apoio'
-        },
-        {
-          id: `fb-disc-${Date.now()}-2`,
-          name: 'Alfabetização Infantil Lúdica & Material para Imprimir',
-          url: 'https://facebook.com/groups/alfabetizacaoinfantilludicapdf',
-          membersCount: 112000,
-          privacy: 'Público',
-          niche: 'Pedagogia & Escolas',
-          mappedAt: new Date().toLocaleDateString('pt-BR'),
-          dispatchCount: 0,
-          status: 'ready',
-          categoryBadge: 'Pedagogia & Alfabetização'
-        }
-      ];
-
-      setMappedGroups(prev => {
-        const merged = [...newDiscoveredGroups, ...prev];
-        return merged.filter((g, i, self) => i === self.findIndex(t => t.name === g.name));
-      });
-
-      setSelectedGroupIds(prev => [...new Set([...prev, newDiscoveredGroups[0].id, newDiscoveredGroups[1].id])]);
-      setIsScanningGroups(false);
-      alert('🎉 2 novos grupos de alto engajamento foram detectados e mapeados com sucesso!');
-    }, 1200);
-  };
-
-  // Toggle group selection
-  const handleToggleGroup = (id: string) => {
-    setSelectedGroupIds(prev =>
-      prev.includes(id) ? prev.filter(gid => gid !== id) : [...prev, id]
-    );
-  };
-
-  // Select all groups
-  const handleSelectAll = () => {
-    if (selectedGroupIds.length === mappedGroups.length) {
-      setSelectedGroupIds([]);
-    } else {
-      setSelectedGroupIds(mappedGroups.map(g => g.id));
-    }
-  };
-
-  // Create Audience from selected groups
-  const handleCreateAudience = () => {
-    if (selectedGroupIds.length === 0) {
-      alert('Selecione ao menos 1 grupo mapeado para criar o público.');
-      return;
-    }
-
-    const selectedObjs = mappedGroups.filter(g => selectedGroupIds.includes(g.id));
-    const totalMembers = selectedObjs.reduce((acc, curr) => acc + curr.membersCount, 0);
-
-    const newAud: FacebookAudience = {
-      id: `aud-${Date.now()}`,
-      name: newAudienceName || `Público: ${selectedObjs[0].categoryBadge || 'Mães & Educação'} (${selectedGroupIds.length} Grupos - ${(totalMembers / 1000).toFixed(0)}k membros)`,
-      description: newAudienceDesc || `Público qualificado gerado a partir de ${selectedGroupIds.length} grupos do Facebook mapeados via extensão. Foco em conversão imediata no Pix R$ 9,90.`,
-      groupIds: selectedGroupIds,
-      groupsCount: selectedGroupIds.length,
-      estimatedMembers: totalMembers,
-      niche: selectedObjs[0].niche || 'Maternidade & Autismo',
-      targetProductId: selectedProductId,
-      createdAt: new Date().toLocaleDateString('pt-BR')
-    };
-
-    setAudiences(prev => [newAud, ...prev]);
-    setSelectedAudienceId(newAud.id);
-    setIsAudienceModalOpen(false);
-    setNewAudienceName('');
-    setNewAudienceDesc('');
-    setActiveSubTab('audiences');
-    alert('✅ Público personalizado criado com sucesso! Agora você pode criar a campanha de divulgação.');
-  };
-
-  // Add Manual Group
-  const handleAddManualGroup = () => {
-    if (!manualGroupName.trim()) {
-      alert('Por favor, informe o nome do grupo.');
-      return;
-    }
-
-    const newGrp: FacebookGroup = {
-      id: `fb-manual-${Date.now()}`,
-      name: manualGroupName.trim(),
-      url: manualGroupUrl.trim() || 'https://facebook.com/groups/',
-      membersCount: Number(manualMembersCount) || 25000,
-      privacy: 'Público',
-      niche: manualNiche,
-      mappedAt: new Date().toLocaleDateString('pt-BR'),
-      dispatchCount: 0,
-      status: 'ready',
-      categoryBadge: manualNiche.split(' ')[0]
-    };
-
-    setMappedGroups(prev => [newGrp, ...prev]);
-    setSelectedGroupIds(prev => [...prev, newGrp.id]);
-    setIsAddGroupModalOpen(false);
-    setManualGroupName('');
-  };
-
-  // Filter groups
-  const filteredGroups = mappedGroups.filter(g => {
-    const matchesNiche = filterNiche === 'all' || g.niche === filterNiche;
-    const matchesSearch = g.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          g.url.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesNiche && matchesSearch;
-  });
+  // Logistics & Analytics Calculations
+  const totalTargetGroups = selectedGroupIds.length;
+  const completedCount = botLogs.length;
+  const pendingCount = Math.max(0, totalTargetGroups - (completedCount % (totalTargetGroups || 1)));
+  const successPercentage = totalTargetGroups > 0 ? Math.min(100, Math.round((completedCount / totalTargetGroups) * 100)) : 100;
+  const pendingPercentage = Math.max(0, 100 - successPercentage);
 
   const selectedGroupsTotalMembers = mappedGroups
     .filter(g => selectedGroupIds.includes(g.id))
@@ -547,31 +583,34 @@ Espero que ajude outras mães como me ajudou! ❤️`
 
   return (
     <div className="space-y-6">
-      {/* Top Banner - Context & Chrome Extension Announcement */}
-      <div className="bg-gradient-to-r from-blue-950/80 via-slate-900 to-indigo-950/80 border border-blue-800/40 rounded-2xl p-6 shadow-2xl relative overflow-hidden">
-        <div className="absolute -right-10 -bottom-10 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
-        
+      {/* Top Banner with Background Execution Indicator */}
+      <div className="bg-gradient-to-r from-blue-950/90 via-slate-900 to-indigo-950/90 border border-blue-800/40 rounded-2xl p-6 shadow-2xl relative overflow-hidden">
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6 relative z-10">
           <div className="space-y-2 max-w-2xl">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="bg-blue-500/20 text-blue-300 border border-blue-400/30 px-3 py-0.5 rounded-full text-xs font-semibold flex items-center gap-1.5">
                 <Share2 className="w-3.5 h-3.5 text-blue-400" />
-                EXTENSÃO GOOGLE CHROME + FACEBOOK
+                MAPEADOR DE ROLAGEM FB &amp; YOUTUBE
               </span>
               <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 px-3 py-0.5 rounded-full text-xs font-semibold flex items-center gap-1">
                 <ShieldCheck className="w-3.5 h-3.5" />
-                Intervalo Anti-Bloqueio: 120s, 300s, 400s
+                Intervalo 300s a 400s • Até 500 Disparos/Dia
               </span>
+              {isBotRunning && (
+                <span className="bg-emerald-500 text-slate-950 px-2.5 py-0.5 rounded-full text-xs font-black flex items-center gap-1 animate-pulse">
+                  <Activity className="w-3.5 h-3.5" />
+                  RODANDO EM SEGUNDO PLANO
+                </span>
+              )}
             </div>
-            
+
             <h1 className="text-2xl font-black text-white tracking-tight flex items-center gap-2">
-              Mapeador de Grupos Facebook & Robô Divulgador Anti-Bloqueio
+              Mapeador de Grupos por Rolagem &amp; Robô Divulgador Autônomo
             </h1>
-            
+
             <p className="text-sm text-slate-300 leading-relaxed">
-              Instale a extensão no seu Chrome, abra os grupos que você participa no Facebook e a plataforma mapeia
-              automaticamente os membros. Crie públicos personalizados e ative a divulgação com pausas humanas programadas 
-              (<strong className="text-emerald-400">120s, 300s ou 400s</strong>) para nunca tomar bloqueio de spam!
+              O robô continua disparando <strong className="text-emerald-400">mesmo quando a página estiver minimizada</strong> ou quando você navegar em outras abas. 
+              Organize os grupos por busca (<strong className="text-blue-300">Curitiba: 48 grupos</strong>, <strong className="text-purple-300">Pedagogia: 7 grupos</strong>), salve públicos na biblioteca e acompanhe a logística com métricas e gráficos ao vivo!
             </p>
           </div>
 
@@ -579,7 +618,7 @@ Espero que ajude outras mães como me ajudou! ❤️`
             <button
               onClick={handleDownloadExtensionZip}
               disabled={isZipping}
-              className="px-5 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/30 transition transform hover:-translate-y-0.5"
+              className="px-5 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/30 transition transform hover:-translate-y-0.5 cursor-pointer"
             >
               {isZipping ? (
                 <>
@@ -596,33 +635,37 @@ Espero que ajude outras mães como me ajudou! ❤️`
 
             <button
               onClick={() => setActiveSubTab('extension_guide')}
-              className="px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 transition"
+              className="px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 transition cursor-pointer"
             >
               <HelpCircle className="w-4 h-4 text-blue-400" />
-              Como Instalar em 30s
+              Como Instalar
             </button>
           </div>
         </div>
 
-        {/* Live Bridge Connection Pill */}
+        {/* Live Persistent Background Status Bar */}
         <div className="mt-5 pt-4 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-4 text-xs">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <span className="flex h-2.5 w-2.5 relative">
-              <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${isExtensionDetected ? 'bg-emerald-400' : 'bg-blue-400'} opacity-75`}></span>
-              <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${isExtensionDetected ? 'bg-emerald-500' : 'bg-blue-500'}`}></span>
+              <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${isBotRunning ? 'bg-emerald-400' : 'bg-blue-400'} opacity-75`}></span>
+              <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${isBotRunning ? 'bg-emerald-500' : 'bg-blue-500'}`}></span>
             </span>
             <span className="text-slate-300 font-medium">
-              Bridge com o Chrome:
+              Status do Robô:
             </span>
-            <span className={`font-semibold ${isExtensionDetected ? 'text-emerald-400' : 'text-blue-300'}`}>
-              {isExtensionDetected ? '✅ Extensão Conectada & Sincronizada' : '📡 Mapeamento Ativo (Modo Direto & Bridge Web)'}
+            <span className={`font-bold ${isBotRunning ? 'text-emerald-400' : 'text-slate-400'}`}>
+              {isBotRunning
+                ? `🟢 Ativo em Segundo Plano (Próximo disparo em ${secondsRemaining}s • Executa mesmo minimizado)`
+                : '⏸️ Parado (Clique em Iniciar para rodar com pausas de 300s a 400s)'}
             </span>
           </div>
 
           <div className="flex items-center gap-4 text-slate-400">
-            <span>Grupos no Radar: <strong className="text-white">{mappedGroups.length}</strong></span>
+            <span>Disparos Hoje: <strong className="text-white">{dailyDispatchesCompleted} / {dailyDispatchLimit}</strong></span>
             <span>•</span>
-            <span>Público Total Acumulado: <strong className="text-emerald-400">{mappedGroups.reduce((a, b) => a + b.membersCount, 0).toLocaleString('pt-BR')} membros</strong></span>
+            <span>Grupos de Curitiba: <strong className="text-blue-300">48 grupos mapeados</strong></span>
+            <span>•</span>
+            <span>Públicos Salvos: <strong className="text-indigo-400">{audiences.length}</strong></span>
           </div>
         </div>
       </div>
@@ -631,97 +674,144 @@ Espero que ajude outras mães como me ajudou! ❤️`
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 pb-3">
         <button
           onClick={() => setActiveSubTab('groups')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition ${
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition cursor-pointer ${
             activeSubTab === 'groups'
               ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/30'
               : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
           }`}
         >
           <Share2 className="w-4 h-4" />
-          1. Grupos Mapeados do Facebook ({mappedGroups.length})
+          1. Grupos Mapeados por Busca ({mappedGroups.length})
         </button>
 
         <button
           onClick={() => setActiveSubTab('audiences')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition ${
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition cursor-pointer ${
             activeSubTab === 'audiences'
               ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/30'
               : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
           }`}
         >
           <Users className="w-4 h-4" />
-          2. Criar & Gerenciar Públicos ({audiences.length})
+          2. Biblioteca de Públicos Salvos ({audiences.length})
         </button>
 
         <button
           onClick={() => setActiveSubTab('campaign')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition relative ${
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition relative cursor-pointer ${
             activeSubTab === 'campaign'
               ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/30'
               : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
           }`}
         >
           <Bot className="w-4 h-4 text-emerald-300" />
-          3. Campanha & Robô Divulgador (Anti-Bloqueio)
+          3. Robô &amp; Logística de Postagens
           {isBotRunning && (
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping absolute -top-0.5 -right-0.5" />
           )}
         </button>
 
         <button
+          onClick={() => setActiveSubTab('youtube')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition cursor-pointer ${
+            activeSubTab === 'youtube'
+              ? 'bg-red-600 text-white shadow-lg shadow-red-900/30'
+              : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
+          }`}
+        >
+          <Video className="w-4 h-4 text-red-400" />
+          4. ▶️ Robô YouTube (Comentários &amp; Likes)
+        </button>
+
+        <button
           onClick={() => setActiveSubTab('extension_guide')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition ${
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition cursor-pointer ${
             activeSubTab === 'extension_guide'
               ? 'bg-purple-600 text-white shadow-lg shadow-purple-900/30'
               : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
           }`}
         >
           <FileCode className="w-4 h-4" />
-          4. Como Instalar a Extensão no Chrome
+          5. Como Usar no Chrome
         </button>
       </div>
 
-      {/* SUBTAB 1: MAPPED FACEBOOK GROUPS */}
+      {/* SUBTAB 1: MAPPED GROUPS ORGANIZED BY SEARCH TERM */}
       {activeSubTab === 'groups' && (
         <div className="space-y-6">
-          {/* Action Header for Groups */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
-            <div className="flex flex-wrap items-center gap-3">
+          {/* Search Term Folder Selector */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5 mr-2">
+                <FolderOpen className="w-4 h-4 text-blue-400" />
+                Buscas do Facebook:
+              </span>
+
               <button
-                onClick={handleScanFacebookGroups}
-                disabled={isScanningGroups}
-                className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-xs sm:text-sm flex items-center gap-2 shadow-lg shadow-blue-900/20 transition"
+                onClick={() => setActiveSearchFolder('curitiba')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                  activeSearchFolder === 'curitiba'
+                    ? 'bg-blue-600 text-white shadow-md shadow-blue-900/40'
+                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                }`}
               >
-                {isScanningGroups ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    Mapeando Grupos Abertos...
-                  </>
-                ) : (
-                  <>
-                    <Zap className="w-4 h-4 text-amber-300" />
-                    Mapear Grupos Abertos do Facebook
-                  </>
-                )}
+                <span>🏙️ Busca: "curitiba"</span>
+                <span className="bg-blue-950 px-2 py-0.5 rounded-full text-[10px] text-blue-200 font-extrabold border border-blue-700">
+                  48 grupos
+                </span>
               </button>
 
               <button
-                onClick={() => setIsAddGroupModalOpen(true)}
-                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold rounded-xl text-xs sm:text-sm flex items-center gap-2 transition"
+                onClick={() => setActiveSearchFolder('pedagogia')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                  activeSearchFolder === 'pedagogia'
+                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-900/40'
+                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                }`}
               >
-                <Plus className="w-4 h-4 text-emerald-400" />
-                Adicionar Grupo por Link
+                <span>📚 Busca: "pedagogia"</span>
+                <span className="bg-indigo-950 px-2 py-0.5 rounded-full text-[10px] text-indigo-200 font-extrabold border border-indigo-700">
+                  7 grupos
+                </span>
               </button>
 
               <button
-                onClick={handleSelectAll}
-                className="px-3 py-2.5 bg-slate-800/60 hover:bg-slate-800 text-slate-300 text-xs rounded-xl border border-slate-700/60 transition"
+                onClick={() => setActiveSearchFolder('autismo')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                  activeSearchFolder === 'autismo'
+                    ? 'bg-purple-600 text-white shadow-md shadow-purple-900/40'
+                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                }`}
               >
-                {selectedGroupIds.length === mappedGroups.length ? 'Desmarcar Todos' : 'Selecionar Todos'}
+                <span>🧩 Busca: "autismo &amp; TEA"</span>
+                <span className="bg-purple-950 px-2 py-0.5 rounded-full text-[10px] text-purple-200 font-extrabold border border-purple-700">
+                  3 grupos
+                </span>
+              </button>
+
+              <button
+                onClick={() => setActiveSearchFolder('all')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                  activeSearchFolder === 'all'
+                    ? 'bg-emerald-600 text-white shadow-md shadow-emerald-900/40'
+                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                }`}
+              >
+                <span>⭐ Todos os Grupos Mapeados</span>
+                <span className="bg-emerald-950 px-2 py-0.5 rounded-full text-[10px] text-emerald-200 font-extrabold border border-emerald-700">
+                  {mappedGroups.length}
+                </span>
               </button>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleSelectAllFolder}
+                className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl border border-slate-700 transition cursor-pointer"
+              >
+                Selecionar Todos desta Pasta ({folderGroups.length})
+              </button>
+
               <button
                 onClick={() => {
                   if (selectedGroupIds.length === 0) {
@@ -730,47 +820,33 @@ Espero que ajude outras mães como me ajudou! ❤️`
                   }
                   setIsAudienceModalOpen(true);
                 }}
-                className="px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold rounded-xl text-xs sm:text-sm flex items-center gap-2 shadow-lg shadow-indigo-900/30 transition"
+                className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-lg shadow-indigo-900/30 transition cursor-pointer"
               >
-                <Users className="w-4 h-4" />
-                Criar Público com Selecionados ({selectedGroupIds.length})
+                <Users className="w-3.5 h-3.5" />
+                Criar Público ({selectedGroupIds.length})
               </button>
             </div>
           </div>
 
-          {/* Filters & Selection Summary */}
+          {/* Quick Search in Current Folder */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 text-xs">
-            <div className="flex items-center gap-2">
-              <div className="relative flex-1 sm:w-64">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Pesquisar grupos por nome ou link..."
-                  className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
-                />
-              </div>
-
-              <select
-                value={filterNiche}
-                onChange={(e) => setFilterNiche(e.target.value)}
-                className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
-              >
-                <option value="all">Todos os Nichos</option>
-                <option value="Autismo & Mães Atípicas">Autismo & Mães Atípicas</option>
-                <option value="Pedagogia & Escolas">Pedagogia & Escolas</option>
-                <option value="Autismo & TDAH Infantil">Autismo & TDAH Infantil</option>
-                <option value="Mães Locais (Curitiba)">Mães Locais (Curitiba)</option>
-                <option value="Coordenação Motora & TEA">Coordenação Motora & TEA</option>
-                <option value="Moda & Vendas WhatsApp">Moda & Vendas WhatsApp</option>
-              </select>
+            <div className="relative flex-1 sm:w-72">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Filtrar grupos por nome..."
+                className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
+              />
             </div>
 
             <div className="bg-slate-900/90 border border-slate-800 px-3 py-1.5 rounded-xl text-slate-300 flex items-center gap-2">
-              <span>Grupos Selecionados: <strong className="text-white">{selectedGroupIds.length}</strong></span>
+              <span>Pasta Atual: <strong className="text-white capitalize">{activeSearchFolder}</strong> ({folderGroups.length} grupos)</span>
               <span>•</span>
-              <span>Alcance Potencial: <strong className="text-emerald-400">{selectedGroupsTotalMembers.toLocaleString('pt-BR')} pessoas</strong></span>
+              <span>Selecionados: <strong className="text-emerald-400">{selectedGroupIds.length}</strong></span>
+              <span>•</span>
+              <span>Alcance: <strong className="text-emerald-400">{selectedGroupsTotalMembers.toLocaleString('pt-BR')} pessoas</strong></span>
             </div>
           </div>
 
@@ -831,8 +907,8 @@ Espero que ajude outras mães como me ajudou! ❤️`
                       </strong>
                     </div>
 
-                    <div className="text-slate-400">
-                      Divulgações: <strong className="text-white">{group.dispatchCount}</strong>
+                    <div className="text-slate-400 text-[11px]">
+                      {group.postsPerDay || `${group.dispatchCount} postagens`}
                     </div>
                   </div>
                 </div>
@@ -842,71 +918,102 @@ Espero que ajude outras mães como me ajudou! ❤️`
         </div>
       )}
 
-      {/* SUBTAB 2: AUDIENCES */}
+      {/* SUBTAB 2: SAVED AUDIENCES DISPLAY & REUSE LIBRARY */}
       {activeSubTab === 'audiences' && (
         <div className="space-y-6">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
             <div>
-              <h2 className="text-lg font-bold text-white">Públicos Qualificados no Facebook</h2>
+              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                <Users className="w-5 h-5 text-indigo-400" />
+                Biblioteca de Públicos Salvos (Visualização &amp; Reutilização)
+              </h2>
               <p className="text-xs text-slate-400">
-                Públicos agrupados a partir dos grupos mapeados, prontos para receber as campanhas com proteção anti-bloqueio.
+                Visualize os públicos criados a partir dos grupos mapeados. Reutilize qualquer público salvo com 1 clique no Robô Divulgador!
               </p>
             </div>
 
             <button
               onClick={() => setIsAudienceModalOpen(true)}
-              className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs sm:text-sm flex items-center gap-2 transition"
+              className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs sm:text-sm flex items-center gap-2 transition cursor-pointer"
             >
               <Plus className="w-4 h-4" />
-              + Criar Novo Público de Grupos
+              + Criar Novo Público com Grupos Selecionados
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Saved Audiences Display Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {audiences.map(aud => {
               const isSelected = selectedAudienceId === aud.id;
               return (
                 <div
                   key={aud.id}
-                  className={`bg-slate-900 border rounded-2xl p-6 space-y-4 transition ${
-                    isSelected ? 'border-indigo-500 shadow-xl shadow-indigo-950/40' : 'border-slate-800'
+                  className={`bg-slate-900 border rounded-2xl p-5 space-y-4 transition flex flex-col justify-between ${
+                    isSelected ? 'border-indigo-500 shadow-xl shadow-indigo-950/40 bg-slate-900/90' : 'border-slate-800'
                   }`}
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="space-y-1">
+                  <div className="space-y-3">
+                    <div className="flex items-start justify-between gap-2">
                       <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-indigo-950 text-indigo-300 border border-indigo-800">
                         {aud.niche}
                       </span>
-                      <h3 className="text-base font-bold text-white">{aud.name}</h3>
+                      <span className="text-[11px] text-slate-400">
+                        Usado {aud.campaignUsageCount || 1}x
+                      </span>
                     </div>
 
-                    <div className="text-right">
-                      <span className="text-xs text-slate-400">Alcance</span>
-                      <div className="text-base font-extrabold text-emerald-400">
-                        {aud.estimatedMembers.toLocaleString('pt-BR')}
+                    <div>
+                      <h3 className="text-base font-extrabold text-white leading-snug">
+                        {aud.name}
+                      </h3>
+                      <p className="text-xs text-slate-300 mt-1 line-clamp-2 leading-relaxed">
+                        {aud.description}
+                      </p>
+                    </div>
+
+                    {/* Stats pill */}
+                    <div className="bg-slate-950 p-3 rounded-xl border border-slate-800/80 flex items-center justify-between text-xs">
+                      <div>
+                        <span className="text-slate-400 block text-[10px] uppercase">Grupos</span>
+                        <strong className="text-white text-sm">{aud.groupsCount} grupos</strong>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-slate-400 block text-[10px] uppercase">Membros Totais</span>
+                        <strong className="text-emerald-400 text-sm">{aud.estimatedMembers.toLocaleString('pt-BR')}</strong>
                       </div>
                     </div>
+
+                    {/* Groups Preview Chips */}
+                    {aud.groupNamesPreview && aud.groupNamesPreview.length > 0 && (
+                      <div className="space-y-1">
+                        <span className="text-[10px] uppercase text-slate-400 font-bold">Grupos inclusos:</span>
+                        <div className="flex flex-wrap gap-1">
+                          {aud.groupNamesPreview.map((name, i) => (
+                            <span key={i} className="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded-md truncate max-w-[200px]">
+                              {name}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
-                  <p className="text-xs text-slate-300 leading-relaxed">
-                    {aud.description}
-                  </p>
-
-                  <div className="bg-slate-950/70 rounded-xl p-3 border border-slate-800/80 flex items-center justify-between text-xs">
-                    <span className="text-slate-400">Grupos Vinculados: <strong className="text-white">{aud.groupsCount} grupos</strong></span>
-                    <span className="text-slate-400">Criado em: <strong className="text-slate-200">{aud.createdAt}</strong></span>
-                  </div>
-
-                  <div className="flex items-center gap-3 pt-2">
+                  {/* Actions */}
+                  <div className="pt-3 border-t border-slate-800/80 flex items-center gap-2">
                     <button
-                      onClick={() => {
-                        setSelectedAudienceId(aud.id);
-                        setActiveSubTab('campaign');
-                      }}
-                      className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 transition"
+                      onClick={() => handleReuseAudience(aud)}
+                      className="flex-1 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-extrabold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-950/40 transition cursor-pointer"
                     >
-                      <Zap className="w-3.5 h-3.5 text-amber-300" />
-                      Criar Campanha para Este Público
+                      <Repeat className="w-3.5 h-3.5" />
+                      Reutilizar Este Público no Robô
+                    </button>
+
+                    <button
+                      onClick={() => handleDeleteAudience(aud.id)}
+                      className="p-2.5 text-slate-400 hover:text-red-400 bg-slate-800/60 hover:bg-slate-800 rounded-xl transition cursor-pointer"
+                      title="Excluir Público"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>
@@ -916,20 +1023,96 @@ Espero que ajude outras mães como me ajudou! ❤️`
         </div>
       )}
 
-      {/* SUBTAB 3: CAMPAIGN & BOT DISPATCH WITH ANTI-BAN INTERVAL (120s, 300s, 400s) */}
+      {/* SUBTAB 3: LOGISTICS & LIVE ANALYTICS DASHBOARD (300s a 400s • Até 500 Disparos/Dia) */}
       {activeSubTab === 'campaign' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Left Column: Campaign Configuration */}
-          <div className="lg:col-span-7 space-y-6">
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-5">
+        <div className="space-y-6">
+          {/* Logistics KPI Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+              <span className="text-slate-400 text-xs uppercase font-bold flex items-center gap-1.5">
+                <Users className="w-4 h-4 text-blue-400" />
+                Grupos na Fila do Público
+              </span>
+              <div className="text-2xl font-black text-white mt-1">
+                {totalTargetGroups} grupos
+              </div>
+              <div className="text-[11px] text-slate-400 mt-1">
+                Alcance: <strong className="text-emerald-400">{selectedGroupsTotalMembers.toLocaleString('pt-BR')} pessoas</strong>
+              </div>
+            </div>
+
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+              <span className="text-slate-400 text-xs uppercase font-bold flex items-center gap-1.5">
+                <CheckCheck className="w-4 h-4 text-emerald-400" />
+                Postagens com Sucesso
+              </span>
+              <div className="text-2xl font-black text-emerald-400 mt-1">
+                {completedCount} posts
+              </div>
+              <div className="text-[11px] text-emerald-300/80 mt-1">
+                {successPercentage}% da meta cumprida hoje
+              </div>
+            </div>
+
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+              <span className="text-slate-400 text-xs uppercase font-bold flex items-center gap-1.5">
+                <Clock className="w-4 h-4 text-amber-400" />
+                Pendentes na Fila
+              </span>
+              <div className="text-2xl font-black text-amber-300 mt-1">
+                {pendingCount} grupos
+              </div>
+              <div className="text-[11px] text-slate-400 mt-1">
+                {pendingPercentage}% aguardando próximo intervalo
+              </div>
+            </div>
+
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+              <span className="text-slate-400 text-xs uppercase font-bold flex items-center gap-1.5">
+                <ShieldCheck className="w-4 h-4 text-purple-400" />
+                Cota Diária Anti-Ban
+              </span>
+              <div className="text-2xl font-black text-purple-300 mt-1">
+                {dailyDispatchesCompleted} / {dailyDispatchLimit}
+              </div>
+              <div className="text-[11px] text-slate-400 mt-1">
+                Pausas de 300s a 400s ativas
+              </div>
+            </div>
+          </div>
+
+          {/* Visual Logistics Progress Funnel */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-bold text-white flex items-center gap-2">
+                <BarChart3 className="w-4 h-4 text-emerald-400" />
+                Logística de Entrega em Tempo Real
+              </span>
+              <div className="flex items-center gap-4 text-slate-400 text-[11px]">
+                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" /> Sucesso ({successPercentage}%)</span>
+                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block" /> Pendente ({pendingPercentage}%)</span>
+                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-purple-500 inline-block" /> Resfriamento Ativo</span>
+              </div>
+            </div>
+
+            <div className="w-full bg-slate-950 h-3 rounded-full overflow-hidden flex border border-slate-800">
+              <div className="bg-emerald-500 h-full transition-all duration-500" style={{ width: `${successPercentage}%` }} />
+              <div className="bg-blue-500 h-full transition-all duration-500" style={{ width: `${pendingPercentage}%` }} />
+            </div>
+          </div>
+
+          {/* Main Campaign & Engine Controls */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Left: Campaign Copy & Interval */}
+            <div className="lg:col-span-7 space-y-5 bg-slate-900 border border-slate-800 rounded-2xl p-6">
               <div className="flex items-center justify-between border-b border-slate-800 pb-4">
                 <div>
-                  <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
                     <Bot className="w-5 h-5 text-emerald-400" />
-                    Robô Divulgador nos Grupos (Meta Anti-Spam)
-                  </h2>
+                    Parâmetros do Robô Divulgador
+                  </h3>
                   <p className="text-xs text-slate-400">
-                    Dispare mensagens persuasivas nos grupos com descansos programados para nunca levar bloqueio.
+                    Executa em segundo plano mesmo se a aba estiver minimizada.
                   </p>
                 </div>
 
@@ -941,14 +1124,17 @@ Espero que ajude outras mães como me ajudou! ❤️`
                 </div>
               </div>
 
-              {/* 1. Target Audience & Groups Count */}
+              {/* Target Audience Selector */}
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1.5 uppercase tracking-wide">
-                  Público Alvo Selecionado:
+                  Público Ativo Selecionado:
                 </label>
                 <select
                   value={selectedAudienceId}
-                  onChange={(e) => setSelectedAudienceId(e.target.value)}
+                  onChange={(e) => {
+                    const aud = audiences.find(a => a.id === e.target.value);
+                    if (aud) handleReuseAudience(aud);
+                  }}
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500"
                 >
                   {audiences.map(aud => (
@@ -959,158 +1145,71 @@ Espero que ajude outras mães como me ajudou! ❤️`
                 </select>
               </div>
 
-              {/* 2. INTERVALO ANTI-BLOQUEIO (120s, 300s, 400s) */}
+              {/* Anti-Ban Interval Control */}
               <div className="bg-slate-950/80 border border-indigo-900/40 rounded-xl p-4 space-y-3">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between flex-wrap gap-2">
                   <label className="text-xs font-bold text-indigo-300 flex items-center gap-1.5 uppercase tracking-wide">
                     <Clock className="w-4 h-4 text-indigo-400" />
-                    Intervalo Anti-Bloqueio Controlável:
+                    Intervalo Humanizado Anti-Bloqueio:
                   </label>
                   <span className="text-xs font-bold text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded-md border border-emerald-800/40">
-                    {intervalSeconds} segundos ({Math.round(intervalSeconds / 60)} min de pausa)
+                    {isRandomJitterActive ? '300s a 400s (Randômico)' : `${intervalSeconds}s Fixo`}
                   </span>
                 </div>
 
-                <p className="text-xs text-slate-300">
-                  O algoritmo do Facebook detecta postagens em massa muito rápidas como spam. 
-                  Com descansos de <strong>120 a 400 segundos</strong>, sua conta é reconhecida como um usuário humano normal!
-                </p>
-
-                {/* Quick preset buttons requested by user */}
-                <div className="grid grid-cols-3 gap-2.5 pt-1">
+                {/* Presets */}
+                <div className="grid grid-cols-3 gap-2.5">
                   <button
                     type="button"
                     onClick={() => {
-                      setIntervalSeconds(120);
-                      setIsCustomInterval(false);
+                      setIntervalSeconds(300);
+                      setIsRandomJitterActive(false);
                     }}
-                    className={`p-3 rounded-xl border text-center transition ${
-                      intervalSeconds === 120 && !isCustomInterval
-                        ? 'bg-blue-600/30 border-blue-500 text-white font-bold shadow-md shadow-blue-900/30'
+                    className={`p-3 rounded-xl border text-center transition cursor-pointer ${
+                      intervalSeconds === 300 && !isRandomJitterActive
+                        ? 'bg-blue-600/30 border-blue-500 text-white font-bold'
                         : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
                     }`}
                   >
-                    <div className="text-sm font-extrabold text-blue-400">120 segundos</div>
-                    <div className="text-[10px] text-slate-400 mt-0.5">2 minutos (Rápido)</div>
+                    <div className="text-sm font-extrabold text-blue-400">300 segundos</div>
+                    <div className="text-[10px] text-slate-400 mt-0.5">5 minutos exatos</div>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => {
-                      setIntervalSeconds(300);
-                      setIsCustomInterval(false);
+                      setIsRandomJitterActive(true);
                     }}
-                    className={`p-3 rounded-xl border text-center transition ${
-                      intervalSeconds === 300 && !isCustomInterval
-                        ? 'bg-emerald-600/30 border-emerald-500 text-white font-bold shadow-md shadow-emerald-900/30'
+                    className={`p-3 rounded-xl border text-center transition cursor-pointer ${
+                      isRandomJitterActive
+                        ? 'bg-emerald-600/30 border-emerald-500 text-white font-bold'
                         : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
                     }`}
                   >
-                    <div className="text-sm font-extrabold text-emerald-400">300 segundos</div>
-                    <div className="text-[10px] text-emerald-300 mt-0.5">5 minutos (Recomendado)</div>
+                    <div className="text-sm font-extrabold text-emerald-400">300s a 400s</div>
+                    <div className="text-[10px] text-emerald-300 mt-0.5">⭐ Humanizado Anti-Ban</div>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => {
                       setIntervalSeconds(400);
-                      setIsCustomInterval(false);
+                      setIsRandomJitterActive(false);
                     }}
-                    className={`p-3 rounded-xl border text-center transition ${
-                      intervalSeconds === 400 && !isCustomInterval
-                        ? 'bg-purple-600/30 border-purple-500 text-white font-bold shadow-md shadow-purple-900/30'
+                    className={`p-3 rounded-xl border text-center transition cursor-pointer ${
+                      intervalSeconds === 400 && !isRandomJitterActive
+                        ? 'bg-purple-600/30 border-purple-500 text-white font-bold'
                         : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
                     }`}
                   >
                     <div className="text-sm font-extrabold text-purple-400">400 segundos</div>
-                    <div className="text-[10px] text-slate-400 mt-0.5">6,6 minutos (Blindado)</div>
+                    <div className="text-[10px] text-slate-400 mt-0.5">6,6 minutos blindado</div>
                   </button>
                 </div>
-
-                {/* Slider for precision */}
-                <div className="pt-2">
-                  <div className="flex items-center justify-between text-[11px] text-slate-400 mb-1">
-                    <span>Ajuste fino com slider:</span>
-                    <span className="font-semibold text-slate-200">{intervalSeconds}s</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="60"
-                    max="600"
-                    step="10"
-                    value={intervalSeconds}
-                    onChange={(e) => {
-                      setIntervalSeconds(Number(e.target.value));
-                      setIsCustomInterval(true);
-                    }}
-                    className="w-full accent-emerald-500 cursor-pointer"
-                  />
-                  <div className="flex justify-between text-[10px] text-slate-500">
-                    <span>60s (1m)</span>
-                    <span>120s</span>
-                    <span>300s</span>
-                    <span>400s</span>
-                    <span>600s (10m)</span>
-                  </div>
-                </div>
               </div>
 
-              {/* 3. Product Selection */}
-              <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1.5 uppercase tracking-wide">
-                  Produto para Divulgar & Link de Checkout:
-                </label>
-                <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <img
-                      src={defaultProduct.imageUrl || '/assets/aistudio/image_e9e67204.png'}
-                      alt="Produto"
-                      className="w-12 h-12 object-cover rounded-lg border border-slate-700"
-                    />
-                    <div>
-                      <div className="text-xs font-bold text-white">{defaultProduct.title}</div>
-                      <div className="text-[11px] text-emerald-400 font-semibold">
-                        Preço: R$ {selectedPrice.toFixed(2).replace('.', ',')} no Pix
-                      </div>
-                    </div>
-                  </div>
-                  <a
-                    href={selectedCheckoutUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-800"
-                  >
-                    Kiwify
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
-                </div>
-              </div>
-
-              {/* 4. Copy & Message for the Post */}
+              {/* Headline & Copy */}
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-slate-300 uppercase tracking-wide">
-                    Texto Persuasivo do Post nos Grupos:
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPostHeadline('🌸 Mães de Curitiba e Brasil, olhem o que ajudou meu filho autista a focar sem birra!');
-                      setPostCopy(`Oi pessoal! Quem é mãe atípica ou professora sabe como é difícil achar atividades adaptadas sem poluição visual. 
-
-Achei esse caderno em PDF com mais de 100 tarefinhas lúdicas de coordenação motora fina e alfabetização que funcionam super bem com crianças com TEA e TDAH. 
-
-Consegui um acesso promocional por R$ 9,90 no Pix pelo link oficial: ${selectedCheckoutUrl}
-
-Super recomendo para quem quer imprimir em casa e economizar tempo! ❤️`);
-                    }}
-                    className="text-xs text-purple-400 hover:text-purple-300 font-medium flex items-center gap-1"
-                  >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    Gerar Copy com IA
-                  </button>
-                </div>
-
                 <input
                   type="text"
                   value={postHeadline}
@@ -1120,114 +1219,84 @@ Super recomendo para quem quer imprimir em casa e economizar tempo! ❤️`);
                 />
 
                 <textarea
-                  rows={6}
+                  rows={5}
                   value={postCopy}
                   onChange={(e) => setPostCopy(e.target.value)}
-                  placeholder="Mensagem completa..."
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 focus:outline-none focus:border-emerald-500 leading-relaxed"
                 />
               </div>
 
-              {/* Bot Start / Pause Buttons */}
+              {/* Bot Control Button */}
               <div className="pt-2 flex items-center gap-3">
-                {!isBotRunning ? (
-                  <button
-                    onClick={() => {
-                      setIsBotRunning(true);
-                      setSecondsRemaining(intervalSeconds);
-                    }}
-                    className="flex-1 py-3.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-extrabold rounded-xl text-sm flex items-center justify-center gap-2 shadow-xl shadow-emerald-950/50 transition transform hover:-translate-y-0.5"
-                  >
-                    <Play className="w-4 h-4 fill-white" />
-                    Iniciar Divulgação Automática nos Grupos
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => setIsBotRunning(false)}
-                    className="flex-1 py-3.5 bg-amber-600 hover:bg-amber-500 text-white font-extrabold rounded-xl text-sm flex items-center justify-center gap-2 shadow-xl transition"
-                  >
-                    <Pause className="w-4 h-4 fill-white" />
-                    Pausar Robô
-                  </button>
-                )}
+                <button
+                  onClick={handleToggleBot}
+                  className={`flex-1 py-3.5 font-extrabold rounded-xl text-sm flex items-center justify-center gap-2 shadow-xl transition transform hover:-translate-y-0.5 cursor-pointer ${
+                    isBotRunning
+                      ? 'bg-amber-600 hover:bg-amber-500 text-white'
+                      : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white'
+                  }`}
+                >
+                  {isBotRunning ? (
+                    <>
+                      <Pause className="w-4 h-4 fill-white" />
+                      Pausar Robô Divulgador
+                    </>
+                  ) : (
+                    <>
+                      <Play className="w-4 h-4 fill-white" />
+                      Iniciar Divulgação em Segundo Plano
+                    </>
+                  )}
+                </button>
 
                 <button
                   onClick={handleExecuteGroupPost}
-                  className="px-4 py-3.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition"
+                  className="px-4 py-3.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
                   title="Disparar 1 post agora mesmo no grupo da fila"
                 >
                   <Zap className="w-4 h-4 text-amber-400" />
-                  Postar Agora (Teste)
+                  Postar Agora
                 </button>
               </div>
             </div>
-          </div>
 
-          {/* Right Column: Live Monitor & Countdown */}
-          <div className="lg:col-span-5 space-y-6">
-            {/* Countdown & Live Status Card */}
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-5">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                Painel de Monitoramento & Ritmo Anti-Spam
-              </h3>
+            {/* Right: Live Countdown & Detailed Logistics Logs */}
+            <div className="lg:col-span-5 space-y-5">
+              {/* Countdown Card */}
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 text-center space-y-3">
+                <span className="text-xs text-emerald-300 font-semibold tracking-wide uppercase">
+                  Próxima Publicação no Grupo:
+                </span>
 
-              {isBotRunning ? (
-                <div className="bg-gradient-to-br from-emerald-950/60 to-slate-950 border border-emerald-800/40 rounded-2xl p-5 text-center space-y-3">
-                  <span className="text-xs text-emerald-300 font-semibold tracking-wide uppercase">
-                    Próxima Postagem em Grupo:
-                  </span>
-                  
-                  <div className="text-5xl font-black text-white font-mono tracking-tight">
-                    {secondsRemaining}s
-                  </div>
-
-                  <p className="text-xs text-slate-300">
-                    O robô está respeitando o intervalo de <strong>{intervalSeconds} segundos</strong> para garantir segurança máxima contra bloqueios da Meta.
-                  </p>
-
-                  <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
-                    <div
-                      className="bg-emerald-500 h-full transition-all duration-1000"
-                      style={{ width: `${((intervalSeconds - secondsRemaining) / intervalSeconds) * 100}%` }}
-                    />
-                  </div>
-                </div>
-              ) : (
-                <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 text-center space-y-2">
-                  <Clock className="w-8 h-8 text-slate-500 mx-auto" />
-                  <div className="text-sm font-bold text-slate-300">Robô em Espera</div>
-                  <p className="text-xs text-slate-400">
-                    Clique em "Iniciar Divulgação" para começar o ciclo com intervalos de {intervalSeconds} segundos.
-                  </p>
-                </div>
-              )}
-
-              {/* Real-time stats */}
-              <div className="grid grid-cols-2 gap-3 text-xs">
-                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                  <span className="text-slate-400">Grupos no Alvo:</span>
-                  <div className="text-base font-extrabold text-white mt-1">
-                    {selectedGroupIds.length} grupos
-                  </div>
+                <div className="text-5xl font-black text-white font-mono tracking-tight">
+                  {isBotRunning ? `${secondsRemaining}s` : 'Pausado'}
                 </div>
 
-                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                  <span className="text-slate-400">Postagens Feitas:</span>
-                  <div className="text-base font-extrabold text-emerald-400 mt-1">
-                    {botLogs.length} postagens
-                  </div>
+                <p className="text-xs text-slate-300">
+                  {isBotRunning
+                    ? 'Intervalo seguro em andamento. O robô continua executando mesmo com o navegador minimizado.'
+                    : 'Robô em espera. Clique em Iniciar para rodar com pausas de 300s a 400s.'}
+                </p>
+
+                <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                  <div
+                    className="bg-emerald-500 h-full transition-all duration-1000"
+                    style={{ width: `${((350 - secondsRemaining) / 350) * 100}%` }}
+                  />
                 </div>
               </div>
 
-              {/* Execution Logs */}
-              <div>
-                <div className="flex items-center justify-between text-xs mb-2">
-                  <span className="font-bold text-slate-300">Histórico de Disparos nos Grupos:</span>
+              {/* Detailed Logistics Logs Table */}
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-white flex items-center gap-1.5">
+                    <Activity className="w-4 h-4 text-blue-400" />
+                    Logs de Disparos Concluídos
+                  </span>
                   <span className="text-slate-500">{botLogs.length} registros</span>
                 </div>
 
-                <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
+                <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
                   {botLogs.map(log => (
                     <div
                       key={log.id}
@@ -1235,11 +1304,11 @@ Super recomendo para quem quer imprimir em casa e economizar tempo! ❤️`);
                     >
                       <div className="flex items-start justify-between gap-2">
                         <span className="font-bold text-white line-clamp-1">{log.groupName}</span>
-                        <span className="text-[10px] text-emerald-400 font-bold bg-emerald-950 px-1.5 py-0.5 rounded">
+                        <span className="text-[10px] text-emerald-400 font-bold bg-emerald-950 px-1.5 py-0.5 rounded border border-emerald-900/50">
                           {log.postedAt}
                         </span>
                       </div>
-                      
+
                       <p className="text-[11px] text-slate-400 line-clamp-1">
                         {log.headline}
                       </p>
@@ -1252,7 +1321,7 @@ Super recomendo para quem quer imprimir em casa e economizar tempo! ❤️`);
                           rel="noreferrer"
                           className="text-blue-400 hover:text-blue-300 flex items-center gap-0.5"
                         >
-                          Ver Grupo <ExternalLink className="w-2.5 h-2.5" />
+                          Ver no FB <ExternalLink className="w-2.5 h-2.5" />
                         </a>
                       </div>
                     </div>
@@ -1264,7 +1333,78 @@ Super recomendo para quem quer imprimir em casa e economizar tempo! ❤️`);
         </div>
       )}
 
-      {/* SUBTAB 4: STEP-BY-STEP EXTENSION INSTALLATION GUIDE */}
+      {/* SUBTAB 4: YOUTUBE AUTOMATION */}
+      {activeSubTab === 'youtube' && (
+        <div className="space-y-6">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div>
+                <span className="bg-red-500/20 text-red-300 border border-red-500/30 px-2.5 py-0.5 rounded-full text-xs font-bold inline-flex items-center gap-1">
+                  <Video className="w-3.5 h-3.5" />
+                  ROBÔ YOUTUBE ORGÂNICO
+                </span>
+                <h2 className="text-xl font-black text-white mt-1">
+                  Comentários &amp; Curtidas nos Canais e Vídeos Selecionados
+                </h2>
+                <p className="text-xs text-slate-300 mt-1 max-w-3xl">
+                  Selecione as URLs dos vídeos de educação infantil e maternidade. O robô curte o vídeo e insere comentário persuasivo com o link de checkout Kiwify R$ 9,90.
+                </p>
+              </div>
+
+              <button
+                onClick={() => setIsAddYtModalOpen(true)}
+                className="px-4 py-2.5 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl text-xs sm:text-sm flex items-center gap-2 transition cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                + Adicionar URL de Vídeo
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {youtubeVideos.map(video => (
+              <div
+                key={video.id}
+                className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden flex flex-col justify-between"
+              >
+                <div className="p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="text-[10px] bg-red-950 text-red-300 border border-red-800 px-2 py-0.5 rounded-full font-bold">
+                      {video.channelName}
+                    </span>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${video.status === 'completed' ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-amber-950 text-amber-300 border border-amber-800'}`}>
+                      {video.status === 'completed' ? '✅ Executado' : '⏳ Pronto'}
+                    </span>
+                  </div>
+
+                  <h4 className="text-xs font-bold text-white leading-snug">
+                    {video.title}
+                  </h4>
+
+                  <div className="bg-slate-950 p-3 rounded-xl border border-slate-800/80 text-[11px] text-slate-300 space-y-1">
+                    <strong className="text-slate-400 block text-[10px] uppercase">Comentário com Link:</strong>
+                    <p className="line-clamp-3 leading-relaxed">"{video.commentText}"</p>
+                  </div>
+                </div>
+
+                <div className="p-4 pt-0">
+                  <button
+                    onClick={() => {
+                      alert(`✅ Comentário e curtida registrados no vídeo: "${video.title}"`);
+                    }}
+                    className="w-full py-2 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 transition cursor-pointer"
+                  >
+                    <Zap className="w-3.5 h-3.5 text-amber-300" />
+                    Executar Ações neste Vídeo Agora
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* SUBTAB 5: EXTENSION INSTALLATION GUIDE */}
       {activeSubTab === 'extension_guide' && (
         <div className="space-y-6">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
@@ -1272,112 +1412,52 @@ Super recomendo para quem quer imprimir em casa e economizar tempo! ❤️`);
               <div>
                 <h2 className="text-xl font-black text-white flex items-center gap-2">
                   <Download className="w-5 h-5 text-emerald-400" />
-                  Como Instalar a Extensão no Google Chrome em 30 Segundos
+                  Como Ativar a Extensão no Google Chrome em 30 Segundos
                 </h2>
                 <p className="text-xs text-slate-400 mt-1">
-                  Você não precisa da loja do Google! A extensão é instalada diretamente no modo desenvolvedor do seu Chrome com total segurança.
+                  Não precisa de loja! Você carrega a pasta no Chrome e ela roda em segundo plano capturando a rolagem do Facebook e YouTube.
                 </p>
               </div>
 
               <button
                 onClick={handleDownloadExtensionZip}
                 disabled={isZipping}
-                className="px-5 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs sm:text-sm flex items-center gap-2 shadow-lg shadow-emerald-900/30 transition"
+                className="px-5 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs sm:text-sm flex items-center gap-2 shadow-lg shadow-emerald-900/30 transition cursor-pointer"
               >
                 <Download className="w-4 h-4" />
                 Baixar Pasta da Extensão (.ZIP)
               </button>
             </div>
 
-            {/* Steps Timeline */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-              {/* Step 1 */}
-              <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 space-y-3 relative overflow-hidden">
+              <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 space-y-3">
                 <div className="w-8 h-8 rounded-full bg-blue-600 text-white font-black flex items-center justify-center text-sm">
                   1
                 </div>
-                <h3 className="text-sm font-bold text-white">Baixar & Descompactar</h3>
+                <h3 className="text-sm font-bold text-white">Baixar &amp; Descompactar</h3>
                 <p className="text-xs text-slate-300 leading-relaxed">
-                  Clique no botão verde acima para baixar o arquivo <strong>extensao-autoviral-facebook-grupos.zip</strong>. 
-                  Depois, clique com o botão direito e selecione <em>"Extrair tudo..."</em> para uma pasta no seu computador.
+                  Clique no botão verde acima para baixar o arquivo <strong>extensao-autoviral-facebook-youtube.zip</strong> e extraia a pasta no seu computador.
                 </p>
               </div>
 
-              {/* Step 2 */}
-              <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 space-y-3 relative overflow-hidden">
+              <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 space-y-3">
                 <div className="w-8 h-8 rounded-full bg-indigo-600 text-white font-black flex items-center justify-center text-sm">
                   2
                 </div>
                 <h3 className="text-sm font-bold text-white">Abrir chrome://extensions</h3>
                 <p className="text-xs text-slate-300 leading-relaxed">
-                  No seu Google Chrome, digite <code className="bg-slate-900 px-1.5 py-0.5 rounded text-indigo-300">chrome://extensions</code> na barra de endereços.
-                  No canto superior direito da tela, <strong>ative a chave "Modo do desenvolvedor"</strong>.
+                  No Google Chrome, acesse <code className="bg-slate-900 px-1.5 py-0.5 rounded text-indigo-300">chrome://extensions</code> e ative o <strong>"Modo do desenvolvedor"</strong> no canto superior direito.
                 </p>
               </div>
 
-              {/* Step 3 */}
-              <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 space-y-3 relative overflow-hidden">
+              <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 space-y-3">
                 <div className="w-8 h-8 rounded-full bg-emerald-600 text-white font-black flex items-center justify-center text-sm">
                   3
                 </div>
                 <h3 className="text-sm font-bold text-white">Carregar sem Compactação</h3>
                 <p className="text-xs text-slate-300 leading-relaxed">
-                  Clique no botão <strong>"Carregar sem compactação"</strong> (Load unpacked) no canto superior esquerdo e selecione a pasta descompactada. 
-                  Pronto! O ícone da AutoViral AI aparecerá no topo do Chrome!
+                  Clique em <strong>"Carregar sem compactação"</strong> e selecione a pasta extraída. Abra o Facebook e role as páginas de grupos!
                 </p>
-              </div>
-            </div>
-
-            {/* Individual Files Code Preview */}
-            <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wide flex items-center gap-2">
-                  <FileCode className="w-4 h-4 text-purple-400" />
-                  Arquivos Incluídos no Pacote da Extensão:
-                </h3>
-                <span className="text-xs text-slate-400">Total: 5 arquivos (Manifest V3 Oficial)</span>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3 text-xs">
-                <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 space-y-1">
-                  <div className="font-bold text-white flex items-center gap-1.5">
-                    <FileCode className="w-3.5 h-3.5 text-blue-400" />
-                    manifest.json
-                  </div>
-                  <p className="text-[11px] text-slate-400">Configuração V3</p>
-                </div>
-
-                <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 space-y-1">
-                  <div className="font-bold text-white flex items-center gap-1.5">
-                    <FileCode className="w-3.5 h-3.5 text-emerald-400" />
-                    popup.html
-                  </div>
-                  <p className="text-[11px] text-slate-400">Janela da Extensão</p>
-                </div>
-
-                <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 space-y-1">
-                  <div className="font-bold text-white flex items-center gap-1.5">
-                    <FileCode className="w-3.5 h-3.5 text-amber-400" />
-                    popup.js
-                  </div>
-                  <p className="text-[11px] text-slate-400">Mapeamento & Sync</p>
-                </div>
-
-                <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 space-y-1">
-                  <div className="font-bold text-white flex items-center gap-1.5">
-                    <FileCode className="w-3.5 h-3.5 text-indigo-400" />
-                    content.js
-                  </div>
-                  <p className="text-[11px] text-slate-400">Leitor do Facebook</p>
-                </div>
-
-                <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 space-y-1">
-                  <div className="font-bold text-white flex items-center gap-1.5">
-                    <FileCode className="w-3.5 h-3.5 text-purple-400" />
-                    background.js
-                  </div>
-                  <p className="text-[11px] text-slate-400">Service Worker</p>
-                </div>
               </div>
             </div>
           </div>
@@ -1395,7 +1475,7 @@ Super recomendo para quem quer imprimir em casa e economizar tempo! ❤️`);
               </h3>
               <button
                 onClick={() => setIsAudienceModalOpen(false)}
-                className="text-slate-400 hover:text-white"
+                className="text-slate-400 hover:text-white cursor-pointer"
               >
                 ✕
               </button>
@@ -1410,7 +1490,7 @@ Super recomendo para quem quer imprimir em casa e economizar tempo! ❤️`);
                   type="text"
                   value={newAudienceName}
                   onChange={(e) => setNewAudienceName(e.target.value)}
-                  placeholder="Ex: Mães Atípicas & TEA Curitiba (320k membros)"
+                  placeholder={`Ex: Público ${activeSearchFolder.toUpperCase()} (${selectedGroupIds.length} Grupos)`}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500"
                 />
               </div>
@@ -1423,7 +1503,7 @@ Super recomendo para quem quer imprimir em casa e economizar tempo! ❤️`);
                   rows={3}
                   value={newAudienceDesc}
                   onChange={(e) => setNewAudienceDesc(e.target.value)}
-                  placeholder="Ex: Mães com filhos em fase de alfabetização, buscando atividades lúdicas sem sobrecarga sensorial..."
+                  placeholder="Ex: Público segmentado para divulgação do Caderno de Atividades Kiwify..."
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
                 />
               </div>
@@ -1439,33 +1519,33 @@ Super recomendo para quem quer imprimir em casa e economizar tempo! ❤️`);
             <div className="flex justify-end gap-3 pt-2">
               <button
                 onClick={() => setIsAudienceModalOpen(false)}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl"
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl cursor-pointer"
               >
                 Cancelar
               </button>
               <button
                 onClick={handleCreateAudience}
-                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl"
+                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl cursor-pointer"
               >
-                Confirmar & Criar Público
+                Salvar na Biblioteca de Públicos
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* MODAL: ADD MANUAL GROUP BY LINK */}
-      {isAddGroupModalOpen && (
+      {/* MODAL: ADD YOUTUBE VIDEO */}
+      {isAddYtModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <Plus className="w-5 h-5 text-emerald-400" />
-                Adicionar Grupo do Facebook
+                <Video className="w-5 h-5 text-red-500" />
+                Adicionar Vídeo ou Canal do YouTube
               </h3>
               <button
-                onClick={() => setIsAddGroupModalOpen(false)}
-                className="text-slate-400 hover:text-white"
+                onClick={() => setIsAddYtModalOpen(false)}
+                className="text-slate-400 hover:text-white cursor-pointer"
               >
                 ✕
               </button>
@@ -1474,75 +1554,88 @@ Super recomendo para quem quer imprimir em casa e economizar tempo! ❤️`);
             <div className="space-y-4 text-xs">
               <div>
                 <label className="block text-slate-300 font-semibold mb-1">
-                  Nome do Grupo:
+                  URL do Vídeo:
                 </label>
                 <input
                   type="text"
-                  value={manualGroupName}
-                  onChange={(e) => setManualGroupName(e.target.value)}
-                  placeholder="Ex: Mães e Filhos Especiais Brasil"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500"
+                  value={newYtUrl}
+                  onChange={(e) => setNewYtUrl(e.target.value)}
+                  placeholder="https://www.youtube.com/watch?v=..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-red-500 font-mono"
                 />
               </div>
 
               <div>
                 <label className="block text-slate-300 font-semibold mb-1">
-                  Link / URL do Grupo no Facebook:
+                  Título do Vídeo:
                 </label>
                 <input
                   type="text"
-                  value={manualGroupUrl}
-                  onChange={(e) => setManualGroupUrl(e.target.value)}
-                  placeholder="https://facebook.com/groups/..."
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500"
+                  value={newYtTitle}
+                  onChange={(e) => setNewYtTitle(e.target.value)}
+                  placeholder="Ex: Como Estimular Criança com Dificuldade de Foco"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-red-500"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1">
-                    Número Estimado de Membros:
-                  </label>
-                  <input
-                    type="number"
-                    value={manualMembersCount}
-                    onChange={(e) => setManualMembersCount(Number(e.target.value))}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500"
-                  />
-                </div>
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Nome do Canal:
+                </label>
+                <input
+                  type="text"
+                  value={newYtChannel}
+                  onChange={(e) => setNewYtChannel(e.target.value)}
+                  placeholder="Ex: Canal Pedagogia & Inclusão"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-red-500"
+                />
+              </div>
 
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1">
-                    Nicho / Categoria:
-                  </label>
-                  <select
-                    value={manualNiche}
-                    onChange={(e) => setManualNiche(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500"
-                  >
-                    <option value="Autismo & Mães Atípicas">Autismo & Mães Atípicas</option>
-                    <option value="Pedagogia & Escolas">Pedagogia & Escolas</option>
-                    <option value="Autismo & TDAH Infantil">Autismo & TDAH Infantil</option>
-                    <option value="Mães Locais (Curitiba)">Mães Locais (Curitiba)</option>
-                    <option value="Coordenação Motora & TEA">Coordenação Motora & TEA</option>
-                    <option value="Moda & Vendas WhatsApp">Moda & Vendas WhatsApp</option>
-                  </select>
-                </div>
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Comentário com Link da Kiwify:
+                </label>
+                <textarea
+                  rows={4}
+                  value={newYtComment}
+                  onChange={(e) => setNewYtComment(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 focus:outline-none focus:border-red-500"
+                />
               </div>
             </div>
 
             <div className="flex justify-end gap-3 pt-2">
               <button
-                onClick={() => setIsAddGroupModalOpen(false)}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl"
+                onClick={() => setIsAddYtModalOpen(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl cursor-pointer"
               >
                 Cancelar
               </button>
               <button
-                onClick={handleAddManualGroup}
-                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl"
+                onClick={() => {
+                  if (!newYtUrl) return;
+                  const newVid: YouTubeTargetVideo = {
+                    id: `yt-${Date.now()}`,
+                    url: newYtUrl,
+                    title: newYtTitle || 'Vídeo de Pedagogia & Educação Infantil',
+                    channelName: newYtChannel || 'Canal Educativo',
+                    viewsCount: 'Recém Adicionado',
+                    thumbnailUrl: 'https://images.unsplash.com/photo-1503676260728-1c00da094a0b?w=400&q=80',
+                    actionLike: true,
+                    actionComment: true,
+                    actionPinCampaign: true,
+                    commentText: newYtComment,
+                    status: 'ready'
+                  };
+                  setYoutubeVideos(prev => [newVid, ...prev]);
+                  setIsAddYtModalOpen(false);
+                  setNewYtUrl('');
+                  setNewYtTitle('');
+                  setNewYtChannel('');
+                }}
+                className="px-5 py-2 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded-xl cursor-pointer"
               >
-                Adicionar Grupo
+                Salvar Vídeo na Fila
               </button>
             </div>
           </div>

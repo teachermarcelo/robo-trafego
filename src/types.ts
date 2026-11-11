@@ -87,7 +87,7 @@ export interface TrackingEvent {
   };
   device: 'mobile' | 'desktop' | 'tablet';
   ageBracket: '18-24' | '25-34' | '35-44' | '45-54' | '55+';
-  source: 'tiktok' | 'pinterest' | 'instagram' | 'whatsapp' | 'google_organic' | 'meta_ads' | 'brevo_email' | 'facebook_groups';
+  source: 'tiktok' | 'pinterest' | 'instagram' | 'whatsapp' | 'google_organic' | 'meta_ads' | 'brevo_email' | 'facebook_groups' | 'youtube_comments';
   amount?: number;
   leadScore?: number;
   durationSeconds?: number;
@@ -148,6 +148,9 @@ export interface FacebookGroup {
   dispatchCount: number;
   status: 'ready' | 'cooling_down' | 'posted';
   categoryBadge?: string;
+  city?: string;
+  searchTerm?: string;
+  postsPerDay?: string;
 }
 
 export interface FacebookAudience {
@@ -160,6 +163,9 @@ export interface FacebookAudience {
   niche: string;
   targetProductId: string;
   createdAt: string;
+  lastUsedAt?: string;
+  campaignUsageCount?: number;
+  groupNamesPreview?: string[];
 }
 
 export interface FacebookPostLog {
@@ -194,5 +200,32 @@ export interface FacebookGroupPostCampaign {
   nextDispatchCountdown: number;
   logs: FacebookPostLog[];
   createdAt: string;
+}
+
+export interface YouTubeTargetVideo {
+  id: string;
+  url: string;
+  title: string;
+  channelName: string;
+  viewsCount?: string;
+  thumbnailUrl?: string;
+  actionLike: boolean;
+  actionComment: boolean;
+  actionPinCampaign: boolean;
+  commentText: string;
+  status: 'ready' | 'processing' | 'completed' | 'error';
+  lastExecutedAt?: string;
+}
+
+export interface YouTubeBotLog {
+  id: string;
+  videoId: string;
+  videoTitle: string;
+  videoUrl: string;
+  channelName: string;
+  executedAt: string;
+  actionDone: 'comment_and_like' | 'comment_only' | 'like_only';
+  commentExcerpt: string;
+  status: 'success' | 'error';
 }
 

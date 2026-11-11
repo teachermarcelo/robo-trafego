@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
-  "name": "AutoViral AI - Mapeador de Grupos Facebook & Anti-Bloqueio",
-  "version": "1.0.0",
-  "description": "Mapeia automaticamente grupos abertos no Facebook, sincroniza com a plataforma AutoViral AI para criar públicos qualificados e automatiza postagens com intervalo anti-bloqueio (120s, 300s, 400s).",
+  "name": "AutoViral AI - Mapeador de Grupos Facebook & Robô YouTube",
+  "version": "1.1.0",
+  "description": "Mapeia automaticamente grupos do Facebook conforme você rola a página de busca, sincroniza públicos com o painel AutoViral AI e automatiza postagens com intervalo anti-bloqueio (300s a 400s, até 500 disparos/dia) e automação de comentários/likes no YouTube.",
   "action": {
     "default_popup": "popup.html",
-    "default_title": "AutoViral AI - Mapeador Facebook"
+    "default_title": "AutoViral AI - Mapeador FB & YouTube"
   },
   "permissions": [
     "activeTab",
@@ -15,6 +15,7 @@
   ],
   "host_permissions": [
     "*://*.facebook.com/*",
+    "*://*.youtube.com/*",
     "*://*.kiwify.com.br/*",
     "*://localhost/*",
     "*://*.vercel.app/*",
@@ -26,7 +27,8 @@
   "content_scripts": [
     {
       "matches": [
-        "*://*.facebook.com/*"
+        "*://*.facebook.com/*",
+        "*://*.youtube.com/*"
       ],
       "js": ["content.js"],
       "run_at": "document_idle"

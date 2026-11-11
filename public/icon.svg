@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#020617"/>
+      <stop offset="50%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#022c22"/>
+    </linearGradient>
+    <linearGradient id="rocket" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#34d399"/>
+      <stop offset="50%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#059669"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#60a5fa"/>
+      <stop offset="100%" stop-color="#a855f7"/>
+    </linearGradient>
+  </defs>
+  <!-- Background with rounded corners -->
+  <rect width="512" height="512" rx="128" fill="url(#bg)"/>
+  <circle cx="256" cy="256" r="210" stroke="#10b981" stroke-width="6" stroke-opacity="0.25" fill="none"/>
+  
+  <!-- Central Rocket & Viral Flame -->
+  <g transform="translate(256,240)">
+    <!-- Trail Glow -->
+    <path d="M-40,80 Q0,160 0,180 Q0,160 40,80 Z" fill="#f59e0b" opacity="0.8"/>
+    <path d="M-20,90 Q0,150 0,165 Q0,150 20,90 Z" fill="#ef4444"/>
+    
+    <!-- Rocket Wings -->
+    <path d="M-60,50 L-95,95 L-40,85 Z" fill="#047857"/>
+    <path d="M60,50 L95,95 L40,85 Z" fill="#047857"/>
+    
+    <!-- Rocket Body -->
+    <path d="M0,-120 C50,-60 65,30 55,85 L-55,85 C-65,30 -50,-60 0,-120 Z" fill="url(#rocket)"/>
+    
+    <!-- Window with AI Glow -->
+    <circle cx="0" cy="-20" r="32" fill="#0f172a" stroke="#34d399" stroke-width="6"/>
+    <circle cx="0" cy="-20" r="18" fill="url(#glow)"/>
+    
+    <!-- Tip Highlight -->
+    <path d="M0,-120 C18,-95 24,-65 24,-50 L-24,-50 C-24,-65 -18,-95 0,-120 Z" fill="#6ee7b7" opacity="0.9"/>
+  </g>
+  
+  <!-- Speed lines -->
+  <circle cx="100" cy="120" r="6" fill="#34d399" opacity="0.6"/>
+  <circle cx="410" cy="140" r="8" fill="#38bdf8" opacity="0.6"/>
+  <circle cx="390" cy="380" r="5" fill="#f59e0b" opacity="0.5"/>
+  <circle cx="120" cy="370" r="7" fill="#a855f7" opacity="0.5"/>
+</svg>

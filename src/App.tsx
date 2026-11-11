@@ -25,6 +25,8 @@ import { MetaAdsBoosterTab } from './components/MetaAdsBoosterTab';
 import { RoboDivulgadorCidades } from './components/RoboDivulgadorCidades';
 import { BrevoEmailWhatsAppTab } from './components/BrevoEmailWhatsAppTab';
 import { ChromeFbGroupsTab } from './components/ChromeFbGroupsTab';
+import { PWAInstallModal } from './components/PWAInstallModal';
+import { OfflineIndicator } from './components/OfflineIndicator';
 import { getCampaignSlug } from './utils/campaignSlug';
 import { INITIAL_CAMPAIGNS } from './data/defaultCampaigns';
 import { Campaign, TrackingEvent, PainPointData, PushNotification, CustomerLead } from './types';
@@ -106,6 +108,7 @@ export default function App() {
   const [isNotificationsModalOpen, setIsNotificationsModalOpen] = useState(false);
   const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
   const [isVercelModalOpen, setIsVercelModalOpen] = useState(false);
+  const [isPWAInstallModalOpen, setIsPWAInstallModalOpen] = useState(false);
   const [bridgeModalCampaign, setBridgeModalCampaign] = useState<Campaign | null>(null);
   const [isPublicLeadMode, setIsPublicLeadMode] = useState<boolean>(() => {
     try {
@@ -872,6 +875,7 @@ export default function App() {
         onOpenSupabase={() => setIsSupabaseModalOpen(true)}
         onOpenVercel={() => setIsVercelModalOpen(true)}
         onResetAllMetrics={handleResetToRealMode}
+        onOpenPWAInstall={() => setIsPWAInstallModalOpen(true)}
       />
 
 
@@ -966,6 +970,7 @@ export default function App() {
             initialNiche={selectedNicheForCreative}
             campaigns={campaigns}
             onAddCampaign={handleAddCampaign}
+            onNavigateTab={(tab) => setActiveTab(tab)}
           />
         )}
 
@@ -1112,6 +1117,13 @@ export default function App() {
         onSimulateSale={handleSimulateQuickConversion}
         onDeleteCustomer={handleDeleteCustomer}
       />
+
+      <PWAInstallModal
+        isOpen={isPWAInstallModalOpen}
+        onClose={() => setIsPWAInstallModalOpen(false)}
+      />
+
+      <OfflineIndicator />
     </div>
   );
 }

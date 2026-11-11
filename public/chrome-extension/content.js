@@ -123,6 +123,21 @@
 
     function categorizeNiche(title) {
       const lower = title.toLowerCase();
+      if (
+        lower.includes('renda') ||
+        lower.includes('dinheiro') ||
+        lower.includes('ganhar') ||
+        lower.includes('trabalho') ||
+        lower.includes('afiliad') ||
+        lower.includes('marketing') ||
+        lower.includes('celular') ||
+        lower.includes('home office') ||
+        lower.includes('loja') ||
+        lower.includes('oportunidade') ||
+        lower.includes('venda')
+      ) {
+        return 'Renda Extra & Oportunidades';
+      }
       if (lower.includes('pedagog') || lower.includes('professor') || lower.includes('estágio') || lower.includes('escola')) {
         return 'Pedagogia & Educação';
       }
@@ -225,18 +240,37 @@
 
       document.getElementById('autoviral-badge-sync').onclick = () => {
         const count = localMappedGroups.length;
+
+        // 1. Send via BroadcastChannel (works between tabs in same browser immediately!)
+        try {
+          const bc = new BroadcastChannel('autoviral_bridge_channel');
+          bc.postMessage({
+            action: 'AUTOVIRAL_IMPORT_GROUPS_FROM_EXTENSION',
+            groups: localMappedGroups,
+            timestamp: new Date().toISOString()
+          });
+        } catch (e) {
+          console.warn('[AutoViral AI] BroadcastChannel não suportado:', e);
+        }
+
+        // 2. Window postMessage fallback
         window.postMessage({
           type: 'AUTOVIRAL_IMPORT_GROUPS_FROM_EXTENSION',
           groups: localMappedGroups,
           timestamp: new Date().toISOString()
         }, '*');
 
-        chrome.runtime.sendMessage({
-          action: 'AUTOVIRAL_SYNC_WITH_PLATFORM',
-          groups: localMappedGroups
-        }, () => {
-          alert(`✅ Sucesso! ${count} grupos mapeados foram sincronizados com a plataforma AutoViral AI.`);
-        });
+        // 3. Extension message to background relay
+        if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
+          chrome.runtime.sendMessage({
+            action: 'AUTOVIRAL_SYNC_WITH_PLATFORM',
+            groups: localMappedGroups
+          }, (res) => {
+            alert(`✅ Sucesso! ${count} grupos mapeados foram sincronizados com o Painel AutoViral AI.`);
+          });
+        } else {
+          alert(`✅ ${count} grupos mapeados foram enviados para sincronização via Broadcast!`);
+        }
       };
     }
 
@@ -254,6 +288,10 @@
       if (request.action === 'AUTOVIRAL_MAP_GROUPS' || request.action === 'AUTOVIRAL_GET_GROUPS') {
         scanVisibleGroups();
         sendResponse({ success: true, groups: localMappedGroups, currentUrl: window.location.href });
+      } else if (request.action === 'AUTOVIRAL_RESET_MAPPED_GROUPS') {
+        localMappedGroups = [];
+        updateFloatingBadge();
+        sendResponse({ success: true });
       }
       return true;
     });
@@ -338,12 +376,61 @@
   }
 
   // =========================================================================
-  // 4. AUTOVIRAL PLATFORM RECEIVER
+  // 4. INSTAGRAM LOGGED-IN BRIDGE & STORIES DETECTOR
+  // =========================================================================
+  if (currentHost.includes('instagram.com')) {
+    console.log('[AutoViral AI] Conectado ao Instagram Web. Automação de Stories & Feed ATIVA.');
+
+    // Inject small badge showing connected account
+    const badge = document.createElement('div');
+    badge.id = 'autoviral-insta-badge';
+    badge.innerHTML = `
+      <div style="position: fixed; bottom: 20px; left: 20px; z-index: 999999; background: #0f172a; color: #fff; padding: 8px 14px; border-radius: 9999px; font-family: sans-serif; font-size: 11px; font-weight: 700; border: 1px solid #c084fc; box-shadow: 0 4px 15px rgba(192, 132, 252, 0.4); display: flex; align-items: center; gap: 6px;">
+        <span style="display: inline-block; width: 8px; height: 8px; background: #10b981; border-radius: 50%;"></span>
+        <span>AutoViral AI • Stories com Link Clicável Conectado</span>
+      </div>
+    `;
+    if (document.body) {
+      document.body.appendChild(badge);
+    } else {
+      window.addEventListener('DOMContentLoaded', () => document.body.appendChild(badge));
+    }
+
+    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+      if (request.action === 'AUTOVIRAL_INSTA_PING') {
+        sendResponse({ status: 'active', url: window.location.href, title: document.title });
+      }
+      return true;
+    });
+  }
+
+  // =========================================================================
+  // 5. AUTOVIRAL PLATFORM RECEIVER
   // =========================================================================
   if (isAutoViral) {
     console.log('[AutoViral AI] Conectado à Plataforma AutoViral.');
     window.__AUTOVIRAL_CHROME_EXTENSION_INSTALLED__ = true;
     document.documentElement.setAttribute('data-autoviral-extension-installed', 'true');
+
+    // Listen via BroadcastChannel for real-time inter-tab sync
+    try {
+      const bc = new BroadcastChannel('autoviral_bridge_channel');
+      bc.onmessage = (ev) => {
+        if (ev.data && ev.data.action === 'AUTOVIRAL_IMPORT_GROUPS_FROM_EXTENSION') {
+          window.dispatchEvent(new CustomEvent('autoviral_extension_groups_received', {
+            detail: {
+              groups: ev.data.groups,
+              ytVideos: ev.data.ytVideos,
+              pinBoards: ev.data.pinBoards,
+              instaStories: ev.data.instaStories,
+              targetChannels: ev.data.targetChannels,
+              interval: ev.data.interval,
+              timestamp: ev.data.timestamp
+            }
+          }));
+        }
+      };
+    } catch (e) {}
 
     // Forward messages from extension background
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -351,10 +438,17 @@
         window.dispatchEvent(new CustomEvent('autoviral_extension_groups_received', {
           detail: {
             groups: message.groups,
+            ytVideos: message.ytVideos,
+            pinBoards: message.pinBoards,
+            instaStories: message.instaStories,
+            targetChannels: message.targetChannels,
             interval: message.interval,
             timestamp: message.timestamp
           }
         }));
+        sendResponse({ received: true });
+      } else if (message.action === 'AUTOVIRAL_RESET_MAPPED_GROUPS') {
+        window.dispatchEvent(new CustomEvent('autoviral_extension_groups_reset'));
         sendResponse({ received: true });
       }
       return true;

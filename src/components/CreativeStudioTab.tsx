@@ -23,6 +23,7 @@ interface CreativeStudioTabProps {
   campaigns?: Campaign[];
   onAddCampaign?: (newCamp: Campaign) => void;
   onSendToCampaign?: (creative: CreativePackage, productTitle: string) => void;
+  onNavigateTab?: (tab: string) => void;
 }
 
 export const CreativeStudioTab: React.FC<CreativeStudioTabProps> = ({
@@ -31,6 +32,7 @@ export const CreativeStudioTab: React.FC<CreativeStudioTabProps> = ({
   campaigns = [],
   onAddCampaign,
   onSendToCampaign,
+  onNavigateTab,
 }) => {
   // If user has registered campaigns, default to the latest one, else fallback to practical niche
   const defaultProduct = campaigns[0]?.title || 'Renda extra para mães solo';
@@ -265,6 +267,28 @@ export const CreativeStudioTab: React.FC<CreativeStudioTabProps> = ({
               A IA cria conteúdos estratégicos que prendem o público nos primeiros 3 segundos e direcionam para o seu link ou WhatsApp.
             </p>
           </div>
+        </div>
+
+        {/* Banner para o Criador de Layouts & Stories com Sticker de Link */}
+        <div className="mt-4 pt-3 border-t border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-gradient-to-r from-rose-950/40 via-purple-950/40 to-slate-900 p-3.5 rounded-xl border border-rose-500/30">
+          <div className="flex items-center gap-2.5">
+            <span className="text-xl">📸</span>
+            <div>
+              <span className="text-xs font-black text-rose-300 block">
+                NOVO: Estúdio de Layouts &amp; Stories com Link Clicável
+              </span>
+              <span className="text-[11px] text-slate-300 block">
+                Crie layouts em 9:16 com a figurinha oficial do Instagram e envie direto para o robô automático!
+              </span>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => onNavigateTab && onNavigateTab('chrome_fb_groups')}
+            className="px-3.5 py-1.5 bg-gradient-to-r from-rose-600 to-purple-600 hover:from-rose-500 hover:to-purple-500 text-white font-bold text-xs rounded-lg transition cursor-pointer shadow flex-shrink-0"
+          >
+            Abrir Estúdio Visual &amp; Stories →
+          </button>
         </div>
 
         {/* Quick Campaign & Product Selector */}

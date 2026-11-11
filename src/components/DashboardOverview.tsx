@@ -267,6 +267,49 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
         </button>
       </div>
 
+      {/* Real Metrics Transparency & Defense Alert Banner */}
+      <div className="bg-[#121624] border border-slate-800 rounded-2xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-bold text-white flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse inline-block" />
+              Veracidade das Métricas:
+            </span>
+            <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-700/60 font-black px-2 py-0.5 rounded-full">
+              🟢 Conexão com Webhook Kiwify &amp; Hotmart Ativa
+            </span>
+            <span className="text-[10px] bg-slate-800 text-slate-300 font-semibold px-2 py-0.5 rounded-full">
+              Rastreamento de Cliques em Tempo Real
+            </span>
+          </div>
+          <p className="text-xs text-slate-400">
+            {totalRevenue > 0
+              ? 'Os valores abaixo incluem simulações de teste do painel somadas aos acessos rastreados. Para ver somente vendas 100% reais, clique em "Zerar para Base R$ 0,00".'
+              : 'Painel zerado. Pronto para receber cliques e registrar apenas vendas reais confirmadas.'}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
+          {onResetAllMetrics && (
+            <button
+              onClick={onResetAllMetrics}
+              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-amber-300 font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+              title="Zerar todos os números para começar do zero absoluto"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+              <span>Zerar para Base R$ 0,00</span>
+            </button>
+          )}
+          <button
+            onClick={() => onNavigateTab('chrome_fb_groups')}
+            className="px-3 py-1.5 bg-blue-950/80 hover:bg-blue-900 border border-blue-600/60 text-blue-300 font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+          >
+            <ShieldCheck className="w-3.5 h-3.5 text-blue-400" />
+            <span>Ver Escudo de Defesa</span>
+          </button>
+        </div>
+      </div>
+
       {/* KPI Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Card 1: Faturamento & Renda Familiar */}

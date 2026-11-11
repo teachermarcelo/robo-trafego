@@ -178,6 +178,41 @@ export interface FacebookPostLog {
   status: 'success' | 'cooling_down' | 'error';
   intervalWaitedSeconds: number;
   checkoutUrl: string;
+  trackedToken?: string;
+  trackedClicksCount?: number;
+}
+
+export interface TrackedLinkClick {
+  id: string;
+  linkId: string;
+  token: string;
+  timestamp: string;
+  groupOriginName: string;
+  groupOriginUrl?: string;
+  geoCity: string;
+  geoState: string;
+  device: 'mobile' | 'desktop' | 'tablet';
+  operatingSystem: string;
+  hasOpenedPage: boolean;
+  hasVisitedCheckout: boolean;
+  timeSpentSeconds: number;
+  leadScore: number;
+}
+
+export interface TrackedLinkItem {
+  id: string;
+  token: string;
+  originalUrl: string;
+  smartUrl: string;
+  campaignTitle: string;
+  campaignId: string;
+  targetGroupCount: number;
+  createdAt: string;
+  totalClicks: number;
+  uniqueOpens: number;
+  checkoutViews: number;
+  conversions: number;
+  clicksHistory: TrackedLinkClick[];
 }
 
 export interface FacebookGroupPostCampaign {
@@ -251,5 +286,42 @@ export interface PinterestBoard {
   followersEstimated: number;
   niche: string;
   description: string;
+}
+
+export interface InstagramStoryItem {
+  id: string;
+  title: string;
+  mediaUrl: string;
+  mediaType: 'story_9_16' | 'feed_1_1' | 'feed_4_5' | 'reels_9_16';
+  stickerText: string;
+  stickerUrl: string; // link convertido / checkout
+  caption?: string;
+  status: 'ready' | 'published' | 'scheduled';
+  scheduledTime?: string;
+  publishedAt?: string;
+  viewsEstimated: number;
+  linkClicksEstimated: number;
+  salesEstimated: number;
+  targetCampaignId?: string;
+}
+
+export interface InstagramLayoutTemplate {
+  id: string;
+  name: string;
+  category: 'story_oferta' | 'dor_solucao' | 'depoimento' | 'destaque_pix' | 'reels_hook';
+  aspectRatio: '9:16' | '1:1' | '4:5' | '2:3' | '16:9';
+  headline: string;
+  subheadline: string;
+  badgeText: string;
+  priceText: string;
+  oldPriceText?: string;
+  stickerLinkText: string;
+  stickerUrl: string;
+  ctaText: string;
+  bgGradient: string;
+  textColor: string;
+  imageUrl?: string;
+  features?: string[];
+  threePillars?: { title: string; subtitle: string; icon: string }[];
 }
 

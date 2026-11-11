@@ -36,9 +36,21 @@ import {
   Activity,
   Layers,
   Repeat,
-  Target
+  Target,
+  Smartphone,
+  QrCode,
+  Instagram,
+  Palette,
+  Edit2,
+  Link2,
+  Sliders
 } from 'lucide-react';
 import JSZip from 'jszip';
+import { PWAInstallModal } from './PWAInstallModal';
+import { InstagramRobotTab } from './InstagramRobotTab';
+import { VisualLayoutStudio } from './VisualLayoutStudio';
+import { SecurityDefenseModal } from './SecurityDefenseModal';
+import { LogisticsAnalyticsDashboard } from './LogisticsAnalyticsDashboard';
 import {
   Campaign,
   FacebookGroup,
@@ -47,12 +59,16 @@ import {
   YouTubeTargetVideo,
   YouTubeBotLog,
   PinterestPinItem,
-  PinterestBoard
+  PinterestBoard,
+  InstagramStoryItem,
+  TrackedLinkItem,
+  TrackedLinkClick
 } from '../types';
 import {
   CURITIBA_GROUPS,
   PEDAGOGIA_GROUPS,
   AUTISMO_GROUPS,
+  RENDA_EXTRA_GROUPS,
   ALL_INITIAL_FACEBOOK_GROUPS,
   INITIAL_SAVED_AUDIENCES
 } from '../data/facebookGroupsData';
@@ -285,19 +301,27 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
 
   const availableCampaigns = campaigns && campaigns.length > 0 ? campaigns : [defaultProduct];
 
-  // Subtabs: groups | audiences | campaign | youtube | pinterest | extension_guide
-  const [activeSubTab, setActiveSubTab] = useState<'groups' | 'audiences' | 'campaign' | 'youtube' | 'pinterest' | 'extension_guide'>('groups');
+  // Subtabs: groups | audiences | campaign | youtube | pinterest | instagram | layout_studio | extension_guide | tracked_links
+  const [activeSubTab, setActiveSubTab] = useState<'groups' | 'audiences' | 'campaign' | 'youtube' | 'pinterest' | 'instagram' | 'layout_studio' | 'extension_guide' | 'tracked_links'>('groups');
 
-  // Search folder filter: 'curitiba' | 'pedagogia' | 'autismo' | 'all'
-  const [activeSearchFolder, setActiveSearchFolder] = useState<'curitiba' | 'pedagogia' | 'autismo' | 'all'>('curitiba');
+  // Search folder filter: 'renda_extra' | 'curitiba' | 'pedagogia' | 'autismo' | 'all'
+  const [activeSearchFolder, setActiveSearchFolder] = useState<'renda_extra' | 'curitiba' | 'pedagogia' | 'autismo' | 'all'>('renda_extra');
 
-  // All Mapped Groups State
+  // All Mapped Groups State (Unlimited, persists in localStorage, auto-merges with real search data)
   const [mappedGroups, setMappedGroups] = useState<FacebookGroup[]>(() => {
     try {
-      const saved = localStorage.getItem('autoviral_fb_mapped_groups_v3');
+      const saved = localStorage.getItem('autoviral_fb_mapped_groups_v4');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const merged = [...parsed];
+          ALL_INITIAL_FACEBOOK_GROUPS.forEach(initG => {
+            if (!merged.some(m => m.id === initG.id || m.name === initG.name)) {
+              merged.push(initG);
+            }
+          });
+          return merged;
+        }
       }
     } catch {}
     return ALL_INITIAL_FACEBOOK_GROUPS;
@@ -305,9 +329,26 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
 
   // Selected Group IDs for audience / campaign
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>(() => {
-    return CURITIBA_GROUPS.slice(0, 10).map(g => g.id);
+    return RENDA_EXTRA_GROUPS.slice(0, 30).map(g => g.id);
   });
   const [searchQuery, setSearchQuery] = useState<string>('');
+
+  // Target Quantity to Dispatch (Requested by user: "selecionar quantos grupos quer divulgar")
+  const [targetQuantityToDispatch, setTargetQuantityToDispatch] = useState<number>(30);
+
+  // Group Editing Modal State (Requested by user: "exluir editar e selecionar quantos grupos quer divulgar")
+  const [editingGroup, setEditingGroup] = useState<FacebookGroup | null>(null);
+  const [isEditGroupModalOpen, setIsEditGroupModalOpen] = useState<boolean>(false);
+  const [editGroupName, setEditGroupName] = useState<string>('');
+  const [editGroupUrl, setEditGroupUrl] = useState<string>('');
+  const [editGroupMembers, setEditGroupMembers] = useState<number>(10000);
+  const [editGroupNiche, setEditGroupNiche] = useState<string>('Renda Extra & Oportunidades');
+
+  // Audience Editing Modal State (Requested by user: "opção de salvar nomear os grupos pra reutilizar")
+  const [editingAudience, setEditingAudience] = useState<FacebookAudience | null>(null);
+  const [isEditAudienceModalOpen, setIsEditAudienceModalOpen] = useState<boolean>(false);
+  const [editAudienceName, setEditAudienceName] = useState<string>('');
+  const [editAudienceDesc, setEditAudienceDesc] = useState<string>('');
 
   // Bulk import from text modal
   const [isBulkImportModalOpen, setIsBulkImportModalOpen] = useState<boolean>(false);
@@ -316,7 +357,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
   // Saved Audiences Library (Display & Reusable)
   const [audiences, setAudiences] = useState<FacebookAudience[]>(() => {
     try {
-      const saved = localStorage.getItem('autoviral_fb_audiences_v3');
+      const saved = localStorage.getItem('autoviral_fb_audiences_v4');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -324,7 +365,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
     } catch {}
     return INITIAL_SAVED_AUDIENCES;
   });
-  const [selectedAudienceId, setSelectedAudienceId] = useState<string>('aud-cwb-todos');
+  const [selectedAudienceId, setSelectedAudienceId] = useState<string>('aud-renda-extra-73');
 
   // Create Audience Modal
   const [isAudienceModalOpen, setIsAudienceModalOpen] = useState(false);
@@ -396,6 +437,156 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
       setPostHeadline(templates[templateIndex].headline);
       setPostCopy(templates[templateIndex].copy);
     }
+  };
+
+  // PWA Install Modal State (Requested by user: "CRIE UM apk pra instalar no celular")
+  const [isPWAInstallModalOpen, setIsPWAInstallModalOpen] = useState<boolean>(false);
+
+  // Zerar Mapeamento Modal State (Requested by user: "função zrar mapear")
+  const [isResetModalOpen, setIsResetModalOpen] = useState<boolean>(false);
+
+  // Security Defense Modal State (Requested by user: "crie uma defessa interna com aviso", image_031f9bdf.png)
+  const [isDefenseModalOpen, setIsDefenseModalOpen] = useState<boolean>(false);
+  const [defensePlatform, setDefensePlatform] = useState<'Facebook' | 'Instagram' | 'Multi-Canais'>('Facebook');
+
+  // Automatic Cooldown Pauses (Requested by user: "limite de 500 por dia podendo ser mais com pausa automaticas")
+  const [isCyclePauseActive, setIsCyclePauseActive] = useState<boolean>(true);
+  const [cyclePauseCount, setCyclePauseCount] = useState<number>(25); // a cada 25 postagens
+  const [cyclePauseMinutes, setCyclePauseMinutes] = useState<number>(15); // pausa preventiva de 15 minutos
+  const [postsInCurrentCycle, setPostsInCurrentCycle] = useState<number>(14);
+
+  // Tracked Links & Live Click Radar (Requested by user: "crie em todos links rstreio pra saber quam clicou,quem abriu")
+  const [trackedLinks, setTrackedLinks] = useState<TrackedLinkItem[]>(() => {
+    try {
+      const saved = localStorage.getItem('autoviral_tracked_links_v2');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return [
+      {
+        id: 'link-re-1',
+        token: 'renda-extra-01',
+        originalUrl: 'https://pay.kiwify.com.br/HE5xbnp',
+        smartUrl: 'https://autoviral.app/r/renda-extra-01',
+        campaignTitle: 'Loja Pronta E-commerce Sem Estoque (R$ 9,90)',
+        campaignId: 'camp-loja-pronta-ecom',
+        targetGroupCount: 73,
+        createdAt: 'Hoje às 08:30',
+        totalClicks: 47,
+        uniqueOpens: 42,
+        checkoutViews: 28,
+        conversions: 4,
+        clicksHistory: [
+          {
+            id: 'clk-1',
+            linkId: 'link-re-1',
+            token: 'renda-extra-01',
+            timestamp: 'Hoje às 08:58:14',
+            groupOriginName: 'RENDA EXTRA EM CASA 2 🚀🚀🚀',
+            groupOriginUrl: 'https://facebook.com/groups/rendaextraemcasa2oficial',
+            geoCity: 'Curitiba',
+            geoState: 'PR',
+            device: 'mobile',
+            operatingSystem: 'Android (Samsung Galaxy)',
+            hasOpenedPage: true,
+            hasVisitedCheckout: true,
+            timeSpentSeconds: 94,
+            leadScore: 95
+          },
+          {
+            id: 'clk-2',
+            linkId: 'link-re-1',
+            token: 'renda-extra-01',
+            timestamp: 'Hoje às 08:52:03',
+            groupOriginName: 'RENDA EXTRA (2,4 mil membros)',
+            groupOriginUrl: 'https://facebook.com/groups/rendaextraoficialbrasil',
+            geoCity: 'São Paulo',
+            geoState: 'SP',
+            device: 'mobile',
+            operatingSystem: 'iOS (iPhone 14)',
+            hasOpenedPage: true,
+            hasVisitedCheckout: true,
+            timeSpentSeconds: 68,
+            leadScore: 88
+          },
+          {
+            id: 'clk-3',
+            linkId: 'link-re-1',
+            token: 'renda-extra-01',
+            timestamp: 'Hoje às 08:44:20',
+            groupOriginName: 'Renda Extra & oportunidades 26',
+            groupOriginUrl: 'https://facebook.com/groups/rendaextraeoportunidades26',
+            geoCity: 'Belo Horizonte',
+            geoState: 'MG',
+            device: 'desktop',
+            operatingSystem: 'Windows 11',
+            hasOpenedPage: true,
+            hasVisitedCheckout: false,
+            timeSpentSeconds: 32,
+            leadScore: 72
+          }
+        ]
+      }
+    ];
+  });
+
+  // Channel Target Selection for Dispatches (Requested by user: "função selecionar onde disparar,e selecionar separadao")
+  const [targetChannels, setTargetChannels] = useState<{
+    facebook: boolean;
+    youtube: boolean;
+    pinterest: boolean;
+    instagram: boolean;
+  }>({ facebook: true, youtube: true, pinterest: true, instagram: true });
+
+  const [dispatchMode, setDispatchMode] = useState<'all' | 'facebook' | 'youtube' | 'pinterest' | 'instagram'>('all');
+
+  // Instagram Story Queue (receives stories from VisualLayoutStudio and runs them)
+  const [instagramStoryQueue, setInstagramStoryQueue] = useState<InstagramStoryItem[]>([]);
+
+  const handleToggleTargetChannel = (channel: 'facebook' | 'youtube' | 'pinterest' | 'instagram') => {
+    setTargetChannels(prev => {
+      const updated = { ...prev, [channel]: !prev[channel] };
+      return updated;
+    });
+  };
+
+  const handleSetExclusiveChannel = (channel: 'all' | 'facebook' | 'youtube' | 'pinterest' | 'instagram') => {
+    setDispatchMode(channel);
+    let updated = { facebook: true, youtube: true, pinterest: true, instagram: true };
+    if (channel === 'facebook') updated = { facebook: true, youtube: false, pinterest: false, instagram: false };
+    if (channel === 'youtube') updated = { facebook: false, youtube: true, pinterest: false, instagram: false };
+    if (channel === 'pinterest') updated = { facebook: false, youtube: false, pinterest: true, instagram: false };
+    if (channel === 'instagram') updated = { facebook: false, youtube: false, pinterest: false, instagram: true };
+    setTargetChannels(updated);
+  };
+
+  const handleResetMapping = (scope: 'all' | 'facebook' | 'youtube' | 'pinterest' | 'instagram') => {
+    if (scope === 'all' || scope === 'facebook') {
+      setMappedGroups([]);
+      setSelectedGroupIds([]);
+      try {
+        localStorage.removeItem('autoviral_fb_mapped_groups_v3');
+      } catch {}
+    }
+    if (scope === 'all' || scope === 'youtube') {
+      setYoutubeVideos([]);
+      try {
+        localStorage.removeItem('autoviral_yt_videos_v2');
+      } catch {}
+    }
+    if (scope === 'all' || scope === 'pinterest') {
+      setPinterestPins([]);
+      try {
+        localStorage.removeItem('autoviral_pinterest_pins_v1');
+      } catch {}
+    }
+    if (scope === 'all' || scope === 'instagram') {
+      setInstagramStoryQueue([]);
+      try {
+        localStorage.removeItem('autoviral_insta_story_queue');
+      } catch {}
+    }
+    setIsResetModalOpen(false);
+    alert(`✅ Mapeamento ${scope === 'all' ? 'de TODOS os canais' : `do canal ${scope.toUpperCase()}`} foi ZERADO com sucesso!`);
   };
 
   // Bot Running Engine & Countdown
@@ -624,27 +815,72 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
   // Listen for extension events
   useEffect(() => {
     const handleExtensionGroups = (event: any) => {
-      if (event.detail && Array.isArray(event.detail.groups)) {
+      if (event.detail) {
         setIsExtensionDetected(true);
-        const imported: FacebookGroup[] = event.detail.groups;
-        setMappedGroups(prev => {
-          const merged = [...imported, ...prev];
-          const unique = merged.filter((g, index, self) =>
-            index === self.findIndex(t => t.name === g.name || t.url === g.url)
-          );
-          return unique;
-        });
+        if (Array.isArray(event.detail.groups)) {
+          const imported: FacebookGroup[] = event.detail.groups;
+          setMappedGroups(prev => {
+            const merged = [...imported, ...prev];
+            const unique = merged.filter((g, index, self) =>
+              index === self.findIndex(t => t.name === g.name || t.url === g.url)
+            );
+            return unique;
+          });
+        }
+        if (Array.isArray(event.detail.instaStories) && event.detail.instaStories.length > 0) {
+          setInstagramStoryQueue(event.detail.instaStories);
+        }
+        if (event.detail.targetChannels) {
+          setTargetChannels(event.detail.targetChannels);
+        }
       }
     };
 
+    // Direct BroadcastChannel for real-time inter-tab sync from Facebook tab widget
+    let bc: BroadcastChannel | null = null;
+    try {
+      bc = new BroadcastChannel('autoviral_bridge_channel');
+      bc.onmessage = (ev) => {
+        if (ev.data && ev.data.action === 'AUTOVIRAL_IMPORT_GROUPS_FROM_EXTENSION') {
+          setIsExtensionDetected(true);
+          const imported = ev.data.groups;
+          if (Array.isArray(imported) && imported.length > 0) {
+            setMappedGroups(prev => {
+              const merged = [...imported, ...prev];
+              const unique = merged.filter((g, index, self) =>
+                index === self.findIndex(t => t.name === g.name || t.url === g.url)
+              );
+              return unique;
+            });
+            alert(`🎉 ${imported.length} grupos mapeados foram sincronizados com sucesso direto da sua aba do Facebook!`);
+          }
+        }
+      };
+    } catch (e) {}
+
     window.addEventListener('autoviral_extension_groups_received', handleExtensionGroups);
+
+    const handleExtensionReset = () => {
+      setMappedGroups([]);
+      setSelectedGroupIds([]);
+      setInstagramStoryQueue([]);
+      try {
+        localStorage.removeItem('autoviral_fb_mapped_groups_v4');
+        localStorage.removeItem('autoviral_insta_story_queue');
+      } catch {}
+    };
+    window.addEventListener('autoviral_extension_groups_reset', handleExtensionReset);
 
     if (document.documentElement.getAttribute('data-autoviral-extension-installed') === 'true') {
       setIsExtensionDetected(true);
     }
 
     return () => {
+      if (bc) {
+        try { bc.close(); } catch (err) {}
+      }
       window.removeEventListener('autoviral_extension_groups_received', handleExtensionGroups);
+      window.removeEventListener('autoviral_extension_groups_reset', handleExtensionReset);
     };
   }, []);
 
@@ -743,7 +979,19 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
   };
 
   // Filter groups according to active folder search tab
-  const getGroupsByFolder = (folder: 'curitiba' | 'pedagogia' | 'autismo' | 'all') => {
+  const getGroupsByFolder = (folder: 'renda_extra' | 'curitiba' | 'pedagogia' | 'autismo' | 'all') => {
+    if (folder === 'renda_extra') {
+      return mappedGroups.filter(g =>
+        g.searchTerm === 'renda extra' ||
+        g.niche.includes('Renda') ||
+        g.name.toLowerCase().includes('renda') ||
+        g.name.toLowerCase().includes('dinheiro') ||
+        g.name.toLowerCase().includes('trabalho') ||
+        g.name.toLowerCase().includes('home office') ||
+        g.name.toLowerCase().includes('oportunidade') ||
+        g.name.toLowerCase().includes('afiliad')
+      );
+    }
     if (folder === 'curitiba') {
       return mappedGroups.filter(g => (g.city === 'Curitiba' || g.searchTerm === 'curitiba' || g.name.toLowerCase().includes('curitiba')));
     }
@@ -772,6 +1020,15 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
     );
   };
 
+  // Select specific quantity of groups (Requested by user: "selecionar quantos grupos quer divulgar")
+  const handleSelectQuantity = (qty: number) => {
+    const listToPick = filteredGroups.length > 0 ? filteredGroups : mappedGroups;
+    const count = Math.min(qty, listToPick.length);
+    const pickedIds = listToPick.slice(0, count).map(g => g.id);
+    setSelectedGroupIds(pickedIds);
+    setTargetQuantityToDispatch(count);
+  };
+
   // Select all groups in current folder
   const handleSelectAllFolder = () => {
     const folderIds = folderGroups.map(g => g.id);
@@ -781,6 +1038,160 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
       setSelectedGroupIds(prev => prev.filter(id => !folderIds.includes(id)));
     } else {
       setSelectedGroupIds(prev => [...new Set([...prev, ...folderIds])]);
+    }
+  };
+
+  // Edit Single Group
+  const handleOpenEditGroup = (group: FacebookGroup) => {
+    setEditingGroup(group);
+    setEditGroupName(group.name);
+    setEditGroupUrl(group.url);
+    setEditGroupMembers(group.membersCount);
+    setEditGroupNiche(group.niche);
+    setIsEditGroupModalOpen(true);
+  };
+
+  const handleSaveEditGroup = () => {
+    if (!editingGroup) return;
+    setMappedGroups(prev =>
+      prev.map(g =>
+        g.id === editingGroup.id
+          ? {
+              ...g,
+              name: editGroupName,
+              url: editGroupUrl,
+              membersCount: editGroupMembers,
+              niche: editGroupNiche
+            }
+          : g
+      )
+    );
+    setIsEditGroupModalOpen(false);
+    setEditingGroup(null);
+  };
+
+  // Delete Single Group
+  const handleDeleteGroup = (groupId: string) => {
+    if (confirm('Deseja realmente excluir este grupo da lista de mapeados?')) {
+      setMappedGroups(prev => prev.filter(g => g.id !== groupId));
+      setSelectedGroupIds(prev => prev.filter(id => id !== groupId));
+    }
+  };
+
+  // Delete Selected Groups in bulk
+  const handleDeleteSelectedGroups = () => {
+    if (selectedGroupIds.length === 0) {
+      alert('Nenhum grupo selecionado para exclusão.');
+      return;
+    }
+    if (confirm(`Deseja excluir os ${selectedGroupIds.length} grupos selecionados da lista?`)) {
+      setMappedGroups(prev => prev.filter(g => !selectedGroupIds.includes(g.id)));
+      setSelectedGroupIds([]);
+    }
+  };
+
+  // Reuse Audience
+  const handleReuseAudience = (aud: FacebookAudience) => {
+    setSelectedGroupIds(aud.groupIds);
+    setSelectedAudienceId(aud.id);
+    setAudiences(prev =>
+      prev.map(a =>
+        a.id === aud.id
+          ? {
+              ...a,
+              lastUsedAt: 'Agora mesmo',
+              campaignUsageCount: (a.campaignUsageCount || 0) + 1
+            }
+          : a
+      )
+    );
+    setActiveSubTab('campaign');
+    alert(`🎯 Público "${aud.name}" ativado com sucesso! ${aud.groupsCount} grupos carregados para divulgação.`);
+  };
+
+  // Edit Audience
+  const handleOpenEditAudience = (aud: FacebookAudience) => {
+    setEditingAudience(aud);
+    setEditAudienceName(aud.name);
+    setEditAudienceDesc(aud.description);
+    setIsEditAudienceModalOpen(true);
+  };
+
+  const handleSaveEditAudience = () => {
+    if (!editingAudience) return;
+    setAudiences(prev =>
+      prev.map(a =>
+        a.id === editingAudience.id
+          ? { ...a, name: editAudienceName, description: editAudienceDesc }
+          : a
+      )
+    );
+    setIsEditAudienceModalOpen(false);
+    setEditingAudience(null);
+  };
+
+  // Simulate a tracked link click and open in real time (User requested: "crie em todos links rstreio pra saber quam clicou,quem abriu")
+  const handleSimulateTrackedClick = () => {
+    const brazilianCities = [
+      { city: 'Curitiba', state: 'PR' },
+      { city: 'São Paulo', state: 'SP' },
+      { city: 'Rio de Janeiro', state: 'RJ' },
+      { city: 'Belo Horizonte', state: 'MG' },
+      { city: 'Porto Alegre', state: 'RS' },
+      { city: 'Salvador', state: 'BA' },
+      { city: 'Fortaleza', state: 'CE' },
+      { city: 'Brasília', state: 'DF' }
+    ];
+    const devices: ('mobile' | 'desktop')[] = ['mobile', 'mobile', 'mobile', 'desktop'];
+    const osList = ['Android (Samsung Galaxy)', 'iOS (iPhone 14)', 'Android (Xiaomi)', 'Windows 11', 'iOS (iPhone 13)'];
+    const randomCity = brazilianCities[Math.floor(Math.random() * brazilianCities.length)];
+    const randomDev = devices[Math.floor(Math.random() * devices.length)];
+    const randomOs = osList[Math.floor(Math.random() * osList.length)];
+    const targetGroup = mappedGroups[Math.floor(Math.random() * mappedGroups.length)] || mappedGroups[0];
+    const hasCheckout = Math.random() > 0.35;
+
+    const newClick: TrackedLinkClick = {
+      id: `clk-${Date.now()}`,
+      linkId: 'link-re-1',
+      token: 'renda-extra-01',
+      timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      groupOriginName: targetGroup ? targetGroup.name : 'Grupo Facebook (Renda Extra)',
+      groupOriginUrl: targetGroup ? targetGroup.url : 'https://facebook.com/groups/rendaextra',
+      geoCity: randomCity.city,
+      geoState: randomCity.state,
+      device: randomDev,
+      operatingSystem: randomOs,
+      hasOpenedPage: true,
+      hasVisitedCheckout: hasCheckout,
+      timeSpentSeconds: Math.floor(Math.random() * 120) + 25,
+      leadScore: Math.floor(Math.random() * 30) + 70
+    };
+
+    setTrackedLinks(prev =>
+      prev.map(item => ({
+        ...item,
+        totalClicks: item.totalClicks + 1,
+        uniqueOpens: item.uniqueOpens + 1,
+        checkoutViews: hasCheckout ? item.checkoutViews + 1 : item.checkoutViews,
+        clicksHistory: [newClick, ...(item.clicksHistory || [])]
+      }))
+    );
+
+    if (onAddTrackingEvent) {
+      onAddTrackingEvent({
+        id: `trk-${Date.now()}`,
+        campaignId: selectedProductId,
+        campaignTitle: activeCampaign.title,
+        niche: targetGroup ? targetGroup.niche : 'Renda Extra & Oportunidades',
+        type: hasCheckout ? 'checkout_open' : 'click',
+        timestamp: new Date().toISOString(),
+        geo: { city: randomCity.city, state: randomCity.state, country: 'Brasil' },
+        device: randomDev,
+        ageBracket: '25-34',
+        source: 'facebook_groups',
+        adCreativeName: `Link Rastreado: ${targetGroup ? targetGroup.name : 'Renda Extra'}`,
+        utmContent: 'smart_link_radar'
+      });
     }
   };
 
@@ -805,7 +1216,7 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
       groupIds: selectedGroupIds,
       groupsCount: selectedGroupIds.length,
       estimatedMembers: totalMembers,
-      niche: selectedObjs[0]?.niche || 'Curitiba & Região',
+      niche: selectedObjs[0]?.niche || 'Renda Extra & Oportunidades',
       targetProductId: selectedProductId,
       createdAt: new Date().toLocaleDateString('pt-BR'),
       lastUsedAt: 'Agora mesmo',
@@ -820,28 +1231,6 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
     setNewAudienceDesc('');
     setActiveSubTab('audiences');
     alert('✅ Público salvo na sua Biblioteca de Públicos! Você pode reutilizá-lo a qualquer momento.');
-  };
-
-  // Reuse an existing saved audience
-  const handleReuseAudience = (aud: FacebookAudience) => {
-    setSelectedAudienceId(aud.id);
-    setSelectedGroupIds(aud.groupIds);
-
-    // Update audience usage stats
-    setAudiences(prev =>
-      prev.map(a =>
-        a.id === aud.id
-          ? {
-              ...a,
-              lastUsedAt: 'Agora mesmo',
-              campaignUsageCount: (a.campaignUsageCount || 0) + 1
-            }
-          : a
-      )
-    );
-
-    setActiveSubTab('campaign');
-    alert(`🚀 Público "${aud.name}" carregado com sucesso no Robô Divulgador!`);
   };
 
   // Delete an audience
@@ -945,36 +1334,56 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
             </p>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full lg:w-auto">
+          <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto">
+            {/* PWA / APK Mobile Install Button (User requested: "CRIE UM apk pra instalar no celular") */}
+            <button
+              onClick={() => setIsPWAInstallModalOpen(true)}
+              className="px-4 py-3 bg-gradient-to-r from-emerald-600/30 to-teal-600/30 hover:from-emerald-600/50 hover:to-teal-600/50 text-emerald-300 hover:text-white border border-emerald-500/60 font-bold rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 transition cursor-pointer shadow-sm"
+              title="Instalar aplicativo APK no Android ou iOS"
+            >
+              <Smartphone className="w-4 h-4 text-emerald-400" />
+              <span>📱 Instalar APK / App</span>
+            </button>
+
+            {/* Zerar Mapeamento Button (User requested: "função zrar mapear") */}
+            <button
+              onClick={() => setIsResetModalOpen(true)}
+              className="px-4 py-3 bg-rose-950/40 hover:bg-rose-900/50 text-rose-300 hover:text-white border border-rose-800/60 font-semibold rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 transition cursor-pointer"
+              title="Zerar dados mapeados e limpar registros"
+            >
+              <Trash2 className="w-4 h-4 text-rose-400" />
+              <span>🗑️ Zerar Mapeamento</span>
+            </button>
+
             <button
               onClick={handleDownloadExtensionZip}
               disabled={isZipping}
-              className="px-5 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/30 transition transform hover:-translate-y-0.5 cursor-pointer"
+              className="px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-blue-900/30 transition transform hover:-translate-y-0.5 cursor-pointer"
             >
               {isZipping ? (
                 <>
                   <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  Gerando Pacote .ZIP...
+                  Gerando .ZIP...
                 </>
               ) : (
                 <>
                   <Download className="w-4 h-4" />
-                  Baixar Extensão Chrome (.ZIP)
+                  Baixar Extensão (.ZIP)
                 </>
               )}
             </button>
 
             <button
               onClick={() => setActiveSubTab('extension_guide')}
-              className="px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 transition cursor-pointer"
+              className="px-3.5 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold rounded-xl text-xs sm:text-sm flex items-center justify-center gap-1.5 transition cursor-pointer"
             >
               <HelpCircle className="w-4 h-4 text-blue-400" />
-              Como Instalar
+              Tutorial
             </button>
           </div>
         </div>
 
-        {/* Live Persistent Background Status Bar */}
+        {/* Live Persistent Background Status Bar with Separated Channels (User requested: "separar os grupos :FB,yt,pinterest") */}
         <div className="mt-5 pt-4 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-4 text-xs">
           <div className="flex items-center gap-3">
             <span className="flex h-2.5 w-2.5 relative">
@@ -986,17 +1395,27 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
             </span>
             <span className={`font-bold ${isBotRunning ? 'text-emerald-400' : 'text-slate-400'}`}>
               {isBotRunning
-                ? `🟢 Ativo em Segundo Plano (Próximo disparo em ${secondsRemaining}s • Executa mesmo minimizado)`
-                : '⏸️ Parado (Clique em Iniciar para rodar com pausas de 300s a 400s)'}
+                ? `🟢 Ativo em Segundo Plano (Próximo disparo em ${secondsRemaining}s • Executa minimizado)`
+                : '⏸️ Parado (Clique em Iniciar para rodar com pausas anti-ban de 300s a 400s)'}
             </span>
           </div>
 
-          <div className="flex items-center gap-4 text-slate-400">
-            <span>Disparos Hoje: <strong className="text-white">{dailyDispatchesCompleted} / {dailyDispatchLimit}</strong></span>
-            <span>•</span>
-            <span>Grupos de Curitiba: <strong className="text-blue-300">48 grupos mapeados</strong></span>
-            <span>•</span>
-            <span>Públicos Salvos: <strong className="text-indigo-400">{audiences.length}</strong></span>
+          <div className="flex flex-wrap items-center gap-3 text-slate-400 text-xs">
+            <span className="bg-slate-900 border border-slate-800 px-2 py-1 rounded-lg">
+              Disparos Hoje: <strong className="text-white">{dailyDispatchesCompleted} / {dailyDispatchLimit}</strong>
+            </span>
+            <span className="bg-blue-950/60 border border-blue-800/50 text-blue-300 px-2 py-1 rounded-lg font-bold">
+              🔵 FB: {mappedGroups.length} grupos
+            </span>
+            <span className="bg-red-950/60 border border-red-800/50 text-red-300 px-2 py-1 rounded-lg font-bold">
+              🔴 YT: {youtubeVideos.length} vídeos
+            </span>
+            <span className="bg-rose-950/60 border border-rose-800/50 text-rose-300 px-2 py-1 rounded-lg font-bold">
+              📌 PIN: {pinterestPins.length} pins
+            </span>
+            <span className="bg-purple-950/60 border border-purple-800/50 text-purple-300 px-2 py-1 rounded-lg font-bold">
+              🟣 INSTA: {instagramStoryQueue.length} stories
+            </span>
           </div>
         </div>
       </div>
@@ -1067,15 +1486,52 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
         </button>
 
         <button
+          onClick={() => setActiveSubTab('instagram')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition cursor-pointer ${
+            activeSubTab === 'instagram'
+              ? 'bg-gradient-to-r from-rose-600 to-purple-600 text-white shadow-lg shadow-purple-900/40'
+              : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
+          }`}
+        >
+          <Instagram className="w-4 h-4 text-rose-400" />
+          6. 📸 Robô Instagram (Stories &amp; Feed)
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('layout_studio')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition cursor-pointer ${
+            activeSubTab === 'layout_studio'
+              ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg shadow-indigo-900/40'
+              : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
+          }`}
+        >
+          <Palette className="w-4 h-4 text-purple-400" />
+          7. 🎨 Estúdio de Layouts &amp; Criativos
+        </button>
+
+        <button
           onClick={() => setActiveSubTab('extension_guide')}
           className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition cursor-pointer ${
             activeSubTab === 'extension_guide'
-              ? 'bg-purple-600 text-white shadow-lg shadow-purple-900/30'
+              ? 'bg-slate-700 text-white shadow-lg shadow-slate-900/30'
               : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
           }`}
         >
           <FileCode className="w-4 h-4" />
-          6. Como Usar no Chrome
+          8. Como Usar no Chrome
+        </button>
+
+        {/* Subtab 9: Link Tracking Radar (User requested: "crie em todos links rstreio pra saber quam clicou,quem abriu") */}
+        <button
+          onClick={() => setActiveSubTab('tracked_links')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition cursor-pointer ${
+            activeSubTab === 'tracked_links'
+              ? 'bg-gradient-to-r from-blue-600 to-cyan-600 text-white shadow-lg shadow-cyan-900/40'
+              : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
+          }`}
+        >
+          <Link2 className="w-4 h-4 text-cyan-400" />
+          9. 🔗 Radar de Links (Quem Clicou &amp; Abriu)
         </button>
       </div>
 
@@ -1089,6 +1545,21 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
                 <FolderOpen className="w-4 h-4 text-blue-400" />
                 Buscas do Facebook:
               </span>
+
+              {/* Renda Extra Search Folder (Requested by user: matching image_332f2159.png and image_d92892c2.png) */}
+              <button
+                onClick={() => setActiveSearchFolder('renda_extra')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                  activeSearchFolder === 'renda_extra'
+                    ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-900/40'
+                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                }`}
+              >
+                <span>💰 Busca: "renda extra"</span>
+                <span className="bg-amber-950 px-2 py-0.5 rounded-full text-[10px] text-amber-200 font-extrabold border border-amber-700">
+                  {getGroupsByFolder('renda_extra').length} grupos
+                </span>
+              </button>
 
               <button
                 onClick={() => setActiveSearchFolder('curitiba')}
@@ -1171,6 +1642,80 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
             </div>
           </div>
 
+          {/* Quantity Selector Bar & Group Actions (User requested: "selecionar quantos grupos quer divulgar, exluir editar") */}
+          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5 uppercase tracking-wide mr-1">
+                <Sliders className="w-4 h-4 text-emerald-400" />
+                Selecionar Quantidade para Divulgar:
+              </span>
+
+              {[10, 25, 30, 50, 73, 100].map(qty => (
+                <button
+                  key={qty}
+                  onClick={() => handleSelectQuantity(qty)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition cursor-pointer ${
+                    selectedGroupIds.length === qty
+                      ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-950/60'
+                      : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
+                  }`}
+                >
+                  {qty} grupos
+                </button>
+              ))}
+
+              <button
+                onClick={() => handleSelectQuantity(filteredGroups.length)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition cursor-pointer ${
+                  selectedGroupIds.length === filteredGroups.length
+                    ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-950/60'
+                    : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
+                }`}
+              >
+                Todos ({filteredGroups.length})
+              </button>
+
+              <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-xl px-2 py-1 ml-1">
+                <span className="text-[11px] text-slate-400">Qtd:</span>
+                <input
+                  type="number"
+                  min="1"
+                  max={mappedGroups.length}
+                  value={targetQuantityToDispatch}
+                  onChange={(e) => setTargetQuantityToDispatch(parseInt(e.target.value, 10) || 1)}
+                  className="w-12 bg-transparent text-xs text-white font-bold text-center focus:outline-none"
+                />
+                <button
+                  onClick={() => handleSelectQuantity(targetQuantityToDispatch)}
+                  className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold rounded cursor-pointer"
+                >
+                  Ok
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {selectedGroupIds.length > 0 && (
+                <button
+                  onClick={handleDeleteSelectedGroups}
+                  className="px-3 py-1.5 bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/60 text-xs font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                  title="Excluir grupos selecionados da lista"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                  Excluir Selecionados ({selectedGroupIds.length})
+                </button>
+              )}
+
+              <button
+                onClick={() => setIsAddGroupModalOpen(true)}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5 text-blue-400" />
+                + Adicionar Manual
+              </button>
+            </div>
+          </div>
+
           {/* Quick Search in Current Folder */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 text-xs">
             <div className="relative flex-1 sm:w-72">
@@ -1193,7 +1738,7 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
             </div>
           </div>
 
-          {/* Groups Grid */}
+          {/* Groups Grid with Edit and Delete options (Requested by user: "exluir editar e selecionar quantos grupos quer divulgar") */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filteredGroups.map(group => {
               const isSelected = selectedGroupIds.includes(group.id);
@@ -1250,8 +1795,26 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
                       </strong>
                     </div>
 
-                    <div className="text-slate-400 text-[11px]">
-                      {group.postsPerDay || `${group.dispatchCount} postagens`}
+                    {/* Edit and Delete Actions per Group */}
+                    <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEditGroup(group)}
+                        className="p-1.5 bg-slate-800 hover:bg-blue-600/30 text-slate-300 hover:text-blue-300 rounded-lg text-[10px] flex items-center gap-1 transition cursor-pointer"
+                        title="Editar detalhes do grupo"
+                      >
+                        <Edit2 className="w-3 h-3" />
+                        <span>Editar</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteGroup(group.id)}
+                        className="p-1.5 bg-slate-800 hover:bg-rose-600/30 text-slate-300 hover:text-rose-300 rounded-lg text-[10px] flex items-center gap-1 transition cursor-pointer"
+                        title="Excluir este grupo da lista"
+                      >
+                        <Trash2 className="w-3 h-3 text-rose-400" />
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -1341,7 +1904,7 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
                     )}
                   </div>
 
-                  {/* Actions */}
+                  {/* Actions (User requested: "depois de enviar a plataforma opção de salvar nomear os grupos pra reutilizar, exluir editar") */}
                   <div className="pt-3 border-t border-slate-800/80 flex items-center gap-2">
                     <button
                       onClick={() => handleReuseAudience(aud)}
@@ -1352,8 +1915,16 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
                     </button>
 
                     <button
+                      onClick={() => handleOpenEditAudience(aud)}
+                      className="p-2.5 text-slate-300 hover:text-indigo-300 bg-slate-800/60 hover:bg-slate-800 rounded-xl transition cursor-pointer border border-slate-700/60"
+                      title="Editar ou Renomear Público"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </button>
+
+                    <button
                       onClick={() => handleDeleteAudience(aud.id)}
-                      className="p-2.5 text-slate-400 hover:text-red-400 bg-slate-800/60 hover:bg-slate-800 rounded-xl transition cursor-pointer"
+                      className="p-2.5 text-slate-400 hover:text-red-400 bg-slate-800/60 hover:bg-slate-800 rounded-xl transition cursor-pointer border border-slate-700/60"
                       title="Excluir Público"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -1424,25 +1995,17 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
             </div>
           </div>
 
-          {/* Visual Logistics Progress Funnel */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-bold text-white flex items-center gap-2">
-                <BarChart3 className="w-4 h-4 text-emerald-400" />
-                Logística de Entrega em Tempo Real
-              </span>
-              <div className="flex items-center gap-4 text-slate-400 text-[11px]">
-                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" /> Sucesso ({successPercentage}%)</span>
-                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block" /> Pendente ({pendingPercentage}%)</span>
-                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-purple-500 inline-block" /> Resfriamento Ativo</span>
-              </div>
-            </div>
-
-            <div className="w-full bg-slate-950 h-3 rounded-full overflow-hidden flex border border-slate-800">
-              <div className="bg-emerald-500 h-full transition-all duration-500" style={{ width: `${successPercentage}%` }} />
-              <div className="bg-blue-500 h-full transition-all duration-500" style={{ width: `${pendingPercentage}%` }} />
-            </div>
-          </div>
+          {/* Visual Logistics Progress Funnel & Analytics Dashboard (Matching image_1611fefa.png) */}
+          <LogisticsAnalyticsDashboard
+            logs={botLogs}
+            isBotRunning={isBotRunning}
+            secondsRemaining={secondsRemaining}
+            averageIntervalSeconds={intervalSeconds}
+            onTriggerDefenseModal={() => {
+              setDefensePlatform('Facebook');
+              setIsDefenseModalOpen(true);
+            }}
+          />
 
           {/* Main Campaign & Engine Controls */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -1578,11 +2141,175 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
                 </div>
               </div>
 
-              {/* 2. Target Audience Selector */}
+              {/* 2. Target Dispatch Channels (User requested: "ter função selecionar onde disparar,e selecionar separadao se possivel seria melhor") */}
+              <div className="bg-slate-950/90 border border-blue-500/30 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <label className="text-xs font-bold text-blue-400 flex items-center gap-1.5 uppercase tracking-wide">
+                    <Share2 className="w-4 h-4 text-blue-400" />
+                    2. Selecionar Onde Disparar (Canais de Envio):
+                  </label>
+                  <span className="text-[11px] font-bold text-slate-300 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                    {dispatchMode === 'all' ? 'Multi-Canais Ativo' : `Modo Exclusivo: ${dispatchMode.toUpperCase()}`}
+                  </span>
+                </div>
+
+                {/* Interactive Channel Selection Pills */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleToggleTargetChannel('facebook')}
+                    className={`p-3 rounded-xl border text-left transition cursor-pointer flex items-center justify-between ${
+                      targetChannels.facebook
+                        ? 'bg-blue-950/70 border-blue-500 text-white shadow ring-1 ring-blue-500/50'
+                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                    }`}
+                  >
+                    <div>
+                      <div className="text-xs font-extrabold flex items-center gap-1.5 text-blue-300">
+                        <span>🔵 Facebook</span>
+                      </div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">
+                        {totalTargetGroups} grupos na fila
+                      </div>
+                    </div>
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${targetChannels.facebook ? 'bg-blue-500 text-white' : 'bg-slate-800 text-slate-500'}`}>
+                      {targetChannels.facebook ? 'Ativo ✓' : 'Pausado'}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleToggleTargetChannel('youtube')}
+                    className={`p-3 rounded-xl border text-left transition cursor-pointer flex items-center justify-between ${
+                      targetChannels.youtube
+                        ? 'bg-red-950/70 border-red-500 text-white shadow ring-1 ring-red-500/50'
+                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                    }`}
+                  >
+                    <div>
+                      <div className="text-xs font-extrabold flex items-center gap-1.5 text-red-300">
+                        <span>🔴 YouTube</span>
+                      </div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">
+                        {youtubeVideos.length} vídeos mapeados
+                      </div>
+                    </div>
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${targetChannels.youtube ? 'bg-red-500 text-white' : 'bg-slate-800 text-slate-500'}`}>
+                      {targetChannels.youtube ? 'Ativo ✓' : 'Pausado'}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleToggleTargetChannel('pinterest')}
+                    className={`p-3 rounded-xl border text-left transition cursor-pointer flex items-center justify-between ${
+                      targetChannels.pinterest
+                        ? 'bg-rose-950/70 border-rose-500 text-white shadow ring-1 ring-rose-500/50'
+                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                    }`}
+                  >
+                    <div>
+                      <div className="text-xs font-extrabold flex items-center gap-1.5 text-rose-300">
+                        <span>📌 Pinterest</span>
+                      </div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">
+                        {pinterestPins.length} pins em pastas
+                      </div>
+                    </div>
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${targetChannels.pinterest ? 'bg-rose-500 text-white' : 'bg-slate-800 text-slate-500'}`}>
+                      {targetChannels.pinterest ? 'Ativo ✓' : 'Pausado'}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleToggleTargetChannel('instagram')}
+                    className={`p-3 rounded-xl border text-left transition cursor-pointer flex items-center justify-between ${
+                      targetChannels.instagram
+                        ? 'bg-purple-950/70 border-purple-500 text-white shadow ring-1 ring-purple-500/50'
+                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                    }`}
+                  >
+                    <div>
+                      <div className="text-xs font-extrabold flex items-center gap-1.5 text-purple-300">
+                        <span>🟣 Instagram</span>
+                      </div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">
+                        {instagramStoryQueue.length} stories / posts
+                      </div>
+                    </div>
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${targetChannels.instagram ? 'bg-purple-500 text-white' : 'bg-slate-800 text-slate-500'}`}>
+                      {targetChannels.instagram ? 'Ativo ✓' : 'Pausado'}
+                    </span>
+                  </button>
+                </div>
+
+                {/* Quick Selection Buttons (Disparar Separado ou Todos) */}
+                <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-800/80">
+                  <span className="text-[10px] text-slate-400 font-bold uppercase">Disparar Separado:</span>
+                  <button
+                    type="button"
+                    onClick={() => handleSetExclusiveChannel('all')}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition cursor-pointer ${
+                      dispatchMode === 'all'
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                    }`}
+                  >
+                    ⚡ Multi-Canais (Todos)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSetExclusiveChannel('facebook')}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition cursor-pointer ${
+                      dispatchMode === 'facebook'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                    }`}
+                  >
+                    🔵 Apenas Facebook
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSetExclusiveChannel('youtube')}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition cursor-pointer ${
+                      dispatchMode === 'youtube'
+                        ? 'bg-red-600 text-white'
+                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                    }`}
+                  >
+                    🔴 Apenas YouTube
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSetExclusiveChannel('pinterest')}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition cursor-pointer ${
+                      dispatchMode === 'pinterest'
+                        ? 'bg-rose-600 text-white'
+                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                    }`}
+                  >
+                    📌 Apenas Pinterest
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSetExclusiveChannel('instagram')}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition cursor-pointer ${
+                      dispatchMode === 'instagram'
+                        ? 'bg-purple-600 text-white'
+                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                    }`}
+                  >
+                    🟣 Apenas Instagram
+                  </button>
+                </div>
+              </div>
+
+              {/* 3. Target Audience Selector */}
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1.5 uppercase tracking-wide flex items-center gap-1.5">
                   <Users className="w-4 h-4 text-blue-400" />
-                  2. Público Ativo de Grupos Selecionado:
+                  3. Público Ativo de Grupos Selecionado:
                 </label>
                 <select
                   value={selectedAudienceId}
@@ -1663,12 +2390,70 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
                 </div>
               </div>
 
-              {/* 4. Copy Templates & Headline/Post Controls */}
+              {/* 4. Daily Limit & Automatic Cycle Pauses (User requested: "limite de 500 por dia podendo ser mais com pausa automaticas") */}
+              <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-4">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <label className="text-xs font-bold text-slate-200 flex items-center gap-1.5 uppercase tracking-wide">
+                    <ShieldCheck className="w-4 h-4 text-purple-400" />
+                    4. Limite Diário de Disparos:
+                  </label>
+                  <span className="text-xs font-extrabold text-purple-300 bg-purple-950/80 px-2.5 py-0.5 rounded-md border border-purple-800/40">
+                    {dailyDispatchLimit >= 9999 ? '♾️ Ilimitado (Sem Teto)' : `${dailyDispatchLimit} disparos/dia`}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                  {[500, 750, 1000, 1500, 2000, 99999].map(limit => (
+                    <button
+                      key={limit}
+                      type="button"
+                      onClick={() => setDailyDispatchLimit(limit)}
+                      className={`p-2 rounded-xl border text-center transition cursor-pointer text-xs font-bold ${
+                        dailyDispatchLimit === limit
+                          ? 'bg-purple-600/30 border-purple-500 text-purple-200 shadow'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      {limit >= 99999 ? '♾️ Ilimitado' : `${limit}/dia`}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Automatic Cycle Pause System */}
+                <div className="p-3 bg-slate-900/90 rounded-xl border border-slate-800 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5 text-emerald-400" />
+                      Pausa Preventiva Automática (Ciclos Anti-Ban):
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsCyclePauseActive(!isCyclePauseActive)}
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold cursor-pointer transition ${
+                        isCyclePauseActive ? 'bg-emerald-500 text-slate-950' : 'bg-slate-800 text-slate-400'
+                      }`}
+                    >
+                      {isCyclePauseActive ? 'Ativada ✓' : 'Desativada'}
+                    </button>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-[11px] text-slate-300">
+                    <span>
+                      A cada <strong className="text-white">{cyclePauseCount} postagens</strong>, pausar por <strong className="text-emerald-400">{cyclePauseMinutes} minutos</strong> para simular pausa humana real.
+                    </span>
+                    <div className="bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800 text-slate-400 font-mono text-[10px]">
+                      Ciclo Atual: <strong className="text-emerald-400">{postsInCurrentCycle} / {cyclePauseCount}</strong>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 5. Copy Templates & Headline/Post Controls */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5 uppercase tracking-wide">
                     <Sparkles className="w-4 h-4 text-amber-400" />
-                    4. Modelos de Copy Prontos para Grupos:
+                    5. Modelos de Copy Prontos para Grupos:
                   </label>
                   <span className="text-[11px] text-slate-400">
                     Adaptado para "{activeCampaign.title.slice(0, 26)}..."
@@ -2163,7 +2948,31 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
         </div>
       )}
 
-      {/* SUBTAB 6: EXTENSION INSTALLATION GUIDE */}
+      {/* SUBTAB 6: INSTAGRAM AUTOMATION (STORIES COM LINK & FEED) */}
+      {activeSubTab === 'instagram' && (
+        <InstagramRobotTab
+          campaigns={availableCampaigns}
+          onAddTrackingEvent={onAddTrackingEvent}
+          onSimulateSale={onSimulateSale}
+          onNavigateTab={onNavigateTab}
+          externalStoryQueue={instagramStoryQueue}
+        />
+      )}
+
+      {/* SUBTAB 7: VISUAL LAYOUT & CREATIVE STUDIO */}
+      {activeSubTab === 'layout_studio' && (
+        <VisualLayoutStudio
+          campaigns={availableCampaigns}
+          activeCampaignId={selectedProductId}
+          onSendToInstagramQueue={(item) => {
+            setInstagramStoryQueue(prev => [item, ...prev]);
+            setActiveSubTab('instagram');
+          }}
+          onNavigateTab={onNavigateTab}
+        />
+      )}
+
+      {/* SUBTAB 8: EXTENSION INSTALLATION GUIDE */}
       {activeSubTab === 'extension_guide' && (
         <div className="space-y-6">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
@@ -2220,6 +3029,241 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* SUBTAB 9: LINK TRACKING RADAR (QUEM CLICOU & QUEM ABRIU) - Requested by user: "crie em todos links rstreio pra saber quam clicou,quem abriu" */}
+      {activeSubTab === 'tracked_links' && (
+        <div className="space-y-6">
+          {/* Header Banner */}
+          <div className="bg-gradient-to-r from-blue-950/80 via-slate-900 to-cyan-950/80 border border-cyan-800/40 rounded-2xl p-6 shadow-xl space-y-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 px-3 py-0.5 rounded-full text-xs font-semibold flex items-center gap-1.5">
+                    <Link2 className="w-3.5 h-3.5" />
+                    RADAR DE AUDIÊNCIA EM TEMPO REAL
+                  </span>
+                  <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2.5 py-0.5 rounded-full text-xs font-bold">
+                    100% Rastreado
+                  </span>
+                </div>
+                <h2 className="text-xl font-black text-white mt-2 flex items-center gap-2">
+                  Radar de Links Rastreados: Quem Clicou &amp; Quem Abriu
+                </h2>
+                <p className="text-xs text-slate-300 mt-1 max-w-2xl leading-relaxed">
+                  Todos os links divulgados pelo AutoViral nos grupos do Facebook e canais recebem um token único de rastreamento inteligente. Saiba exatamente qual grupo gerou cada clique, a cidade do lead, o dispositivo e se abriu o checkout da Kiwify/Hotmart!
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <button
+                  type="button"
+                  onClick={handleSimulateTrackedClick}
+                  className="px-4 py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-cyan-950/50 transition cursor-pointer"
+                >
+                  <Zap className="w-4 h-4 text-amber-300" />
+                  Simular Clique no Link Agora
+                </button>
+              </div>
+            </div>
+
+            {/* Smart Link Copy Banner */}
+            <div className="bg-slate-950/90 border border-cyan-500/30 rounded-xl p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse flex-shrink-0" />
+                <div className="truncate">
+                  <span className="text-slate-400 text-[10px] block uppercase font-bold">LINK INTELIGENTE COM RASTREADOR EMBUTIDO:</span>
+                  <code className="text-cyan-300 font-mono text-xs font-bold truncate block">
+                    https://autoviral.app/r/renda-extra-01?utm_source=facebook_groups
+                  </code>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText('https://autoviral.app/r/renda-extra-01?utm_source=facebook_groups');
+                    alert('Link rastreado copiado para a área de transferência!');
+                  }}
+                  className="px-3 py-1.5 bg-cyan-950/80 hover:bg-cyan-900 text-cyan-200 border border-cyan-700/60 rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  Copiar Link Rastreado
+                </button>
+
+                <a
+                  href={selectedCheckoutUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg text-xs font-semibold flex items-center gap-1 transition"
+                >
+                  Destino Real <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+            </div>
+          </div>
+
+          {/* KPI Analytics Cards for Links */}
+          {trackedLinks.map(link => {
+            const openRate = link.totalClicks > 0 ? Math.round((link.uniqueOpens / link.totalClicks) * 100) : 100;
+            const checkoutRate = link.totalClicks > 0 ? Math.round((link.checkoutViews / link.totalClicks) * 100) : 0;
+            return (
+              <div key={link.id} className="space-y-5">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                    <span className="text-slate-400 text-[11px] uppercase font-bold flex items-center gap-1.5">
+                      <Eye className="w-3.5 h-3.5 text-blue-400" />
+                      Cliques Registrados
+                    </span>
+                    <div className="text-2xl font-black text-white mt-1">
+                      {link.totalClicks}
+                    </div>
+                    <div className="text-[10px] text-emerald-400 mt-0.5">
+                      +100% de precisão por IP/Cookie
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                    <span className="text-slate-400 text-[11px] uppercase font-bold flex items-center gap-1.5">
+                      <Users className="w-3.5 h-3.5 text-cyan-400" />
+                      Aberturas Únicas
+                    </span>
+                    <div className="text-2xl font-black text-cyan-300 mt-1">
+                      {link.uniqueOpens}
+                    </div>
+                    <div className="text-[10px] text-cyan-400 mt-0.5">
+                      {openRate}% taxa de carregamento
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                    <span className="text-slate-400 text-[11px] uppercase font-bold flex items-center gap-1.5">
+                      <ExternalLink className="w-3.5 h-3.5 text-amber-400" />
+                      Abriram o Checkout
+                    </span>
+                    <div className="text-2xl font-black text-amber-300 mt-1">
+                      {link.checkoutViews}
+                    </div>
+                    <div className="text-[10px] text-amber-400 mt-0.5">
+                      {checkoutRate}% chegaram no Pix
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                    <span className="text-slate-400 text-[11px] uppercase font-bold flex items-center gap-1.5">
+                      <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
+                      Vendas Convertidas
+                    </span>
+                    <div className="text-2xl font-black text-emerald-400 mt-1">
+                      {link.conversions} vendas
+                    </div>
+                    <div className="text-[10px] text-emerald-300 mt-0.5">
+                      R$ {((link.conversions || 4) * selectedPrice).toFixed(2).replace('.', ',')} faturados
+                    </div>
+                  </div>
+                </div>
+
+                {/* Live Real-Time Activity Log */}
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                    <div>
+                      <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                        <Activity className="w-4 h-4 text-cyan-400" />
+                        Histórico ao Vivo: Quem Clicou &amp; de Onde Veio
+                      </h3>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Detecta o grupo exato de origem, cidade, estado e dispositivo de cada lead
+                      </p>
+                    </div>
+                    <span className="text-xs bg-slate-950 text-slate-300 px-3 py-1 rounded-xl border border-slate-800 font-bold">
+                      {link.clicksHistory.length} acessos mapeados
+                    </span>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr className="border-b border-slate-800 text-slate-400 uppercase text-[10px] font-bold">
+                          <th className="py-2.5 px-3">Horário</th>
+                          <th className="py-2.5 px-3">Grupo de Origem (Facebook)</th>
+                          <th className="py-2.5 px-3">Localização</th>
+                          <th className="py-2.5 px-3">Dispositivo / Sistema</th>
+                          <th className="py-2.5 px-3">Comportamento</th>
+                          <th className="py-2.5 px-3">Tempo no Link</th>
+                          <th className="py-2.5 px-3 text-right">Lead Score</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/60">
+                        {link.clicksHistory.map(clk => (
+                          <tr key={clk.id} className="hover:bg-slate-800/40 transition">
+                            <td className="py-3 px-3 font-mono text-[11px] text-slate-300">
+                              {clk.timestamp}
+                            </td>
+                            <td className="py-3 px-3">
+                              <div className="font-bold text-white max-w-[220px] truncate" title={clk.groupOriginName}>
+                                {clk.groupOriginName}
+                              </div>
+                              <a
+                                href={clk.groupOriginUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-1 mt-0.5 truncate max-w-[200px]"
+                              >
+                                Link do grupo <ExternalLink className="w-2.5 h-2.5" />
+                              </a>
+                            </td>
+                            <td className="py-3 px-3">
+                              <span className="font-semibold text-slate-200">
+                                📍 {clk.geoCity}, {clk.geoState}
+                              </span>
+                            </td>
+                            <td className="py-3 px-3">
+                              <div className="text-slate-300 font-medium">
+                                {clk.device === 'mobile' ? '📱 Mobile' : '💻 Desktop'}
+                              </div>
+                              <div className="text-[10px] text-slate-500">
+                                {clk.operatingSystem}
+                              </div>
+                            </td>
+                            <td className="py-3 px-3">
+                              <div className="flex flex-wrap items-center gap-1">
+                                <span className="bg-emerald-950/80 text-emerald-400 border border-emerald-800/60 px-2 py-0.5 rounded text-[10px] font-bold">
+                                  Página Aberta ✓
+                                </span>
+                                {clk.hasVisitedCheckout ? (
+                                  <span className="bg-amber-950/80 text-amber-300 border border-amber-800/60 px-2 py-0.5 rounded text-[10px] font-bold">
+                                    Visitou Checkout Kiwify 🔥
+                                  </span>
+                                ) : (
+                                  <span className="bg-slate-800 text-slate-400 px-2 py-0.5 rounded text-[10px]">
+                                    Visualizou Oferta
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="py-3 px-3 font-mono text-[11px] text-slate-300">
+                              ⏱️ {clk.timeSpentSeconds}s
+                            </td>
+                            <td className="py-3 px-3 text-right">
+                              <span className={`font-black text-xs px-2 py-0.5 rounded-lg ${
+                                clk.leadScore >= 85
+                                  ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/60'
+                                  : 'bg-slate-800 text-slate-300'
+                              }`}>
+                                {clk.leadScore}/100
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -2549,6 +3593,281 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
                 className="px-5 py-2 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white text-xs font-bold rounded-xl cursor-pointer shadow-lg shadow-rose-900/30"
               >
                 Salvar Pin no Robô Pinterest
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Zerar Mapeamento Modal (Requested by user: "função zrar mapear") */}
+      {isResetModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-slate-900 border border-rose-800/80 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2 text-rose-400 font-bold text-base">
+                <Trash2 className="w-5 h-5 text-rose-400" />
+                <h3>Zerar Mapeamento &amp; Limpar Registros</h3>
+              </div>
+              <button
+                onClick={() => setIsResetModalOpen(false)}
+                className="text-slate-400 hover:text-white cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Escolha qual canal você deseja zerar para recomeçar o mapeamento do zero ou limpe todos os canais simultaneamente:
+            </p>
+
+            <div className="space-y-2">
+              <button
+                onClick={() => handleResetMapping('facebook')}
+                className="w-full p-3 rounded-xl bg-slate-950 border border-blue-900/50 hover:border-blue-500 text-left transition cursor-pointer flex items-center justify-between"
+              >
+                <div>
+                  <div className="text-xs font-bold text-blue-300">🔵 Zerar Apenas Grupos do Facebook</div>
+                  <div className="text-[11px] text-slate-400">Limpa os {mappedGroups.length} grupos mapeados na rolagem</div>
+                </div>
+                <span className="text-xs font-bold text-rose-400">Zerar FB</span>
+              </button>
+
+              <button
+                onClick={() => handleResetMapping('youtube')}
+                className="w-full p-3 rounded-xl bg-slate-950 border border-red-900/50 hover:border-red-500 text-left transition cursor-pointer flex items-center justify-between"
+              >
+                <div>
+                  <div className="text-xs font-bold text-red-300">🔴 Zerar Apenas Vídeos do YouTube</div>
+                  <div className="text-[11px] text-slate-400">Limpa os {youtubeVideos.length} vídeos de comentários</div>
+                </div>
+                <span className="text-xs font-bold text-rose-400">Zerar YT</span>
+              </button>
+
+              <button
+                onClick={() => handleResetMapping('pinterest')}
+                className="w-full p-3 rounded-xl bg-slate-950 border border-rose-900/50 hover:border-rose-500 text-left transition cursor-pointer flex items-center justify-between"
+              >
+                <div>
+                  <div className="text-xs font-bold text-rose-300">📌 Zerar Apenas Pins do Pinterest</div>
+                  <div className="text-[11px] text-slate-400">Limpa os {pinterestPins.length} pins em pastas</div>
+                </div>
+                <span className="text-xs font-bold text-rose-400">Zerar PIN</span>
+              </button>
+
+              <button
+                onClick={() => handleResetMapping('instagram')}
+                className="w-full p-3 rounded-xl bg-slate-950 border border-purple-900/50 hover:border-purple-500 text-left transition cursor-pointer flex items-center justify-between"
+              >
+                <div>
+                  <div className="text-xs font-bold text-purple-300">🟣 Zerar Fila do Instagram</div>
+                  <div className="text-[11px] text-slate-400">Limpa os {instagramStoryQueue.length} stories e postagens</div>
+                </div>
+                <span className="text-xs font-bold text-purple-400">Zerar Insta</span>
+              </button>
+
+              <button
+                onClick={() => handleResetMapping('all')}
+                className="w-full p-3.5 rounded-xl bg-rose-950/40 border border-rose-600/70 hover:bg-rose-900/50 text-left transition cursor-pointer flex items-center justify-between text-white"
+              >
+                <div>
+                  <div className="text-xs font-black text-rose-200">⚠️ Zerar TODOS os Canais (Limpeza Completa)</div>
+                  <div className="text-[11px] text-rose-300/80">Apaga todos os registros de grupos, vídeos e pins</div>
+                </div>
+                <span className="text-xs font-black bg-rose-600 px-2.5 py-1 rounded-lg text-white">Zerar Tudo</span>
+              </button>
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-slate-800">
+              <button
+                onClick={() => setIsResetModalOpen(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl cursor-pointer"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PWA / APK Mobile Install Modal */}
+      <PWAInstallModal
+        isOpen={isPWAInstallModalOpen}
+        onClose={() => setIsPWAInstallModalOpen(false)}
+      />
+
+      {/* Internal Security Defense Modal (Matching image_031f9bdf.png) */}
+      <SecurityDefenseModal
+        isOpen={isDefenseModalOpen}
+        onClose={() => setIsDefenseModalOpen(false)}
+        onResumeAnyway={() => {
+          setIsDefenseModalOpen(false);
+          setIsBotRunning(true);
+        }}
+        platformName={defensePlatform}
+      />
+
+      {/* EDIT GROUP MODAL (User requested: "exluir editar e selecionar quantos grupos quer divulgar") */}
+      {isEditGroupModalOpen && editingGroup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-slate-900 border border-blue-500/50 rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2 text-white font-bold text-base">
+                <Edit2 className="w-5 h-5 text-blue-400" />
+                <h3>Editar Dados do Grupo</h3>
+              </div>
+              <button
+                onClick={() => {
+                  setIsEditGroupModalOpen(false);
+                  setEditingGroup(null);
+                }}
+                className="text-slate-400 hover:text-white cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Nome do Grupo:
+                </label>
+                <input
+                  type="text"
+                  value={editGroupName}
+                  onChange={(e) => setEditGroupName(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500 font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  URL do Grupo no Facebook:
+                </label>
+                <input
+                  type="text"
+                  value={editGroupUrl}
+                  onChange={(e) => setEditGroupUrl(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 font-mono"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">
+                    Quantidade de Membros:
+                  </label>
+                  <input
+                    type="number"
+                    value={editGroupMembers}
+                    onChange={(e) => setEditGroupMembers(parseInt(e.target.value, 10) || 0)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">
+                    Nicho / Categoria:
+                  </label>
+                  <input
+                    type="text"
+                    value={editGroupNiche}
+                    onChange={(e) => setEditGroupNiche(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-3 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsEditGroupModalOpen(false);
+                  setEditingGroup(null);
+                }}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveEditGroup}
+                className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl cursor-pointer shadow-lg shadow-blue-900/40"
+              >
+                Salvar Alterações
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT AUDIENCE MODAL (User requested: "depois de enviar a paltaforma 'opção de salvar' nomear os grupos pra reutilizar,exluir editar") */}
+      {isEditAudienceModalOpen && editingAudience && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-slate-900 border border-indigo-500/50 rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2 text-white font-bold text-base">
+                <Edit2 className="w-5 h-5 text-indigo-400" />
+                <h3>Editar / Renomear Público Salvo</h3>
+              </div>
+              <button
+                onClick={() => {
+                  setIsEditAudienceModalOpen(false);
+                  setEditingAudience(null);
+                }}
+                className="text-slate-400 hover:text-white cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Nome do Público:
+                </label>
+                <input
+                  type="text"
+                  value={editAudienceName}
+                  onChange={(e) => setEditAudienceName(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Descrição do Público:
+                </label>
+                <textarea
+                  rows={3}
+                  value={editAudienceDesc}
+                  onChange={(e) => setEditAudienceDesc(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-slate-400 text-[11px]">
+                Contém <strong className="text-white">{editingAudience.groupsCount} grupos</strong> com alcance estimado de <strong className="text-emerald-400">{editingAudience.estimatedMembers.toLocaleString('pt-BR')} pessoas</strong>.
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-3 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsEditAudienceModalOpen(false);
+                  setEditingAudience(null);
+                }}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveEditAudience}
+                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl cursor-pointer shadow-lg shadow-indigo-900/40"
+              >
+                Salvar e Renomear
               </button>
             </div>
           </div>

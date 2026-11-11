@@ -1,19 +1,139 @@
-// AutoViral AI Chrome Extension - Popup Controller V1.1.0
+// AutoViral AI Chrome Extension - Popup Controller V1.2.0
+// Multi-Channel Mapper (Facebook, YouTube & Pinterest) + Zerar Mapeamento + Seletor de Canais
 
 document.addEventListener('DOMContentLoaded', () => {
   const fbStatusEl = document.getElementById('fb-status');
   const ytStatusEl = document.getElementById('yt-status');
-  const groupsCountEl = document.getElementById('groups-count');
+  const pinStatusEl = document.getElementById('pin-status');
+  const instaStatusEl = document.getElementById('insta-status');
+
+  const fbCountEl = document.getElementById('fb-count');
+  const ytCountEl = document.getElementById('yt-count');
+  const pinCountEl = document.getElementById('pin-count');
+  const instaCountEl = document.getElementById('insta-count');
+  const totalBadgeEl = document.getElementById('total-badge');
+
   const btnScan = document.getElementById('btn-scan');
   const btnSync = document.getElementById('btn-sync');
+  const btnResetMapped = document.getElementById('btn-reset-mapped');
   const btnOpenPlatform = document.getElementById('btn-open-platform');
+
   const groupsContainer = document.getElementById('groups-container');
   const groupsItems = document.getElementById('groups-items');
   const intervalBtns = document.querySelectorAll('.interval-btn');
+  const filterTabs = document.querySelectorAll('.filter-tab');
+
+  // Channel toggles
+  const chkFb = document.getElementById('chk-fb');
+  const chkYt = document.getElementById('chk-yt');
+  const chkPin = document.getElementById('chk-pin');
+  const chkInsta = document.getElementById('chk-insta');
+  const toggleFb = document.getElementById('toggle-fb');
+  const toggleYt = document.getElementById('toggle-yt');
+  const togglePin = document.getElementById('toggle-pin');
+  const toggleInsta = document.getElementById('toggle-insta');
+
+  const btnQuickFb = document.getElementById('btn-quick-fb');
+  const btnQuickYt = document.getElementById('btn-quick-yt');
+  const btnQuickPin = document.getElementById('btn-quick-pin');
+  const btnQuickInsta = document.getElementById('btn-quick-insta');
 
   let selectedInterval = 350;
   let currentMappedGroups = [];
-  let detectedFbTab = null;
+  let currentYtVideos = [];
+  let currentPinBoards = [];
+  let currentInstaStories = [];
+  let activeFilter = 'all';
+
+  // Toggle handlers for dispatch channels
+  function updateToggleUI(label, chk) {
+    if (chk.checked) {
+      label.classList.add('active');
+    } else {
+      label.classList.remove('active');
+    }
+  }
+
+  [
+    { label: toggleFb, chk: chkFb },
+    { label: toggleYt, chk: chkYt },
+    { label: togglePin, chk: chkPin },
+    { label: toggleInsta, chk: chkInsta }
+  ].forEach(pair => {
+    pair.label.addEventListener('click', (e) => {
+      // Toggle checkbox
+      if (e.target !== pair.chk) {
+        pair.chk.checked = !pair.chk.checked;
+      }
+      updateToggleUI(pair.label, pair.chk);
+      saveDispatchChannels();
+    });
+  });
+
+  // Quick single channel buttons (selects ONLY that channel)
+  btnQuickFb.addEventListener('click', () => {
+    chkFb.checked = true;
+    chkYt.checked = false;
+    chkPin.checked = false;
+    chkInsta.checked = false;
+    updateToggleUI(toggleFb, chkFb);
+    updateToggleUI(toggleYt, chkYt);
+    updateToggleUI(togglePin, chkPin);
+    updateToggleUI(toggleInsta, chkInsta);
+    saveDispatchChannels();
+    alert('🎯 Modo selecionado: Disparo EXCLUSIVO no Facebook!');
+  });
+
+  btnQuickYt.addEventListener('click', () => {
+    chkFb.checked = false;
+    chkYt.checked = true;
+    chkPin.checked = false;
+    chkInsta.checked = false;
+    updateToggleUI(toggleFb, chkFb);
+    updateToggleUI(toggleYt, chkYt);
+    updateToggleUI(togglePin, chkPin);
+    updateToggleUI(toggleInsta, chkInsta);
+    saveDispatchChannels();
+    alert('🎯 Modo selecionado: Disparo EXCLUSIVO no YouTube!');
+  });
+
+  btnQuickPin.addEventListener('click', () => {
+    chkFb.checked = false;
+    chkYt.checked = false;
+    chkPin.checked = true;
+    chkInsta.checked = false;
+    updateToggleUI(toggleFb, chkFb);
+    updateToggleUI(toggleYt, chkYt);
+    updateToggleUI(togglePin, chkPin);
+    updateToggleUI(toggleInsta, chkInsta);
+    saveDispatchChannels();
+    alert('🎯 Modo selecionado: Disparo EXCLUSIVO no Pinterest!');
+  });
+
+  btnQuickInsta.addEventListener('click', () => {
+    chkFb.checked = false;
+    chkYt.checked = false;
+    chkPin.checked = false;
+    chkInsta.checked = true;
+    updateToggleUI(toggleFb, chkFb);
+    updateToggleUI(toggleYt, chkYt);
+    updateToggleUI(togglePin, chkPin);
+    updateToggleUI(toggleInsta, chkInsta);
+    saveDispatchChannels();
+    alert('🎯 Modo selecionado: Disparo EXCLUSIVO no Instagram Stories!');
+  });
+
+  function saveDispatchChannels() {
+    const targets = {
+      facebook: chkFb.checked,
+      youtube: chkYt.checked,
+      pinterest: chkPin.checked,
+      instagram: chkInsta.checked
+    };
+    if (chrome.storage && chrome.storage.local) {
+      chrome.storage.local.set({ autoviral_target_channels: targets });
+    }
+  }
 
   // Interval selection
   intervalBtns.forEach(btn => {
@@ -27,33 +147,65 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Load existing mapped groups
-  if (chrome.storage && chrome.storage.local) {
-    chrome.storage.local.get(['autoviral_mapped_groups', 'autoviral_interval'], (res) => {
-      if (res.autoviral_mapped_groups && Array.isArray(res.autoviral_mapped_groups)) {
-        currentMappedGroups = res.autoviral_mapped_groups;
-        renderGroups(currentMappedGroups);
-      }
-      if (res.autoviral_interval) {
-        selectedInterval = res.autoviral_interval;
-        intervalBtns.forEach(b => {
-          b.classList.toggle('active', parseInt(b.dataset.time, 10) === selectedInterval);
-        });
-      }
+  // Filter tabs (all | fb | yt | pin)
+  filterTabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      filterTabs.forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      activeFilter = tab.dataset.filter || 'all';
+      renderItems();
     });
+  });
+
+  // Load existing storage data
+  if (chrome.storage && chrome.storage.local) {
+    chrome.storage.local.get(
+      ['autoviral_mapped_groups', 'autoviral_yt_videos', 'autoviral_pin_boards', 'autoviral_insta_stories', 'autoviral_interval', 'autoviral_target_channels'],
+      (res) => {
+        if (res.autoviral_mapped_groups && Array.isArray(res.autoviral_mapped_groups)) {
+          currentMappedGroups = res.autoviral_mapped_groups;
+        }
+        if (res.autoviral_yt_videos && Array.isArray(res.autoviral_yt_videos)) {
+          currentYtVideos = res.autoviral_yt_videos;
+        }
+        if (res.autoviral_pin_boards && Array.isArray(res.autoviral_pin_boards)) {
+          currentPinBoards = res.autoviral_pin_boards;
+        }
+        if (res.autoviral_insta_stories && Array.isArray(res.autoviral_insta_stories)) {
+          currentInstaStories = res.autoviral_insta_stories;
+        }
+        if (res.autoviral_interval) {
+          selectedInterval = res.autoviral_interval;
+          intervalBtns.forEach(b => {
+            b.classList.toggle('active', parseInt(b.dataset.time, 10) === selectedInterval);
+          });
+        }
+        if (res.autoviral_target_channels) {
+          chkFb.checked = !!res.autoviral_target_channels.facebook;
+          chkYt.checked = !!res.autoviral_target_channels.youtube;
+          chkPin.checked = !!res.autoviral_target_channels.pinterest;
+          chkInsta.checked = res.autoviral_target_channels.instagram !== false;
+          updateToggleUI(toggleFb, chkFb);
+          updateToggleUI(toggleYt, chkYt);
+          updateToggleUI(togglePin, chkPin);
+          updateToggleUI(toggleInsta, chkInsta);
+        }
+        updateCounts();
+        renderItems();
+      }
+    );
   }
 
-  // Search across ALL open tabs for Facebook and YouTube
+  // Detect open tabs (Facebook, YouTube, Pinterest, Instagram)
   chrome.tabs.query({}, (tabs) => {
     if (!tabs || tabs.length === 0) return;
 
     const fbTab = tabs.find(t => (t.url || '').includes('facebook.com'));
     const ytTab = tabs.find(t => (t.url || '').includes('youtube.com'));
     const pinTab = tabs.find(t => (t.url || '').includes('pinterest.com'));
-    const pinStatusEl = document.getElementById('pin-status');
+    const instaTab = tabs.find(t => (t.url || '').includes('instagram.com'));
 
     if (fbTab) {
-      detectedFbTab = fbTab;
       const url = fbTab.url || '';
       if (url.includes('groups/search') || url.includes('groups_home')) {
         fbStatusEl.textContent = 'Busca de Grupos Aberta!';
@@ -66,7 +218,7 @@ document.addEventListener('DOMContentLoaded', () => {
         fbStatusEl.style.color = '#38bdf8';
       }
 
-      // Automatically query groups from that Facebook tab
+      // Query groups from that tab
       chrome.tabs.sendMessage(fbTab.id, { action: 'AUTOVIRAL_MAP_GROUPS' }, (res) => {
         if (res && res.groups && Array.isArray(res.groups)) {
           saveAndRenderGroups(res.groups);
@@ -85,27 +237,33 @@ document.addEventListener('DOMContentLoaded', () => {
       ytStatusEl.style.color = '#94a3b8';
     }
 
-    if (pinStatusEl) {
-      if (pinTab) {
-        pinStatusEl.textContent = 'Aba Pinterest Aberta!';
-        pinStatusEl.style.color = '#10b981';
-      } else {
-        pinStatusEl.textContent = 'Pins & Pastas Prontos';
-        pinStatusEl.style.color = '#e11d48';
-      }
+    if (pinTab) {
+      pinStatusEl.textContent = 'Aba Pinterest Aberta!';
+      pinStatusEl.style.color = '#10b981';
+    } else {
+      pinStatusEl.textContent = 'Pins & Pastas Prontos';
+      pinStatusEl.style.color = '#e11d48';
+    }
+
+    if (instaTab) {
+      instaStatusEl.textContent = 'Instagram Conectado!';
+      instaStatusEl.style.color = '#10b981';
+    } else {
+      instaStatusEl.textContent = 'Stories com Link Clicável';
+      instaStatusEl.style.color = '#c084fc';
     }
   });
 
   // Manual Scan button
   btnScan.addEventListener('click', () => {
-    btnScan.textContent = '⏳ Escaneando Rolagem do FB...';
+    btnScan.textContent = '⏳ Escaneando Rolagem...';
     btnScan.disabled = true;
 
     chrome.tabs.query({}, (tabs) => {
       const fbTab = tabs.find(t => (t.url || '').includes('facebook.com'));
 
       if (!fbTab) {
-        alert('Abra uma aba do Facebook com grupos ou a busca de grupos (como você abriu em facebook.com/groups/search/groups_home/?q=pedagogia) e role a página para mapear!');
+        alert('Abra uma aba do Facebook com busca de grupos ou grupos abertos e role a página para mapear!');
         btnScan.textContent = '🔍 Mapear Grupos da Aba Aberta do FB';
         btnScan.disabled = false;
         return;
@@ -119,18 +277,46 @@ document.addEventListener('DOMContentLoaded', () => {
           saveAndRenderGroups(response.groups);
           alert(`✅ ${response.groups.length} grupos foram capturados na sua rolagem do Facebook!`);
         } else {
-          // Fallback script injection if content script was dormant
-          chrome.scripting.executeScript({
-            target: { tabId: fbTab.id },
-            func: extractGroupsFromDOM
-          }, (results) => {
-            if (results && results[0] && results[0].result && results[0].result.length > 0) {
-              saveAndRenderGroups(results[0].result);
-              alert(`✅ ${results[0].result.length} grupos foram mapeados com sucesso!`);
-            } else {
-              alert('Role um pouco a página de busca do Facebook para que os grupos apareçam na tela, depois clique em mapear novamente.');
-            }
-          });
+          alert('Role a página do Facebook para que novos grupos carreguem e tente novamente.');
+        }
+      });
+    });
+  });
+
+  // ZERAR MAPEAMENTO (Requested by user: "função zrar mapear")
+  btnResetMapped.addEventListener('click', () => {
+    const total = currentMappedGroups.length + currentYtVideos.length + currentPinBoards.length + currentInstaStories.length;
+    const confirmReset = confirm(
+      `⚠️ Deseja realmente ZERAR todos os dados mapeados (${currentMappedGroups.length} grupos FB, ${currentYtVideos.length} vídeos YT, ${currentPinBoards.length} pastas PIN, ${currentInstaStories.length} stories INSTA)?\n\nEssa ação limpará os registros mapeados para que você possa recomeçar do zero.`
+    );
+
+    if (!confirmReset) return;
+
+    currentMappedGroups = [];
+    currentYtVideos = [];
+    currentPinBoards = [];
+    currentInstaStories = [];
+
+    if (chrome.storage && chrome.storage.local) {
+      chrome.storage.local.remove(
+        ['autoviral_mapped_groups', 'autoviral_yt_videos', 'autoviral_pin_boards', 'autoviral_insta_stories'],
+        () => {
+          updateCounts();
+          renderItems();
+          alert('✅ Mapeamento ZERADO com sucesso! Você pode iniciar uma nova rolagem limpa.');
+        }
+      );
+    } else {
+      updateCounts();
+      renderItems();
+    }
+
+    // Notify open AutoViral AI platforms that mapping was reset
+    chrome.tabs.query({}, (tabs) => {
+      tabs.forEach(tab => {
+        const url = tab.url || '';
+        if (url.includes('ais-') || url.includes('localhost') || url.includes('vercel.app') || url.includes('run.app')) {
+          chrome.tabs.sendMessage(tab.id, { action: 'AUTOVIRAL_RESET_MAPPED_GROUPS' });
         }
       });
     });
@@ -138,8 +324,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Sync with AutoViral AI Platform
   btnSync.addEventListener('click', () => {
-    btnSync.textContent = '⏳ Sincronizando com Plataforma...';
+    btnSync.textContent = '⏳ Sincronizando...';
     btnSync.disabled = true;
+
+    // Send via BroadcastChannel (direct inter-tab sync)
+    try {
+      const bc = new BroadcastChannel('autoviral_bridge_channel');
+      bc.postMessage({
+        action: 'AUTOVIRAL_IMPORT_GROUPS_FROM_EXTENSION',
+        groups: currentMappedGroups,
+        ytVideos: currentYtVideos,
+        pinBoards: currentPinBoards,
+        instaStories: currentInstaStories,
+        interval: selectedInterval,
+        targetChannels: {
+          facebook: chkFb.checked,
+          youtube: chkYt.checked,
+          pinterest: chkPin.checked,
+          instagram: chkInsta.checked
+        },
+        timestamp: new Date().toISOString()
+      });
+    } catch (err) {}
 
     chrome.tabs.query({}, (tabs) => {
       let platformTabFound = false;
@@ -157,25 +363,34 @@ document.addEventListener('DOMContentLoaded', () => {
           chrome.tabs.sendMessage(tab.id, {
             action: 'AUTOVIRAL_IMPORT_GROUPS_FROM_EXTENSION',
             groups: currentMappedGroups,
+            ytVideos: currentYtVideos,
+            pinBoards: currentPinBoards,
+            instaStories: currentInstaStories,
             interval: selectedInterval,
+            targetChannels: {
+              facebook: chkFb.checked,
+              youtube: chkYt.checked,
+              pinterest: chkPin.checked,
+              instagram: chkInsta.checked
+            },
             timestamp: new Date().toISOString()
           });
         }
       });
 
       setTimeout(() => {
-        btnSync.textContent = '📡 Enviar Todos os Grupos para o Painel AutoViral';
+        btnSync.textContent = '📡 Enviar Grupos Mapeados para o Painel AutoViral';
         btnSync.disabled = false;
         if (platformTabFound) {
-          alert(`✅ Sucesso! ${currentMappedGroups.length} grupos mapeados foram sincronizados com a aba aberta da plataforma AutoViral AI.`);
+          alert(`✅ Sucesso! Dados mapeados separados (FB: ${currentMappedGroups.length}, YT: ${currentYtVideos.length}, PIN: ${currentPinBoards.length}, INSTA: ${currentInstaStories.length}) foram sincronizados com a plataforma AutoViral AI.`);
         } else {
-          alert('ℹ️ Abra ou atualize a aba da plataforma AutoViral AI no seu navegador para ver os grupos no painel.');
+          alert('ℹ️ Abra a aba da plataforma AutoViral AI no seu navegador para ver os dados sincronizados.');
         }
       }, 500);
     });
   });
 
-  // Open platform button
+  // Open platform
   if (btnOpenPlatform) {
     btnOpenPlatform.addEventListener('click', () => {
       chrome.tabs.create({ url: 'https://ais-dev-fdvdpr73jbu2hzpbbibxp5-395073471759.us-west2.run.app' });
@@ -189,7 +404,7 @@ document.addEventListener('DOMContentLoaded', () => {
     newGroups.forEach(ng => {
       const exists = merged.some(g => g.id === ng.id || g.url === ng.url || g.name === ng.name);
       if (!exists && ng.name) {
-        merged.unshift(ng);
+        merged.unshift({ ...ng, channel: 'facebook' });
       }
     });
 
@@ -197,57 +412,56 @@ document.addEventListener('DOMContentLoaded', () => {
     if (chrome.storage && chrome.storage.local) {
       chrome.storage.local.set({ autoviral_mapped_groups: currentMappedGroups });
     }
-    renderGroups(currentMappedGroups);
+    updateCounts();
+    renderItems();
   }
 
-  function renderGroups(groups) {
-    groupsCountEl.textContent = `${groups.length} grupos`;
-    if (groups.length === 0) {
+  function updateCounts() {
+    fbCountEl.textContent = `${currentMappedGroups.length} grupos`;
+    ytCountEl.textContent = `${currentYtVideos.length} vídeos`;
+    pinCountEl.textContent = `${currentPinBoards.length} pastas`;
+    if (instaCountEl) instaCountEl.textContent = `${currentInstaStories.length} stories`;
+
+    const total = currentMappedGroups.length + currentYtVideos.length + currentPinBoards.length + currentInstaStories.length;
+    totalBadgeEl.textContent = total.toString();
+  }
+
+  function renderItems() {
+    const allItems = [
+      ...currentMappedGroups.map(g => ({ ...g, channel: 'facebook', channelTag: 'FB', tagClass: 'tag-fb' })),
+      ...currentYtVideos.map(v => ({ ...v, channel: 'youtube', channelTag: 'YT', tagClass: 'tag-yt' })),
+      ...currentPinBoards.map(p => ({ ...p, channel: 'pinterest', channelTag: 'PIN', tagClass: 'tag-pin' })),
+      ...currentInstaStories.map(s => ({ ...s, channel: 'instagram', channelTag: 'INSTA', tagClass: 'tag-insta' }))
+    ];
+
+    const filtered = allItems.filter(item => {
+      if (activeFilter === 'all') return true;
+      if (activeFilter === 'fb') return item.channel === 'facebook';
+      if (activeFilter === 'yt') return item.channel === 'youtube';
+      if (activeFilter === 'pin') return item.channel === 'pinterest';
+      if (activeFilter === 'insta') return item.channel === 'instagram';
+      return true;
+    });
+
+    if (filtered.length === 0) {
       groupsContainer.style.display = 'none';
       return;
     }
 
     groupsContainer.style.display = 'block';
     groupsItems.innerHTML = '';
-    groups.slice(0, 15).forEach(g => {
-      const item = document.createElement('div');
-      item.className = 'group-item';
-      item.innerHTML = `
+
+    filtered.slice(0, 20).forEach(item => {
+      const row = document.createElement('div');
+      row.className = 'group-item';
+      row.innerHTML = `
         <div>
-          <div class="group-name" title="${g.name}">${g.name}</div>
-          <div class="group-meta">${g.membersCount ? g.membersCount.toLocaleString('pt-BR') + ' membros' : 'Membros detectados'} • ${g.postsPerDay || '10+ posts/dia'}</div>
+          <div class="group-name" title="${item.name || item.title}">${item.name || item.title}</div>
+          <div class="group-meta">${item.membersCount ? item.membersCount.toLocaleString('pt-BR') + ' membros' : (item.views || item.followers || 'Detectado')}</div>
         </div>
-        <span style="color: #10b981; font-size: 10px; font-weight: 800;">MAPEADO</span>
+        <span class="channel-tag ${item.tagClass}">${item.channelTag}</span>
       `;
-      groupsItems.appendChild(item);
+      groupsItems.appendChild(row);
     });
   }
 });
-
-function extractGroupsFromDOM() {
-  const detected = [];
-  const links = document.querySelectorAll('a[href*="/groups/"]');
-  links.forEach(link => {
-    const href = link.href || '';
-    if (href.includes('/create') || href.includes('/feed') || href.includes('/joins')) return;
-    const cleanUrl = href.split('?')[0];
-    const text = (link.innerText || '').trim();
-    if (text.length >= 3 && !text.includes('Participar') && !text.includes('Ver mais')) {
-      const exists = detected.some(d => d.url === cleanUrl || d.name === text);
-      if (!exists) {
-        detected.push({
-          id: 'fb-grp-' + Math.random().toString(36).substring(2, 9),
-          name: text,
-          url: cleanUrl,
-          membersCount: 25000,
-          postsPerDay: '10+ posts/dia',
-          privacy: 'Público',
-          mappedAt: new Date().toLocaleDateString('pt-BR'),
-          dispatchCount: 0,
-          status: 'ready'
-        });
-      }
-    }
-  });
-  return detected;
-}

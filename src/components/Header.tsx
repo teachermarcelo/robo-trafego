@@ -15,6 +15,7 @@ import {
   Bot,
   Mail,
   Share2,
+  Smartphone
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -29,6 +30,7 @@ interface HeaderProps {
   onOpenSupabase: () => void;
   onOpenVercel?: () => void;
   onResetAllMetrics?: () => void;
+  onOpenPWAInstall?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -43,10 +45,11 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenSupabase,
   onOpenVercel,
   onResetAllMetrics,
+  onOpenPWAInstall,
 }) => {
   const tabs = [
     { id: 'dashboard', label: 'Dashboard & Métricas', icon: TrendingUp },
-    { id: 'chrome_fb_groups', label: 'Extensão Chrome • FB, YT & Pinterest', icon: Share2, badge: '🔥 Rolagem & Anti-Ban' },
+    { id: 'chrome_fb_groups', label: 'Extensão Chrome • FB, YT, Pinterest & Insta', icon: Share2, badge: '🔥 Multi-Canais & Anti-Ban' },
     { id: 'robo_cidades', label: '🤖 Robô Divulgador & Cidades', icon: Bot, badge: 'Destravar 1ª Venda' },
     { id: 'brevo_disparador', label: 'Disparador E-mail & WhatsApp', icon: Mail, badge: 'Brevo 579 Contatos' },
     { id: 'meta_ads', label: 'Alavanca Meta Ads', icon: Zap, badge: '🚀 10x Vendas' },
@@ -86,7 +89,7 @@ export const Header: React.FC<HeaderProps> = ({
             title="Ver Robô de Grupos do Facebook, YouTube & Pinterest"
           >
             <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block animate-pulse" />
-            <span className="font-semibold">Robô FB, YT &amp; Pinterest Ativo</span>
+            <span className="font-semibold">Robô FB, YT, PIN &amp; Insta Ativo</span>
           </button>
 
           <div className="flex items-center gap-1.5 text-emerald-400 font-medium bg-emerald-950/60 px-2.5 py-1 rounded-full border border-emerald-800/40">
@@ -150,6 +153,17 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           )}
 
+
+          {onOpenPWAInstall && (
+            <button
+              onClick={onOpenPWAInstall}
+              className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs transition border bg-gradient-to-r from-emerald-600/30 to-teal-600/30 border-emerald-500/60 text-emerald-300 hover:text-white hover:bg-emerald-600/50 hover:border-emerald-400 font-bold shadow-sm cursor-pointer"
+              title="Instalar AutoViral AI no Celular (Android APK / WebAPK e iOS)"
+            >
+              <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
+              <span>📱 Instalar App / APK</span>
+            </button>
+          )}
 
           <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs border bg-emerald-950/70 text-emerald-300 border-emerald-700/60 shadow-sm" title="Google Cloud Firebase Firestore: Sincronização em tempo real ativa em todos os computadores, celulares e navegadores">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />

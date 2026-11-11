@@ -17,6 +17,7 @@
     "*://*.facebook.com/*",
     "*://*.youtube.com/*",
     "*://*.pinterest.com/*",
+    "*://*.instagram.com/*",
     "*://*.kiwify.com.br/*",
     "*://localhost/*",
     "*://*.vercel.app/*",
@@ -30,7 +31,8 @@
       "matches": [
         "*://*.facebook.com/*",
         "*://*.youtube.com/*",
-        "*://*.pinterest.com/*"
+        "*://*.pinterest.com/*",
+        "*://*.instagram.com/*"
       ],
       "js": ["content.js"],
       "run_at": "document_idle"

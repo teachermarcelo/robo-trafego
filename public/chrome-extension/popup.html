@@ -2,49 +2,86 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <title>AutoViral AI - Mapeador Facebook & YouTube</title>
+  <title>AutoViral AI - Mapeador Facebook, YouTube & Pinterest</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    body { width: 380px; background-color: #0b1120; color: #f8fafc; padding: 16px; font-size: 13px; }
-    .header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 12px; border-bottom: 1px solid #1e293b; margin-bottom: 14px; }
+    body { width: 400px; background-color: #0b1120; color: #f8fafc; padding: 16px; font-size: 13px; }
+    .header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 12px; border-bottom: 1px solid #1e293b; margin-bottom: 12px; }
     .brand { display: flex; align-items: center; gap: 8px; font-weight: 800; color: #10b981; font-size: 15px; }
     .badge { background: #064e3b; color: #34d399; font-size: 10px; padding: 2px 8px; border-radius: 9999px; font-weight: 700; border: 1px solid #059669; }
+    
     .status-card { background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 12px; margin-bottom: 12px; }
     .status-row { display: flex; align-items: center; justify-content: space-between; font-size: 12px; margin-bottom: 6px; }
     .status-row:last-child { margin-bottom: 0; }
-    .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #10b981; margin-right: 6px; }
+    
+    /* Separated Channels Grid */
+    .channels-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 12px; }
+    .channel-box { background: #020617; border: 1px solid #1e293b; border-radius: 10px; padding: 6px; text-align: center; }
+    .channel-box.fb { border-color: rgba(59, 130, 246, 0.4); }
+    .channel-box.yt { border-color: rgba(239, 68, 68, 0.4); }
+    .channel-box.pin { border-color: rgba(225, 29, 72, 0.4); }
+    .channel-box.insta { border-color: rgba(168, 85, 247, 0.4); }
+    .channel-label { font-size: 9px; font-weight: 700; text-transform: uppercase; margin-bottom: 2px; }
+    .channel-count { font-size: 13px; font-weight: 900; }
+    
+    /* Target Selector Box */
+    .dispatch-box { background: #0f172a; border: 1px solid #334155; border-radius: 12px; padding: 12px; margin-bottom: 12px; }
+    .dispatch-title { font-size: 11px; font-weight: 800; color: #38bdf8; text-transform: uppercase; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; }
+    .dispatch-options { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-bottom: 10px; }
+    .dispatch-toggle { display: flex; align-items: center; justify-content: center; gap: 4px; padding: 6px 4px; border-radius: 8px; background: #020617; border: 1px solid #334155; font-size: 10px; font-weight: 700; color: #94a3b8; cursor: pointer; user-select: none; transition: all 0.2s; }
+    .dispatch-toggle.active { background: #1e293b; color: #fff; border-color: #10b981; box-shadow: 0 0 10px rgba(16, 185, 129, 0.2); }
+    .dispatch-toggle input { display: none; }
+    
+    .quick-dispatch-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+    .btn-quick { padding: 6px 2px; border-radius: 6px; border: 1px solid #334155; background: #1e293b; color: #cbd5e1; font-size: 10px; font-weight: 700; cursor: pointer; text-align: center; transition: all 0.2s; }
+    .btn-quick:hover { background: #334155; color: #fff; }
+    
     .scroll-tip { background: #1e1b4b; border: 1px solid #4338ca; border-radius: 10px; padding: 10px; margin-bottom: 12px; font-size: 11px; color: #c7d2fe; display: flex; gap: 8px; align-items: center; }
+    
     .btn { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 10px 14px; border-radius: 10px; font-weight: 700; font-size: 12px; cursor: pointer; border: none; transition: all 0.2s; margin-bottom: 8px; text-decoration: none; }
     .btn-primary { background: #10b981; color: #022c22; }
     .btn-primary:hover { background: #34d399; }
     .btn-secondary { background: #1e293b; color: #cbd5e1; border: 1px solid #334155; }
     .btn-secondary:hover { background: #334155; color: #fff; }
-    .btn-youtube { background: #ef4444; color: #fff; margin-top: 4px; }
-    .btn-youtube:hover { background: #dc2626; }
-    .limit-box { background: #020617; border: 1px solid #1e293b; border-radius: 10px; padding: 10px; margin-bottom: 12px; }
-    .limit-header { display: flex; justify-content: space-between; align-items: center; font-size: 11px; margin-bottom: 6px; font-weight: 700; color: #cbd5e1; }
-    .interval-box { background: #0f172a; border: 1px solid #334155; border-radius: 10px; padding: 10px; margin-bottom: 12px; }
-    .interval-title { font-size: 11px; font-weight: 700; color: #38bdf8; text-transform: uppercase; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+    .btn-danger { background: #450a0a; color: #f87171; border: 1px solid #991b1b; }
+    .btn-danger:hover { background: #7f1d1d; color: #fecaca; }
+    
+    .interval-box { background: #0f172a; border: 1px solid #1e293b; border-radius: 10px; padding: 10px; margin-bottom: 12px; }
+    .interval-title { font-size: 11px; font-weight: 700; color: #cbd5e1; text-transform: uppercase; margin-bottom: 6px; }
     .interval-options { display: flex; gap: 6px; }
     .interval-btn { flex: 1; padding: 6px; font-size: 11px; border-radius: 6px; background: #1e293b; border: 1px solid #475569; color: #cbd5e1; text-align: center; cursor: pointer; font-weight: 600; }
     .interval-btn.active { background: #10b981; color: #022c22; border-color: #34d399; font-weight: 800; }
+    
+    /* Mapped Filter Tabs */
+    .filter-tabs { display: flex; gap: 4px; margin-bottom: 8px; border-bottom: 1px solid #1e293b; padding-bottom: 6px; }
+    .filter-tab { font-size: 10px; padding: 3px 8px; border-radius: 6px; background: #1e293b; color: #94a3b8; cursor: pointer; font-weight: 700; }
+    .filter-tab.active { background: #10b981; color: #022c22; }
+    
     .groups-list { max-height: 140px; overflow-y: auto; background: #020617; border: 1px solid #1e293b; border-radius: 10px; padding: 8px; margin-bottom: 12px; }
     .group-item { padding: 6px 8px; border-bottom: 1px solid #0f172a; font-size: 11px; display: flex; justify-content: space-between; align-items: center; }
     .group-item:last-child { border-bottom: none; }
-    .group-name { font-weight: 600; color: #f1f5f9; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .group-name { font-weight: 600; color: #f1f5f9; max-width: 230px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .group-meta { color: #94a3b8; font-size: 10px; }
+    
+    .channel-tag { font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 4px; }
+    .tag-fb { background: #1e3a8a; color: #93c5fd; }
+    .tag-yt { background: #7f1d1d; color: #fca5a5; }
+    .tag-pin { background: #831843; color: #fbcfe8; }
+    
     .footer { font-size: 10px; color: #64748b; text-align: center; margin-top: 8px; }
   </style>
 </head>
 <body>
+  <!-- Header -->
   <div class="header">
     <div class="brand">
       <span>🚀 AutoViral AI</span>
-      <span class="badge">V1.1</span>
+      <span class="badge">V1.2</span>
     </div>
-    <span style="font-size: 11px; color: #38bdf8; font-weight: 600;">FB & YouTube Bridge</span>
+    <span style="font-size: 11px; color: #38bdf8; font-weight: 700;">Multi-Canais FB • YT • PIN • INSTA</span>
   </div>
 
+  <!-- Channel Status Card -->
   <div class="status-card">
     <div class="status-row">
       <span style="color: #94a3b8;">Status Facebook:</span>
@@ -59,59 +96,125 @@
       <span id="pin-status" style="color: #e11d48; font-weight: 600;">Pins &amp; Pastas Ativos</span>
     </div>
     <div class="status-row">
-      <span style="color: #94a3b8;">Grupos Mapeados na Rolagem:</span>
-      <strong id="groups-count" style="color: #fbbf24; font-size: 13px;">0 grupos</strong>
+      <span style="color: #94a3b8;">Status Instagram:</span>
+      <span id="insta-status" style="color: #c084fc; font-weight: 700;">Stories com Link Clicável</span>
     </div>
   </div>
 
+  <!-- Separated Mapped Counters Grid (Requested by user) -->
+  <div class="channels-grid">
+    <div class="channel-box fb">
+      <div class="channel-label" style="color: #60a5fa;">🔵 Facebook</div>
+      <div id="fb-count" class="channel-count" style="color: #93c5fd;">0 grupos</div>
+    </div>
+    <div class="channel-box yt">
+      <div class="channel-label" style="color: #f87171;">🔴 YouTube</div>
+      <div id="yt-count" class="channel-count" style="color: #fca5a5;">0 vídeos</div>
+    </div>
+    <div class="channel-box pin">
+      <div class="channel-label" style="color: #f472b6;">📌 Pinterest</div>
+      <div id="pin-count" class="channel-count" style="color: #fbcfe8;">0 pastas</div>
+    </div>
+    <div class="channel-box insta">
+      <div class="channel-label" style="color: #c084fc;">🟣 Instagram</div>
+      <div id="insta-count" class="channel-count" style="color: #e9d5ff;">0 stories</div>
+    </div>
+  </div>
+
+  <!-- Target Dispatch Selection (Onde disparar: separado ou todos) -->
+  <div class="dispatch-box">
+    <div class="dispatch-title">
+      <span>🎯 Selecionar Onde Disparar:</span>
+      <span style="font-size: 10px; color: #10b981;">Modo Flexível</span>
+    </div>
+
+    <!-- Channel Toggles -->
+    <div class="dispatch-options">
+      <label id="toggle-fb" class="dispatch-toggle active">
+        <input type="checkbox" id="chk-fb" checked>
+        <span>🔵 FB</span>
+      </label>
+      <label id="toggle-yt" class="dispatch-toggle active">
+        <input type="checkbox" id="chk-yt" checked>
+        <span>🔴 YT</span>
+      </label>
+      <label id="toggle-pin" class="dispatch-toggle active">
+        <input type="checkbox" id="chk-pin" checked>
+        <span>📌 Pin</span>
+      </label>
+      <label id="toggle-insta" class="dispatch-toggle active">
+        <input type="checkbox" id="chk-insta" checked>
+        <span>🟣 Insta</span>
+      </label>
+    </div>
+
+    <!-- Quick Single Channel Buttons -->
+    <div class="quick-dispatch-grid">
+      <button id="btn-quick-fb" class="btn-quick" title="Disparar exclusivamente no Facebook">
+        Apenas FB
+      </button>
+      <button id="btn-quick-yt" class="btn-quick" title="Disparar exclusivamente no YouTube">
+        Apenas YT
+      </button>
+      <button id="btn-quick-pin" class="btn-quick" title="Disparar exclusivamente no Pinterest">
+        Apenas Pin
+      </button>
+      <button id="btn-quick-insta" class="btn-quick" title="Disparar exclusivamente no Instagram Stories">
+        Apenas Insta
+      </button>
+    </div>
+  </div>
+
+  <!-- Auto-scroll helper tip -->
   <div class="scroll-tip">
     <span style="font-size: 18px;">🔄</span>
     <div>
-      <strong>Captura Automática por Rolagem:</strong> Abra a busca de grupos no Facebook e role a página para baixo. Os grupos são lidos e guardados na hora!
+      <strong>Captura Automática por Rolagem:</strong> Abra a aba de grupos ou busca e role a página. Os grupos e vídeos são mapeados automaticamente!
     </div>
   </div>
 
-  <div class="limit-box">
-    <div class="limit-header">
-      <span>🎯 Limite Diário de Disparos:</span>
-      <span style="color: #10b981; font-weight: 800;">Até 500 disparos/dia</span>
-    </div>
-    <div style="font-size: 10px; color: #94a3b8; line-height: 1.3;">
-      Intervalo humanizado programado para proteger a sua conta contra bloqueios da Meta.
-    </div>
-  </div>
-
+  <!-- Interval Anti-ban -->
   <div class="interval-box">
-    <div class="interval-title">
-      🛡️ Intervalo Anti-Bloqueio & Anti-Ban
-    </div>
+    <div class="interval-title">🛡️ Intervalo Anti-Bloqueio Humanizado:</div>
     <div class="interval-options">
       <div class="interval-btn" data-time="300">300s (5m)</div>
       <div class="interval-btn active" data-time="350">350s (Randômico)</div>
       <div class="interval-btn" data-time="400">400s (6.6m)</div>
     </div>
-    <p style="font-size: 10px; color: #94a3b8; margin-top: 6px;">Variação aleatória (300s a 400s) simulando comportamento humano real.</p>
   </div>
 
+  <!-- Action Buttons -->
   <button id="btn-scan" class="btn btn-primary">
     🔍 Mapear Grupos da Aba Aberta do FB
   </button>
 
   <button id="btn-sync" class="btn btn-secondary">
-    📡 Enviar Todos os Grupos para o Painel AutoViral
+    📡 Enviar Grupos Mapeados para o Painel AutoViral
   </button>
 
   <button id="btn-open-platform" class="btn btn-secondary" style="border-color: #6366f1; color: #a5b4fc;">
     💻 Abrir Painel AutoViral AI
   </button>
 
+  <!-- Zerar Mapeamento Button (Requested by user: 'zrar mapear') -->
+  <button id="btn-reset-mapped" class="btn btn-danger">
+    🗑️ Zerar Mapeamento (Limpar Grupos &amp; Recomeçar)
+  </button>
+
+  <!-- Mapped Items Preview with Channel Filters -->
   <div id="groups-container" class="groups-list" style="display: none;">
-    <div style="font-size: 10px; font-weight: 800; color: #94a3b8; margin-bottom: 4px; text-transform: uppercase;">Grupos Capturados na Rolagem:</div>
+    <div class="filter-tabs">
+      <span class="filter-tab active" data-filter="all">Todos (<span id="total-badge">0</span>)</span>
+      <span class="filter-tab" data-filter="fb">🔵 FB</span>
+      <span class="filter-tab" data-filter="yt">🔴 YT</span>
+      <span class="filter-tab" data-filter="pin">📌 Pin</span>
+      <span class="filter-tab" data-filter="insta">🟣 Insta</span>
+    </div>
     <div id="groups-items"></div>
   </div>
 
   <div class="footer">
-    AutoViral AI • Proteção Anti-Bloqueio Meta & Automação Orgânica
+    AutoViral AI • Proteção Anti-Bloqueio &amp; Automação Multi-Canal
   </div>
 
   <script src="popup.js"></script>

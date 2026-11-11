@@ -21,7 +21,7 @@ export interface Campaign {
   status: 'active' | 'paused' | 'draft';
   createdAt: string;
   antiBanOrganicMode: boolean;
-  platforms: ('tiktok' | 'pinterest' | 'instagram' | 'whatsapp')[];
+  platforms: ('tiktok' | 'pinterest' | 'instagram' | 'whatsapp' | 'facebook')[];
   impressions: number;
   clicks: number;
   conversions: number;

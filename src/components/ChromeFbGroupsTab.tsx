@@ -35,7 +35,8 @@ import {
   CheckCheck,
   Activity,
   Layers,
-  Repeat
+  Repeat,
+  Target
 } from 'lucide-react';
 import JSZip from 'jszip';
 import {
@@ -57,6 +58,210 @@ import {
 } from '../data/facebookGroupsData';
 import { globalBotRunner } from '../utils/backgroundBotRunner';
 
+export interface CopyTemplateItem {
+  id: string;
+  name: string;
+  tag: string;
+  headline: string;
+  copy: string;
+}
+
+export function getCampaignCopyTemplates(camp: Campaign): CopyTemplateItem[] {
+  const titleLower = (camp.title || '').toLowerCase();
+  const nicheLower = (camp.niche || '').toLowerCase();
+  const isEcom =
+    camp.id.includes('ecom') ||
+    titleLower.includes('loja') ||
+    titleLower.includes('ecom') ||
+    (nicheLower.includes('renda_extra') && titleLower.includes('loja'));
+  const isTarefinhas =
+    camp.id.includes('tarefinha') ||
+    nicheLower.includes('psicopedagogia') ||
+    titleLower.includes('tarefinha') ||
+    titleLower.includes('autista') ||
+    titleLower.includes('coordenação') ||
+    titleLower.includes('educação infantil');
+  const isMilhas = camp.id.includes('milhas') || titleLower.includes('milhas');
+
+  const priceVal = typeof camp.price === 'number' && camp.price > 0 ? camp.price : 9.9;
+  const priceFormatted = priceVal.toFixed(2).replace('.', ',');
+  const checkout = camp.checkoutUrl || 'https://pay.kiwify.com.br/';
+
+  if (isEcom) {
+    return [
+      {
+        id: 'tpl-ecom-1',
+        name: '✨ Indicação Sincera (Loja Pronta)',
+        tag: 'Mais Natural',
+        headline:
+          '🚀 Pessoal do grupo, quem aí está procurando uma fonte de renda extra na internet sem precisar criar loja do zero?',
+        copy: `Oi pessoal! Passando pra compartilhar uma oportunidade excelente para quem quer empreender online mas não entende de programação nem tem estoque.
+
+Conheci um projeto onde você recebe uma Loja Virtual Nichada 100% Pronta, com mais de 20 produtos testados e fornecedores confiáveis inclusos.
+
+Não precisa estocar nada nem contratar programador caro. O treinamento passo a passo ensina tudo para buscar de R$ 700 a R$ 1.100 já nos primeiros 7 dias.
+
+O valor promocional com garantia incondicional está saindo por apenas R$ ${priceFormatted} no Pix: ${checkout}
+
+Espero que ajude quem está buscando destravar suas vendas online!`,
+      },
+      {
+        id: 'tpl-ecom-2',
+        name: '🎯 Dor & Solução (Sem Estoque)',
+        tag: 'Foco no Problema',
+        headline:
+          '💼 Cansado de tentar criar loja e travar em produtos que não vendem? Veja essa solução pronta.',
+        copy: `Muita gente tenta começar no e-commerce sem estoque, mas desiste no meio do caminho porque configurar loja é complexo e encontrar fornecedores rápidos é difícil.
+
+Com o ecom club você recebe a loja completa configurada, produtos validados e mentoria com reunião ao vivo.
+
+Acesso imediato com garantia incondicional de 7 dias por apenas R$ ${priceFormatted}: ${checkout}`,
+      },
+      {
+        id: 'tpl-ecom-3',
+        name: '⚡ Oferta Direta Pix',
+        tag: 'Alta Conversão',
+        headline: `⚡ Loja Virtual Pronta + 20 Produtos Validados por apenas R$ ${priceFormatted}!`,
+        copy: `Oportunidade para iniciar no e-commerce sem estoque:
+✅ Loja profissional nichada e configurada
+✅ 20 produtos testados com fornecedores inclusos
+✅ Treinamento passo a passo até os R$ 10 mil de faturamento
+✅ Reunião de 2 horas e garantia total
+✅ Apenas R$ ${priceFormatted} no Pix com liberação imediata
+
+Garanta a sua no link oficial: ${checkout}`,
+      },
+    ];
+  }
+
+  if (isTarefinhas) {
+    return [
+      {
+        id: 'tpl-tarefa-1',
+        name: '✨ Indicação Sincera (Mães & Pedagogia)',
+        tag: 'Mais Natural',
+        headline:
+          '🌸 Meninas e colegas do grupo, achei esse material de coordenação motora que facilitou demais minha rotina!',
+        copy: `Oi pessoal! Passando pra compartilhar uma dica que me ajudou muito na rotina com as crianças.
+
+Quem trabalha com educação infantil ou tem filho com resistência a tarefas sabe o tempo que a gente gasta bolando atividades sem poluição visual.
+
+Achei um caderno digital com mais de 100 atividades lúdicas de coordenação motora fina e alfabetização que funcionam perfeitamente para crianças típicas, com TDAH e autistas.
+
+Dá pra imprimir em casa e o acesso sai por apenas R$ ${priceFormatted} no Pix pelo link oficial: ${checkout}
+
+Espero que ajude outras pessoas como me ajudou! ❤️`,
+      },
+      {
+        id: 'tpl-tarefa-2',
+        name: '🎯 Dor & Solução (Sem Telas / Sem Birra)',
+        tag: 'Foco no Problema',
+        headline:
+          '💡 Dica de ouro para mães e professoras: atividades limpas em PDF para prender a atenção sem telas!',
+        copy: `Gente, quem tem criança em fase de alfabetização ou com TEA/TDAH sabe o sofrimento que é encontrar atividades limpas e atrativas sem telas.
+
+Esse compilado reúne mais de 100 atividades em PDF prontas para imprimir direto da impressora: traçados, pareamento, labirintos e coordenação motora fina.
+
+Está com valor simbólico de apenas R$ ${priceFormatted} no Pix com envio imediato no e-mail.
+
+Quem quiser dar uma olhada no conteúdo completo: ${checkout}`,
+      },
+      {
+        id: 'tpl-tarefa-3',
+        name: '⚡ Oferta Direta Pix',
+        tag: 'Alta Conversão',
+        headline: `⚡ Caderno de Atividades Infantis (+100 Fichas em PDF) por apenas R$ ${priceFormatted} no Pix!`,
+        copy: `Mais de 100 atividades pedagógicas lúdicas prontas para imprimir:
+✅ Estímulo à coordenação motora fina e foco
+✅ Atividades adaptadas para crianças típicas, TEA e TDAH
+✅ Acesso vitalício em PDF no seu e-mail
+✅ Apenas R$ ${priceFormatted} (valor promocional)
+
+Baixe diretamente no link oficial: ${checkout}`,
+      },
+    ];
+  }
+
+  if (isMilhas) {
+    return [
+      {
+        id: 'tpl-milhas-1',
+        name: '✨ Dica Prática (Renda com Milhas)',
+        tag: 'Mais Natural',
+        headline:
+          '✈️ Dica para a galera do grupo: como transformar as compras do dia a dia em renda extra no Pix todo mês!',
+        copy: `Pessoal, passando pra compartilhar algo que mudou meu orçamento este ano.
+
+Quase todo mundo gasta dinheiro no mercado, farmácia e contas diárias e não sabe que dá pra transformar esses gastos em pontos e milhas lucrativas, gerando de R$ 500 a R$ 2.000 limpos no Pix todo mês.
+
+A Comunidade Milhas 3.0 ensina o passo a passo seguro mesmo para quem não tem cartão Black.
+
+Acesso com aulas e grupo de alertas: ${checkout}`,
+      },
+      {
+        id: 'tpl-milhas-2',
+        name: '🎯 Dor & Solução (Fim de Mês)',
+        tag: 'Foco no Problema',
+        headline:
+          '💡 Pare de deixar dinheiro na mesa: aprenda a lucrar com milhas e compras bonificadas',
+        copy: `A maioria das pessoas perde dinheiro todos os meses por não saber acumular e vender pontos. Na Comunidade você recebe os alertas prontos de operações lucrativas.
+
+Acesso imediato e suporte: ${checkout}`,
+      },
+      {
+        id: 'tpl-milhas-3',
+        name: '⚡ Oferta Direta Comunidade',
+        tag: 'Alta Conversão',
+        headline: `⚡ Comunidade Milhas 3.0: Alertas e Estratégias de Lucro no Pix com Milhas`,
+        copy: `Transforme seus gastos diários em lucro comprovado:
+✅ Grupo VIP de alertas em tempo real
+✅ Planilhas prontas de rentabilidade
+✅ Suporte e aulas práticas
+Acesse a turma: ${checkout}`,
+      },
+    ];
+  }
+
+  // Dynamic template for any custom campaign:
+  return [
+    {
+      id: 'tpl-custom-1',
+      name: '✨ Recomendação Amigável',
+      tag: 'Mais Natural',
+      headline: `✨ Dica para o grupo: conheci o "${camp.title}" e recomendo muito!`,
+      copy: `Oi pessoal! Passando pra compartilhar uma recomendação excelente.
+
+${camp.headline || camp.title}
+${camp.subheadline ? '\n' + camp.subheadline : ''}
+
+${camp.painPointTargeted ? 'Ideal para quem busca resolver: ' + camp.painPointTargeted + '.' : ''}
+
+Acesso completo liberado com valor promocional de R$ ${priceFormatted}: ${checkout}`,
+    },
+    {
+      id: 'tpl-custom-2',
+      name: '🎯 Foco na Solução & Benefícios',
+      tag: 'Foco no Problema',
+      headline: `💡 Procurando uma solução para ${camp.nicheLabel || camp.niche || 'destravar resultados'}? Veja essa dica!`,
+      copy: `Se você quer resultados práticos com ${camp.title}:
+${(camp.features || []).slice(0, 4).map((f) => `• ${f}`).join('\n')}
+
+Garanta seu acesso seguro com suporte: ${checkout}`,
+    },
+    {
+      id: 'tpl-custom-3',
+      name: '⚡ Oferta Especial Pix',
+      tag: 'Alta Conversão',
+      headline: `⚡ Oferta Exclusiva: ${camp.title} por apenas R$ ${priceFormatted}!`,
+      copy: `Garanta agora o seu acesso a ${camp.title}:
+${(camp.features || []).slice(0, 3).map((f) => `✅ ${f}`).join('\n')}
+Preço promocional: R$ ${priceFormatted} no Pix.
+
+Acesse diretamente: ${checkout}`,
+    },
+  ];
+}
+
 interface ChromeFbGroupsTabProps {
   campaigns: Campaign[];
   onAddTrackingEvent?: (event: any) => void;
@@ -77,6 +282,8 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
     imageUrl: '/assets/aistudio/image_e9e67204.png',
     checkoutUrl: 'https://pay.kiwify.com.br/HE5xbnp',
   };
+
+  const availableCampaigns = campaigns && campaigns.length > 0 ? campaigns : [defaultProduct];
 
   // Subtabs: groups | audiences | campaign | youtube | pinterest | extension_guide
   const [activeSubTab, setActiveSubTab] = useState<'groups' | 'audiences' | 'campaign' | 'youtube' | 'pinterest' | 'extension_guide'>('groups');
@@ -145,6 +352,14 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
   const [isRandomJitterActive, setIsRandomJitterActive] = useState<boolean>(true);
 
   // Campaign & Bot Execution State
+  const [selectedProductId, setSelectedProductId] = useState<string>(defaultProduct.id);
+  const [selectedCheckoutUrl, setSelectedCheckoutUrl] = useState<string>(defaultProduct.checkoutUrl || 'https://pay.kiwify.com.br/HE5xbnp');
+  const [selectedPrice, setSelectedPrice] = useState<number>(defaultProduct.price || 9.90);
+  const [activeCopyTemplateIndex, setActiveCopyTemplateIndex] = useState<number>(0);
+
+  const activeCampaign = availableCampaigns.find(c => c.id === selectedProductId) || availableCampaigns[0] || defaultProduct;
+  const currentTemplates = getCampaignCopyTemplates(activeCampaign);
+
   const [postHeadline, setPostHeadline] = useState(
     '🌸 Meninas e colegas de Curitiba, achei esse material de coordenação motora que facilitou demais minha rotina!'
   );
@@ -159,9 +374,29 @@ Dá pra imprimir em casa e o acesso sai por apenas R$ 9,90 no Pix pelo link ofic
 
 Espero que ajude outras pessoas como me ajudou! ❤️`
   );
-  const [selectedProductId, setSelectedProductId] = useState<string>(defaultProduct.id);
-  const [selectedCheckoutUrl, setSelectedCheckoutUrl] = useState<string>(defaultProduct.checkoutUrl || 'https://pay.kiwify.com.br/HE5xbnp');
-  const [selectedPrice, setSelectedPrice] = useState<number>(defaultProduct.price || 9.90);
+
+  const handleSelectCampaign = (camp: Campaign, templateIndex: number = 0) => {
+    setSelectedProductId(camp.id);
+    setSelectedCheckoutUrl(camp.checkoutUrl || '');
+    setSelectedPrice(camp.price || 0);
+    setActiveCopyTemplateIndex(templateIndex);
+
+    const templates = getCampaignCopyTemplates(camp);
+    const chosen = templates[templateIndex] || templates[0];
+    if (chosen) {
+      setPostHeadline(chosen.headline);
+      setPostCopy(chosen.copy);
+    }
+  };
+
+  const handleApplyTemplate = (camp: Campaign, templateIndex: number) => {
+    setActiveCopyTemplateIndex(templateIndex);
+    const templates = getCampaignCopyTemplates(camp);
+    if (templates[templateIndex]) {
+      setPostHeadline(templates[templateIndex].headline);
+      setPostCopy(templates[templateIndex].copy);
+    }
+  };
 
   // Bot Running Engine & Countdown
   const [isBotRunning, setIsBotRunning] = useState<boolean>(() => globalBotRunner.getIsRunning());
@@ -463,7 +698,7 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
       onAddTrackingEvent({
         id: `fb-evt-${Date.now()}`,
         campaignId: selectedProductId,
-        campaignTitle: defaultProduct.title,
+        campaignTitle: activeCampaign.title,
         niche: currentGroup.niche,
         type: 'impression',
         timestamp: new Date().toISOString(),
@@ -1232,10 +1467,122 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
                 </div>
               </div>
 
-              {/* Target Audience Selector */}
+              {/* 1. Target Campaign / Product Selector (Requested by user: PRECISAMOS SELECIONAR A CAMPANHA AQUI) */}
+              <div className="bg-slate-950/90 border border-emerald-500/30 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <label className="text-xs font-bold text-emerald-400 flex items-center gap-1.5 uppercase tracking-wide">
+                    <Target className="w-4 h-4 text-emerald-400" />
+                    1. Selecionar Campanha / Produto a Divulgar:
+                  </label>
+                  <span className="text-[11px] font-bold text-emerald-300 bg-emerald-950/90 px-2 py-0.5 rounded border border-emerald-800/60">
+                    {availableCampaigns.length} Campanhas Cadastradas
+                  </span>
+                </div>
+
+                {/* Dropdown for selecting campaign */}
+                <select
+                  value={selectedProductId}
+                  onChange={(e) => {
+                    const chosen = availableCampaigns.find(c => c.id === e.target.value);
+                    if (chosen) {
+                      handleSelectCampaign(chosen, activeCopyTemplateIndex);
+                    }
+                  }}
+                  className="w-full bg-slate-900 border border-emerald-500/40 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-400 font-semibold cursor-pointer"
+                >
+                  {availableCampaigns.map(camp => (
+                    <option key={camp.id} value={camp.id}>
+                      {camp.title} — R$ {(camp.price || 9.90).toFixed(2).replace('.', ',')} ({camp.nicheLabel || camp.niche || 'Geral'})
+                    </option>
+                  ))}
+                </select>
+
+                {/* Quick Selection Cards Grid for 1-click campaign switching */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 pt-1">
+                  {availableCampaigns.map(camp => {
+                    const isSelected = camp.id === selectedProductId;
+                    return (
+                      <button
+                        key={camp.id}
+                        type="button"
+                        onClick={() => handleSelectCampaign(camp, activeCopyTemplateIndex)}
+                        className={`p-2.5 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between ${
+                          isSelected
+                            ? 'bg-emerald-950/60 border-emerald-500 text-white shadow-lg shadow-emerald-950/50 ring-1 ring-emerald-500'
+                            : 'bg-slate-900/80 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-900'
+                        }`}
+                      >
+                        <div className="flex items-start gap-2">
+                          {camp.imageUrl ? (
+                            <img
+                              src={camp.imageUrl}
+                              alt={camp.title}
+                              className="w-9 h-9 rounded-lg object-cover border border-slate-700 flex-shrink-0"
+                            />
+                          ) : (
+                            <div className="w-9 h-9 rounded-lg bg-emerald-900/60 border border-emerald-700/50 flex items-center justify-center text-xs font-bold text-emerald-300 flex-shrink-0">
+                              📦
+                            </div>
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <span className="text-[11px] font-bold line-clamp-1 text-white block">
+                              {camp.title}
+                            </span>
+                            <span className="text-[10px] text-slate-400 line-clamp-1 block">
+                              {camp.nicheLabel || camp.niche || 'Produto'}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="mt-2 flex items-center justify-between border-t border-slate-800/80 pt-1.5 text-[11px]">
+                          <span className="font-black text-emerald-400">
+                            R$ {(camp.price || 9.90).toFixed(2).replace('.', ',')}
+                          </span>
+                          {isSelected && (
+                            <span className="text-[9px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded font-bold">
+                              Ativo ✓
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Active Campaign Info Pill & Checkout Link */}
+                <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" />
+                    <div className="truncate">
+                      <span className="text-slate-400 text-[10px] block">PRODUTO ATIVO NO ROBÔ:</span>
+                      <span className="font-bold text-white truncate block">{activeCampaign.title}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <span className="font-black text-emerald-400 bg-emerald-950 px-2 py-1 rounded-lg border border-emerald-800/40">
+                      R$ {(activeCampaign.price || 9.90).toFixed(2).replace('.', ',')}
+                    </span>
+                    {activeCampaign.checkoutUrl && (
+                      <a
+                        href={activeCampaign.checkoutUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-blue-300 border border-slate-700 rounded-lg text-[11px] font-semibold flex items-center gap-1 transition"
+                        title="Ver checkout oficial do produto"
+                      >
+                        Link Checkout <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. Target Audience Selector */}
               <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1.5 uppercase tracking-wide">
-                  Público Ativo Selecionado:
+                <label className="block text-xs font-bold text-slate-300 mb-1.5 uppercase tracking-wide flex items-center gap-1.5">
+                  <Users className="w-4 h-4 text-blue-400" />
+                  2. Público Ativo de Grupos Selecionado:
                 </label>
                 <select
                   value={selectedAudienceId}
@@ -1253,12 +1600,12 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
                 </select>
               </div>
 
-              {/* Anti-Ban Interval Control */}
+              {/* 3. Anti-Ban Interval Control */}
               <div className="bg-slate-950/80 border border-indigo-900/40 rounded-xl p-4 space-y-3">
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <label className="text-xs font-bold text-indigo-300 flex items-center gap-1.5 uppercase tracking-wide">
                     <Clock className="w-4 h-4 text-indigo-400" />
-                    Intervalo Humanizado Anti-Bloqueio:
+                    3. Intervalo Humanizado Anti-Bloqueio:
                   </label>
                   <span className="text-xs font-bold text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded-md border border-emerald-800/40">
                     {isRandomJitterActive ? '300s a 400s (Randômico)' : `${intervalSeconds}s Fixo`}
@@ -1316,22 +1663,74 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
                 </div>
               </div>
 
-              {/* Headline & Copy */}
+              {/* 4. Copy Templates & Headline/Post Controls */}
               <div className="space-y-3">
-                <input
-                  type="text"
-                  value={postHeadline}
-                  onChange={(e) => setPostHeadline(e.target.value)}
-                  placeholder="Título do Post / Gancho..."
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-semibold"
-                />
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5 uppercase tracking-wide">
+                    <Sparkles className="w-4 h-4 text-amber-400" />
+                    4. Modelos de Copy Prontos para Grupos:
+                  </label>
+                  <span className="text-[11px] text-slate-400">
+                    Adaptado para "{activeCampaign.title.slice(0, 26)}..."
+                  </span>
+                </div>
 
-                <textarea
-                  rows={5}
-                  value={postCopy}
-                  onChange={(e) => setPostCopy(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 focus:outline-none focus:border-emerald-500 leading-relaxed"
-                />
+                {/* 3 Copy Template Buttons */}
+                <div className="grid grid-cols-3 gap-2">
+                  {currentTemplates.map((tpl, idx) => (
+                    <button
+                      key={tpl.id}
+                      type="button"
+                      onClick={() => handleApplyTemplate(activeCampaign, idx)}
+                      className={`py-2 px-2.5 rounded-xl border text-center transition cursor-pointer text-xs ${
+                        activeCopyTemplateIndex === idx
+                          ? 'bg-amber-500/20 border-amber-500/60 text-amber-300 font-bold shadow'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                      }`}
+                    >
+                      <span className="block truncate font-semibold">{tpl.name}</span>
+                      <span className="block text-[9px] opacity-75">{tpl.tag}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Headline input */}
+                <div>
+                  <div className="flex items-center justify-between text-[11px] text-slate-400 mb-1">
+                    <span>Título do Post / Gancho de Abertura:</span>
+                    <span>{postHeadline.length} caracteres</span>
+                  </div>
+                  <input
+                    type="text"
+                    value={postHeadline}
+                    onChange={(e) => setPostHeadline(e.target.value)}
+                    placeholder="Título do Post / Gancho..."
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-semibold"
+                  />
+                </div>
+
+                {/* Post body */}
+                <div>
+                  <div className="flex items-center justify-between text-[11px] text-slate-400 mb-1">
+                    <span>Corpo do Post (Com link oficial do produto):</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(`${postHeadline}\n\n${postCopy}`);
+                        alert('Copiado para a área de transferência!');
+                      }}
+                      className="text-emerald-400 hover:text-emerald-300 flex items-center gap-1 text-[10px] cursor-pointer"
+                    >
+                      <Copy className="w-3 h-3" /> Copiar Texto
+                    </button>
+                  </div>
+                  <textarea
+                    rows={6}
+                    value={postCopy}
+                    onChange={(e) => setPostCopy(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 focus:outline-none focus:border-emerald-500 leading-relaxed font-sans"
+                  />
+                </div>
               </div>
 
               {/* Bot Control Button */}

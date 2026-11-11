@@ -14,6 +14,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { Campaign, TrackingEvent } from '../types';
+import { getCampaignLandingUrl } from '../utils/campaignSlug';
 
 interface BridgePageModalProps {
   campaign: Campaign;
@@ -70,7 +71,7 @@ export const BridgePageModal: React.FC<BridgePageModalProps> = ({
 
           <div className="flex items-center gap-2">
             <a
-              href={`/?p=${campaign.id === 'camp-tarefinhas-autismo' ? 'tarefinhas' : campaign.id.replace('camp-', '')}`}
+              href={getCampaignLandingUrl(campaign)}
               target="_blank"
               rel="noopener noreferrer"
               className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl flex items-center gap-1 transition cursor-pointer"

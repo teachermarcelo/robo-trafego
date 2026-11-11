@@ -789,26 +789,48 @@ export default function App() {
 
   if (isPublicLeadMode) {
     const params = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
-    const pParam = (params.get('p') || params.get('camp') || params.get('prod') || '').trim().toLowerCase();
+    const campParam = (params.get('camp') || params.get('id') || '').trim().toLowerCase();
+    const pParam = (params.get('p') || params.get('prod') || '').trim().toLowerCase();
 
-    // Dynamically match individual campaign by ID, slug, or title keyword
-    let featuredCampaign = campaigns.find((c) => {
-      if (!pParam) return false;
-      const cSlug = getCampaignSlug(c).toLowerCase();
-      const cId = c.id.toLowerCase();
-      const normTitle = c.title.toLowerCase();
-      return (
-        cId === pParam ||
-        cSlug === pParam ||
-        cSlug.includes(pParam) ||
-        pParam.includes(cSlug) ||
-        normTitle.includes(pParam) ||
-        (pParam === 'tarefinhas' && cId.includes('tarefinha')) ||
-        (pParam.includes('cognitiv') && (cId.includes('cognitiv') || normTitle.includes('cognitiv'))) ||
-        (pParam.includes('milha') && cId.includes('milha')) ||
-        (pParam.includes('ingles') && cId.includes('ingles'))
+    // 1. Exact campaign ID match (highest priority)
+    let featuredCampaign: Campaign | undefined;
+    if (campParam) {
+      featuredCampaign = campaigns.find(
+        (c) =>
+          c.id.toLowerCase() === campParam ||
+          c.id.toLowerCase() === `camp-${campParam}` ||
+          c.id.toLowerCase().replace('camp-', '') === campParam
       );
-    }) || campaigns[0];
+    }
+
+    // 2. Exact slug match
+    if (!featuredCampaign && pParam) {
+      featuredCampaign = campaigns.find(
+        (c) => getCampaignSlug(c).toLowerCase() === pParam || c.id.toLowerCase() === pParam || c.id.toLowerCase().replace('camp-', '') === pParam
+      );
+    }
+
+    // 3. Title keyword match
+    if (!featuredCampaign && pParam) {
+      featuredCampaign = campaigns.find((c) => {
+        const normTitle = c.title.toLowerCase();
+        const cSlug = getCampaignSlug(c).toLowerCase();
+        return normTitle.includes(pParam) || pParam.includes(cSlug) || cSlug.includes(pParam);
+      });
+    }
+
+    // 4. Fallback to actively selected landing campaign in localStorage
+    if (!featuredCampaign) {
+      try {
+        const savedActiveId = localStorage.getItem('autoviral_selected_landing_id');
+        if (savedActiveId) {
+          featuredCampaign = campaigns.find((c) => c.id === savedActiveId);
+        }
+      } catch {}
+    }
+
+    // 5. Fallback to first campaign if none matched
+    featuredCampaign = featuredCampaign || campaigns[0];
 
     return (
       <PublicLeadLanding
@@ -838,7 +860,15 @@ export default function App() {
         onOpenNotifications={() => setIsNotificationsModalOpen(true)}
         onOpen2FA={() => setIs2FAModalOpen(true)}
         is2FAEnabled={is2FAEnabled}
-        onPreviewBridge={() => setBridgeModalCampaign(campaigns[0])}
+        onPreviewBridge={() => {
+          try {
+            const activeLandingId = localStorage.getItem('autoviral_selected_landing_id');
+            const targetCamp = (activeLandingId && campaigns.find((c) => c.id === activeLandingId)) || campaigns[0];
+            setBridgeModalCampaign(targetCamp);
+          } catch {
+            setBridgeModalCampaign(campaigns[0]);
+          }
+        }}
         onOpenSupabase={() => setIsSupabaseModalOpen(true)}
         onOpenVercel={() => setIsVercelModalOpen(true)}
         onResetAllMetrics={handleResetToRealMode}
@@ -917,6 +947,7 @@ export default function App() {
           <LandingPageBuilderTab
             campaigns={campaigns}
             onUpdateCampaign={handleUpdateCampaign}
+            onAddCampaign={handleAddCampaign}
             onPreviewBridge={(c) => setBridgeModalCampaign(c)}
           />
         )}

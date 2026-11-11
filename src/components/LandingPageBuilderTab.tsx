@@ -25,60 +25,70 @@ import {
   Upload,
   FolderOpen,
   Trash2,
+  X,
 } from 'lucide-react';
 import { Campaign } from '../types';
 import { saveLandingPageSettingsToFirebase } from '../lib/firebase';
-import { getCampaignSlug } from '../utils/campaignSlug';
+import { getCampaignSlug, getCampaignLandingUrl } from '../utils/campaignSlug';
+import { NicheType } from '../types';
 
 interface LandingPageBuilderTabProps {
   campaigns: Campaign[];
   onUpdateCampaign: (updatedCampaign: Campaign) => void;
+  onAddCampaign?: (newCampaign: Campaign) => void;
   onPreviewBridge: (campaign: Campaign) => void;
 }
 
 export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
   campaigns,
   onUpdateCampaign,
+  onAddCampaign,
   onPreviewBridge,
 }) => {
-  const [selectedCampaignId, setSelectedCampaignId] = useState<string>(
-    campaigns[0]?.id || 'camp-tarefinhas-autismo'
-  );
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('autoviral_selected_landing_id');
+      if (saved && campaigns.some((c) => c.id === saved)) return saved;
+    } catch {}
+    return campaigns[0]?.id || 'camp-tarefinhas-autismo';
+  });
   const [previewDevice, setPreviewDevice] = useState<'mobile' | 'desktop'>('mobile');
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
 
+  // Modal to create brand new landing page from scratch
+  const [isNewLandingModalOpen, setIsNewLandingModalOpen] = useState(false);
+  const [newLandingTitle, setNewLandingTitle] = useState('');
+  const [newLandingPrice, setNewLandingPrice] = useState('37.00');
+  const [newLandingNiche, setNewLandingNiche] = useState<NicheType>('renda_extra');
+  const [newLandingNicheLabel, setNewLandingNicheLabel] = useState('Renda Extra & Afiliados');
+  const [newLandingCheckoutUrl, setNewLandingCheckoutUrl] = useState('');
+  const [newLandingWhatsapp, setNewLandingWhatsapp] = useState('5541998778348');
+  const [newLandingPain, setNewLandingPain] = useState('');
+
   const activeCamp =
     campaigns.find((c) => c.id === selectedCampaignId) || campaigns[0];
 
-  // Editable form state for active campaign
+  // Editable form state for active campaign (strictly bounded to activeCamp)
   const [title, setTitle] = useState(activeCamp?.title || '');
-  const [headline, setHeadline] = useState(
-    activeCamp?.headline ||
-      (activeCamp?.id === 'camp-tarefinhas-autismo'
-        ? 'Caderno Digital com + 100 Atividades em PDF Prontas para Imprimir'
-        : 'Aprenda a Gerar Renda Extra Todos os Meses com Milhas')
-  );
+  const [headline, setHeadline] = useState(activeCamp?.headline || activeCamp?.title || '');
   const [subheadline, setSubheadline] = useState(
     activeCamp?.subheadline ||
       activeCamp?.painPointTargeted ||
-      'Desenvolvido para estimular a coordenação motora, linguagem, foco e cognição de crianças com TEA ou TDAH.'
+      'Acesso imediato com método passo a passo, garantia incondicional e suporte via WhatsApp.'
   );
   const [price, setPrice] = useState(
-    activeCamp?.price?.toString() || '9.90'
+    activeCamp?.price != null ? activeCamp.price.toString() : '9.90'
   );
   const [oldPrice, setOldPrice] = useState(
-    activeCamp?.oldPrice?.toString() || '47.00'
+    activeCamp?.oldPrice != null ? activeCamp.oldPrice.toString() : '47.00'
   );
-  const [checkoutUrl, setCheckoutUrl] = useState(
-    activeCamp?.checkoutUrl || 'https://pay.hotmart.com/U95248783T'
-  );
+  const [checkoutUrl, setCheckoutUrl] = useState(activeCamp?.checkoutUrl || '');
   const [whatsappNumber, setWhatsappNumber] = useState(
     activeCamp?.whatsappNumber || '5541998778348'
   );
   const [badgeText, setBadgeText] = useState(
-    activeCamp?.badgeText ||
-      'PROMOÇÃO EXCLUSIVA HOTMART • ARQUIVOS EM PDF PRONTOS PARA IMPRIMIR'
+    activeCamp?.badgeText || `${activeCamp?.nicheLabel || 'PROMOÇÃO EXCLUSIVA'} • ACESSO IMEDIATO`
   );
 
   function getDefaultCtaText(camp?: Campaign): string {
@@ -202,27 +212,25 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
   // When switching campaign, reload state
   const handleSelectCampaign = (id: string) => {
     setSelectedCampaignId(id);
+    try {
+      localStorage.setItem('autoviral_selected_landing_id', id);
+    } catch {}
     setUploadFileName(null);
     const c = campaigns.find((camp) => camp.id === id);
     if (c) {
       setTitle(c.title);
-      setHeadline(
-        c.headline ||
-          (c.id === 'camp-tarefinhas-autismo'
-            ? 'Caderno Digital com + 100 Atividades em PDF Prontas para Imprimir'
-            : c.title)
-      );
-      setSubheadline(c.subheadline || c.painPointTargeted);
-      setPrice(c.price.toString());
-      setOldPrice(c.oldPrice ? c.oldPrice.toString() : '47.00');
+      setHeadline(c.headline || c.title);
+      setSubheadline(c.subheadline || c.painPointTargeted || '');
+      setPrice(c.price != null ? c.price.toString() : '9.90');
+      setOldPrice(c.oldPrice ? c.oldPrice.toString() : (c.price * 2.2).toFixed(2));
       setCheckoutUrl(c.checkoutUrl || '');
       setWhatsappNumber(c.whatsappNumber || '5541998778348');
       setBadgeText(
-        c.badgeText || 'PROMOÇÃO EXCLUSIVA • ACESSO IMEDIATO'
+        c.badgeText || `${c.nicheLabel || 'PROMOÇÃO EXCLUSIVA'} • ACESSO IMEDIATO`
       );
       setCtaText(getDefaultCtaText(c));
       setGuaranteeDays(c.guaranteeDays ? c.guaranteeDays.toString() : '7');
-      setImageUrl(c.imageUrl || (c.id === 'camp-tarefinhas-autismo' ? '/assets/aistudio/image_e9e67204.png' : ''));
+      setImageUrl(c.imageUrl || '');
     }
   };
 
@@ -250,26 +258,29 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
     };
 
     onUpdateCampaign(updated);
-    saveLandingPageSettingsToFirebase({
-      campaignId: updated.id,
-      title: updated.title,
-      price: updated.price,
-      oldPrice: updated.oldPrice,
-      headline: updated.headline,
-      subheadline: updated.subheadline,
-      checkoutUrl: updated.checkoutUrl,
-      whatsappNumber: updated.whatsappNumber,
-      badgeText: updated.badgeText,
-      ctaText: updated.ctaText,
-      guaranteeDays: updated.guaranteeDays,
-      imageUrl: updated.imageUrl,
-    }, updated.id).catch(console.warn);
+    try {
+      localStorage.setItem('autoviral_selected_landing_id', updated.id);
+      saveLandingPageSettingsToFirebase({
+        campaignId: updated.id,
+        title: updated.title,
+        price: updated.price,
+        oldPrice: updated.oldPrice,
+        headline: updated.headline,
+        subheadline: updated.subheadline,
+        checkoutUrl: updated.checkoutUrl,
+        whatsappNumber: updated.whatsappNumber,
+        badgeText: updated.badgeText,
+        ctaText: updated.ctaText,
+        guaranteeDays: updated.guaranteeDays,
+        imageUrl: updated.imageUrl,
+      }, updated.id).catch(console.warn);
+    } catch {}
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 3000);
   };
 
   const currentSlug = activeCamp ? getCampaignSlug(activeCamp) : 'tarefinhas';
-  const publicLandingUrl = `${window.location.origin}/?p=${currentSlug}`;
+  const publicLandingUrl = activeCamp ? getCampaignLandingUrl(activeCamp) : `${window.location.origin}/?camp=tarefinhas`;
 
   const copyLandingLink = () => {
     navigator.clipboard.writeText(publicLandingUrl);
@@ -336,9 +347,19 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
         <div className="lg:col-span-7 space-y-6">
           {/* Select Campaign Card */}
           <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl space-y-3">
-            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">
-              1. Selecionar Produto / Campanha para Editar:
-            </label>
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">
+                1. Selecionar Produto / Campanha para Editar:
+              </label>
+              <button
+                type="button"
+                onClick={() => setIsNewLandingModalOpen(true)}
+                className="px-3 py-1 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-slate-950 font-bold text-xs rounded-xl flex items-center gap-1.5 shadow transition cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5 text-slate-950" />
+                <span>+ Criar Nova Landing Page</span>
+              </button>
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               {campaigns.map((camp) => (
                 <button
@@ -929,6 +950,206 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
           </div>
         </div>
       </div>
+      {/* MODAL: CRIAR NOVA LANDING PAGE DO ZERO */}
+      {isNewLandingModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-lg w-full p-6 space-y-5 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <LayoutTemplate className="w-5 h-5 text-emerald-400" />
+                <div>
+                  <h3 className="text-base font-bold text-white">Criar Nova Landing Page</h3>
+                  <p className="text-xs text-slate-400">Cada produto tem seu link individual exclusivo sem misturar</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsNewLandingModalOpen(false)}
+                className="text-slate-400 hover:text-white cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!newLandingTitle.trim()) return;
+
+                const newCamp: Campaign = {
+                  id: `camp-${Date.now()}`,
+                  title: newLandingTitle.trim(),
+                  niche: newLandingNiche,
+                  nicheLabel: newLandingNicheLabel || 'Geral',
+                  targetAudience: 'Compradores qualificados',
+                  painPointTargeted: newLandingPain.trim() || 'Resolver problema urgente com suporte',
+                  checkoutUrl: newLandingCheckoutUrl.trim() || undefined,
+                  whatsappNumber: newLandingWhatsapp.trim() || '5541998778348',
+                  price: parseFloat(newLandingPrice) || 37.0,
+                  oldPrice: (parseFloat(newLandingPrice) || 37.0) * 2,
+                  headline: newLandingTitle.trim(),
+                  subheadline: newLandingPain.trim() || 'Método prático e mastigado para aplicar no seu celular com suporte dedicado.',
+                  badgeText: `${newLandingNicheLabel || 'PROMOÇÃO EXCLUSIVA'} • ACESSO IMEDIATO`,
+                  ctaText: 'QUERO GARANTIR MEU ACESSO AGORA',
+                  guaranteeDays: 7,
+                  status: 'active',
+                  createdAt: new Date().toISOString(),
+                  antiBanOrganicMode: true,
+                  platforms: ['tiktok', 'pinterest', 'instagram', 'whatsapp'],
+                  impressions: 0,
+                  clicks: 0,
+                  conversions: 0,
+                  revenue: 0,
+                };
+
+                if (onAddCampaign) {
+                  onAddCampaign(newCamp);
+                }
+                setSelectedCampaignId(newCamp.id);
+                try {
+                  localStorage.setItem('autoviral_selected_landing_id', newCamp.id);
+                  saveLandingPageSettingsToFirebase(newCamp, newCamp.id).catch(console.warn);
+                } catch {}
+
+                setTitle(newCamp.title);
+                setHeadline(newCamp.headline || newCamp.title);
+                setSubheadline(newCamp.subheadline || '');
+                setPrice(newCamp.price.toString());
+                setOldPrice(newCamp.oldPrice ? newCamp.oldPrice.toString() : '74.00');
+                setCheckoutUrl(newCamp.checkoutUrl || '');
+                setWhatsappNumber(newCamp.whatsappNumber || '5541998778348');
+                setBadgeText(newCamp.badgeText || 'OFERTA EXCLUSIVA • ACESSO IMEDIATO');
+                setCtaText('QUERO GARANTIR MEU ACESSO AGORA');
+                setImageUrl('');
+                setIsNewLandingModalOpen(false);
+                setNewLandingTitle('');
+                setNewLandingCheckoutUrl('');
+                setNewLandingPain('');
+                alert(`✅ Nova Landing Page "${newCamp.title}" criada com sucesso! O link exclusivo já está pronto.`);
+              }}
+              className="space-y-4 text-xs"
+            >
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Nome do Produto / Título da Landing Page:
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={newLandingTitle}
+                  onChange={(e) => setNewLandingTitle(e.target.value)}
+                  placeholder="Ex: ecom club, Curso de..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-medium"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">
+                    Preço de Venda (R$):
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    value={newLandingPrice}
+                    onChange={(e) => setNewLandingPrice(e.target.value)}
+                    placeholder="37.00"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-emerald-400 font-bold focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">
+                    Nicho / Categoria:
+                  </label>
+                  <select
+                    value={newLandingNiche}
+                    onChange={(e) => {
+                      const val = e.target.value as NicheType;
+                      setNewLandingNiche(val);
+                      const labels: Record<string, string> = {
+                        renda_extra: 'Renda Extra & Afiliados',
+                        marketing: 'Marketing & E-commerce',
+                        psicopedagogia: 'Psicopedagogia & Educação',
+                        ingles: 'Inglês & Idiomas',
+                        emagrecedor: 'Emagrecimento & Saúde',
+                        artesanato: 'Artesanato & Confeitaria',
+                        outro: 'Geral',
+                      };
+                      setNewLandingNicheLabel(labels[val] || 'Geral');
+                    }}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value="renda_extra">Renda Extra & Afiliados</option>
+                    <option value="marketing">Marketing & E-commerce</option>
+                    <option value="psicopedagogia">Psicopedagogia & Educação</option>
+                    <option value="ingles">Inglês & Idiomas</option>
+                    <option value="emagrecedor">Emagrecimento & Saúde</option>
+                    <option value="artesanato">Artesanato & Confeitaria</option>
+                    <option value="outro">Outro Nicho</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Link de Checkout (Kiwify, Hotmart ou Eduzz):
+                </label>
+                <input
+                  type="url"
+                  value={newLandingCheckoutUrl}
+                  onChange={(e) => setNewLandingCheckoutUrl(e.target.value)}
+                  placeholder="https://kiwify.app/..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-blue-300 focus:outline-none focus:border-emerald-500 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  WhatsApp de Suporte (com DDI e DDD):
+                </label>
+                <input
+                  type="text"
+                  value={newLandingWhatsapp}
+                  onChange={(e) => setNewLandingWhatsapp(e.target.value)}
+                  placeholder="5541998778348"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Dor Tratada / Subtítulo Promocional:
+                </label>
+                <textarea
+                  rows={2}
+                  value={newLandingPain}
+                  onChange={(e) => setNewLandingPain(e.target.value)}
+                  placeholder="Ex: Resolver problema urgente com suporte e entrega garantida..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsNewLandingModalOpen(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-emerald-500/20 cursor-pointer"
+                >
+                  Criar Landing Page Agora
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -8,13 +8,13 @@ import {
   Star,
   Sparkles,
   Zap,
-  TrendingUp,
   Award,
-  ChevronDown,
   BookOpen,
-  FileText,
+  ShoppingBag,
   Download,
   Heart,
+  Store,
+  Layers,
 } from 'lucide-react';
 import { Campaign, TrackingEvent } from '../types';
 import { subscribeLandingPageSettings } from '../lib/firebase';
@@ -34,18 +34,25 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [liveSettings, setLiveSettings] = useState<any>(null);
 
+  // Exact niche identification without loose keyword contamination
   const isTarefinhas =
     campaign.id === 'camp-tarefinhas-autismo' ||
-    campaign.niche === 'psicopedagogia' ||
-    campaign.title.toLowerCase().includes('tarefinha') ||
-    campaign.title.toLowerCase().includes('cognitiv') ||
-    campaign.title.toLowerCase().includes('autista') ||
-    campaign.title.toLowerCase().includes('criança');
+    (campaign.niche === 'psicopedagogia' && campaign.title.toLowerCase().includes('tarefinha'));
+
+  const isMilhas =
+    campaign.title.toLowerCase().includes('milha') &&
+    !campaign.title.toLowerCase().includes('ecom');
+
+  const isEcom =
+    campaign.title.toLowerCase().includes('ecom') ||
+    campaign.title.toLowerCase().includes('loja') ||
+    campaign.niche === 'marketing';
 
   // Real-time synchronization of landing page content and pricing from Firebase
   useEffect(() => {
+    setLiveSettings(null); // Clean state on campaign switch to avoid showing previous campaign data
     const unsub = subscribeLandingPageSettings((settings) => {
-      if (settings) {
+      if (settings && (settings.campaignId === campaign.id || !settings.campaignId)) {
         setLiveSettings(settings);
       }
     }, campaign.id);
@@ -54,37 +61,173 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
 
   const effectivePrice =
     liveSettings?.price != null
-      ? parseFloat(String(liveSettings.price).replace(',', '.')) || 9.9
+      ? parseFloat(String(liveSettings.price).replace(',', '.')) || campaign.price
       : campaign.price;
+
   const effectiveOldPrice =
     liveSettings?.oldPrice != null
-      ? parseFloat(String(liveSettings.oldPrice).replace(',', '.')) || 47.0
-      : campaign.oldPrice || 47.0;
-  const effectiveHeadline = liveSettings?.headline || campaign.headline;
-  const effectiveSubheadline = liveSettings?.subheadline || campaign.subheadline;
-  const effectiveBadgeText = liveSettings?.badgeText || campaign.badgeText;
-  const effectiveCtaText = (() => {
-    const raw = liveSettings?.ctaText || campaign.ctaText;
-    if (isTarefinhas && raw && raw.toUpperCase().includes('COMUNIDADE')) {
-      return 'QUERO BAIXAR AS ATIVIDADES EM PDF AGORA';
-    }
-    if (raw && raw.trim()) return raw;
-    if (isTarefinhas) return 'QUERO BAIXAR AS ATIVIDADES EM PDF AGORA';
-    if (campaign.title.toLowerCase().includes('milha')) return 'QUERO ENTRAR NA COMUNIDADE AGORA';
-    return 'QUERO GARANTIR MEU ACESSO AGORA';
-  })();
+      ? parseFloat(String(liveSettings.oldPrice).replace(',', '.')) || campaign.oldPrice || (campaign.price * 2.2)
+      : campaign.oldPrice || (campaign.price * 2.2);
+
+  const effectiveHeadline = liveSettings?.headline || campaign.headline || campaign.title;
+  const effectiveSubheadline =
+    liveSettings?.subheadline ||
+    campaign.subheadline ||
+    campaign.painPointTargeted ||
+    'Acesso imediato com método passo a passo, garantia incondicional de 7 dias e suporte via WhatsApp.';
+
+  const effectiveBadgeText =
+    liveSettings?.badgeText ||
+    campaign.badgeText ||
+    (isTarefinhas
+      ? 'PROMOÇÃO EXCLUSIVA HOTMART • ARQUIVOS EM PDF PRONTOS PARA IMPRIMIR'
+      : `${campaign.nicheLabel || 'OFERTA ESPECIAL'} • ACESSO IMEDIATO & GARANTIA DE 7 DIAS`);
+
+  const categoryBadge =
+    campaign.nicheLabel ||
+    (isTarefinhas
+      ? 'Para Pedagogos, Psicopedagogos e Mães Atípicas'
+      : isEcom
+      ? 'E-commerce & Renda Familiar'
+      : 'Método Prático e Testado • Acesso Imediato');
+
+  const effectiveImageUrl = liveSettings?.imageUrl || campaign.imageUrl;
+
   const effectiveCheckoutUrl = liveSettings?.checkoutUrl || campaign.checkoutUrl;
   const effectiveWhatsappNumber =
     liveSettings?.whatsappNumber || campaign.whatsappNumber || '5541998778348';
   const effectiveGuaranteeDays =
     liveSettings?.guaranteeDays || campaign.guaranteeDays || 7;
 
+  // Auto-detect payment gateway
+  const checkoutPlatform = (() => {
+    const url = (effectiveCheckoutUrl || '').toLowerCase();
+    if (url.includes('kiwify')) return 'Kiwify';
+    if (url.includes('hotmart')) return 'Hotmart';
+    if (url.includes('eduzz') || url.includes('chk.eduzz')) return 'Eduzz';
+    return isTarefinhas ? 'Hotmart' : isMilhas ? 'Eduzz' : 'Kiwify / Checkout Seguro';
+  })();
+
+  const effectiveCtaText = (() => {
+    const raw = liveSettings?.ctaText || campaign.ctaText;
+    if (raw && raw.trim()) return raw;
+    if (isTarefinhas) return 'QUERO BAIXAR AS ATIVIDADES EM PDF AGORA';
+    if (isMilhas) return 'QUERO ENTRAR NA COMUNIDADE AGORA';
+    if (isEcom) return 'QUERO MINHA LOJA PRONTA AGORA';
+    return 'QUERO GARANTIR MEU ACESSO AGORA';
+  })();
+
+  // Dynamic 4 pillars
+  const displayFeatures = (() => {
+    if (campaign.features && campaign.features.length >= 4) {
+      return campaign.features.map((feat, idx) => ({
+        num: idx + 1,
+        title: feat,
+        desc: 'Conteúdo validado e de aplicação prática imediata.',
+      }));
+    }
+    if (isTarefinhas) {
+      return [
+        {
+          num: 1,
+          title: 'Atividades Adaptadas para Autismo (TEA)',
+          desc: 'Tarefas com pistas visuais estruturadas, sem sobrecarga sensorial, que auxiliam na compreensão de rotinas e foco.',
+        },
+        {
+          num: 2,
+          title: 'Coordenação Motora Fina & Grafomotricidade',
+          desc: 'Exercícios de pontilhado, recorte, pintura orientada para fortalecer as mãos e preparar para a escrita.',
+        },
+        {
+          num: 3,
+          title: 'Alfabetização Lúdica & Raciocínio Lógico',
+          desc: 'Vogais, números, formas e quantidades ensinados de forma leve e divertida sem choro ou birras.',
+        },
+        {
+          num: 4,
+          title: 'Arquivos em PDF Prontos para Imprimir',
+          desc: 'Baixe imediatamente e imprima quantas vezes quiser no conforto de casa ou na escola.',
+        },
+      ];
+    }
+    if (isMilhas) {
+      return [
+        {
+          num: 1,
+          title: 'Multiplicação de Pontos 10x',
+          desc: 'Como comprar itens normais do seu mês e acumular até 10 pontos por real sem mudar seus hábitos.',
+        },
+        {
+          num: 2,
+          title: 'Venda Segura de Milhas',
+          desc: 'Onde e como vender seus pontos para receber dinheiro direto no Pix na sua conta bancária.',
+        },
+        {
+          num: 3,
+          title: 'Passagens e Salas VIP Gratuitas',
+          desc: 'Acesso a benefícios e viagens com custo zero sem precisar ter cartões com anuidade cara.',
+        },
+        {
+          num: 4,
+          title: 'Comunidade & Alertas de Lucro',
+          desc: 'Receba na palma da sua mão os alertas prontos das melhores promoções do dia.',
+        },
+      ];
+    }
+    if (isEcom) {
+      return [
+        {
+          num: 1,
+          title: 'Loja Pronta & Configurada',
+          desc: 'Ganhe sua estrutura completa e profissional pronta para vender sem precisar programar ou gastar fortunas.',
+        },
+        {
+          num: 2,
+          title: 'Fornecedores Nacionais Validados',
+          desc: 'Produtos com envio rápido pelo Brasil e margem líquida de 40% a 70% sem precisar ter estoque.',
+        },
+        {
+          num: 3,
+          title: 'Treinamento Prático do Zero',
+          desc: 'Método descomplicado e direto ao ponto para atrair clientes compradores todos os dias pelo celular.',
+        },
+        {
+          num: 4,
+          title: 'Suporte & Acompanhamento VIP',
+          desc: 'Tire suas dúvidas direto no WhatsApp com especialistas dedicados para destravar suas vendas.',
+        },
+      ];
+    }
+    return [
+      {
+        num: 1,
+        title: 'Método Prático & Descomplicado',
+        desc: 'Conteúdo mastigado para você aplicar de qualquer lugar, direto no seu celular.',
+      },
+      {
+        num: 2,
+        title: 'Acesso Imediato & Vitalício',
+        desc: 'Receba seus dados de acesso no seu e-mail assim que o pagamento for aprovado.',
+      },
+      {
+        num: 3,
+        title: `Garantia Incondicional de ${effectiveGuaranteeDays} Dias`,
+        desc: 'Teste sem nenhum risco. Se não gostar, 100% do seu dinheiro é devolvido.',
+      },
+      {
+        num: 4,
+        title: 'Suporte Humanizado via WhatsApp',
+        desc: 'Equipe pronta para te apoiar em qualquer dúvida ou dificuldade em tempo real.',
+      },
+    ];
+  })();
+
   const [chatMessages, setChatMessages] = useState<Array<{ sender: 'bot' | 'user'; text: string }>>(() => [
     {
       sender: 'bot',
       text: isTarefinhas
         ? 'Olá! Sou a assistente pedagógica 24h. Como posso te ajudar com o material de Tarefinhas para Educação Infantil e Autismo (TEA)?'
-        : 'Olá! Sou a assistente 24h da Comunidade Milhas 3.0. Como posso te ajudar a destravar sua renda extra com milhas hoje?',
+        : `Olá! Sou a assistente virtual 24h de "${campaign.title}". Como posso te ajudar a tirar qualquer dúvida ou garantir seu acesso com desconto hoje?`,
     },
   ]);
 
@@ -92,28 +235,14 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
     const userMsg = { sender: 'user' as const, text: question };
     let reply = '';
 
-    if (isTarefinhas) {
-      if (question.includes('Como recebo') || question.includes('download')) {
-        reply = 'Você recebe o link para baixar o arquivo completo em PDF imediatamente no seu e-mail após a aprovação do pagamento na Hotmart. É rápido e 100% seguro!';
-      } else if (question.includes('imprimir') || question.includes('quantas vezes')) {
-        reply = 'Sim! O PDF de alta resolução é seu para sempre. Você pode salvar no computador ou celular e imprimir quantas vezes quiser para seus alunos ou pacientes.';
-      } else if (question.includes('idade') || question.includes('Serve')) {
-        reply = 'O material foi desenvolvido especificamente para crianças de 2 a 8 anos na Educação Infantil e crianças no espectro autista (TEA) ou com TDAH em fase de estimulação motora e cognitiva.';
-      } else if (question.includes('garantia')) {
-        reply = 'Você tem 7 dias de garantia incondicional assegurada pela Hotmart. Se não amar as atividades, devolvemos 100% do seu dinheiro!';
-      } else {
-        reply = `O material com mais de 100 tarefinhas está com valor promocional liberado na Hotmart por apenas R$ ${effectivePrice.toFixed(2).replace('.', ',')}. Clique no botão verde para garantir o seu!`;
-      }
+    if (question.includes('Como recebo') || question.includes('acesso')) {
+      reply = `O acesso ao ${campaign.title} é enviado imediatamente para o seu e-mail logo após a aprovação do pagamento. É rápido, automático e 100% seguro!`;
+    } else if (question.includes('pagamento') || question.includes('Pix') || question.includes('cartão')) {
+      reply = `Você pode pagar via Pix instantâneo ou em até 12x no cartão de crédito pelo valor promocional de apenas R$ ${effectivePrice.toFixed(2).replace('.', ',')}!`;
+    } else if (question.includes('garantia')) {
+      reply = `Você tem ${effectiveGuaranteeDays} dias de garantia incondicional assegurada pela plataforma de pagamento ${checkoutPlatform}. Se não gostar, 100% do seu dinheiro é devolvido com 1 clique!`;
     } else {
-      if (question.includes('cartão Black')) {
-        reply = 'Não precisa de cartão Black! Você pode começar com qualquer cartão básico ou até pagando seus boletos do dia a dia (luz, mercado, combustível). O método ensina como pontuar 10x sem precisar de renda alta.';
-      } else if (question.includes('dinheiro')) {
-        reply = 'O dinheiro das milhas é pago diretamente via Pix na sua conta bancária! Você transfere e vende seus pontos acumulados em plataformas autorizadas com total segurança.';
-      } else if (question.includes('garantia')) {
-        reply = 'Você tem 7 dias de garantia incondicional protegida pela Eduzz. Se não gostar, basta 1 clique para receber 100% do seu dinheiro de volta sem nenhuma complicação.';
-      } else {
-        reply = 'Comunidade Milhas 3.0 te dá acesso direto às aulas e alertas de promoções. Você pode tirar dúvidas comigo ou falar no WhatsApp com o criador!';
-      }
+      reply = `O produto "${campaign.title}" está com valor promocional liberado por apenas R$ ${effectivePrice.toFixed(2).replace('.', ',')}. Se preferir, pode também tirar dúvidas direto no WhatsApp pelo botão da página!`;
     }
 
     setChatMessages((prev) => [
@@ -166,90 +295,92 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
           phone: effectiveWhatsappNumber,
           status: 'duvida_whatsapp',
           source: 'landing_page_whatsapp',
-          notes: 'Visitante clicou no botão da página para falar direto no WhatsApp',
+          notes: `Visitante clicou no botão da página de ${campaign.title} para falar no WhatsApp`,
         }),
       }).catch(() => {});
     } catch {}
 
     const text = encodeURIComponent(
-      isTarefinhas
-        ? `Olá! Vi o material de 100 Tarefinhas de Educação Infantil e Autismo e gostaria de tirar uma dúvida!`
-        : `Olá! Vi sua página da Comunidade Milhas 3.0 e quero entender como começar a lucrar com milhas ainda essa semana!`
+      `Olá! Vi sua página de "${campaign.title}" e gostaria de tirar uma dúvida antes de garantir minha vaga!`
     );
     window.location.href = `https://wa.me/${effectiveWhatsappNumber}?text=${text}`;
   };
 
   const handleCheckoutClick = () => {
     onTrackAction('checkout_click');
-    window.location.href = effectiveCheckoutUrl || (isTarefinhas ? 'https://pay.hotmart.com/U95248783T' : 'https://chk.eduzz.com/39ZEGY8198');
+    if (effectiveCheckoutUrl) {
+      window.location.href = effectiveCheckoutUrl;
+    } else {
+      alert(`Redirecionando para o checkout de ${campaign.title}...`);
+    }
   };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-slate-950">
       {/* Top Scarcity Bar */}
-      <div className="bg-gradient-to-r from-emerald-600 via-green-600 to-emerald-700 text-slate-950 px-4 py-2 text-center text-xs sm:text-sm font-black tracking-wide flex items-center justify-center gap-2">
+      <div className="bg-gradient-to-r from-emerald-600 via-green-600 to-emerald-700 text-slate-950 px-4 py-2 text-center text-xs sm:text-sm font-black tracking-wide flex items-center justify-center gap-2 shadow-md">
         <Sparkles className="w-4 h-4 fill-slate-950 shrink-0" />
-        <span>
-          {effectiveBadgeText ||
-            (isTarefinhas
-              ? 'PROMOÇÃO EXCLUSIVA HOTMART • ARQUIVOS EM PDF PRONTOS PARA IMPRIMIR'
-              : 'VAGAS PROMOCIONAIS LIBERADAS • SUPORTE DIRETO NO WHATSAPP')}
-        </span>
+        <span>{effectiveBadgeText}</span>
       </div>
 
       {/* Hero Section */}
       <div className="max-w-3xl mx-auto px-4 py-8 sm:py-12 space-y-6 text-center">
-        {/* Badge */}
+        {/* Category Badge */}
         <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-950/80 border border-emerald-600/40 text-emerald-300 text-xs font-semibold shadow-lg shadow-emerald-950/50">
           {isTarefinhas ? (
             <>
               <Heart className="w-3.5 h-3.5 text-pink-400 fill-pink-400" />
-              <span>Para Pedagogos, Psicopedagogos e Mães Atípicas</span>
+              <span>{categoryBadge}</span>
+            </>
+          ) : isEcom ? (
+            <>
+              <Store className="w-3.5 h-3.5 text-emerald-400" />
+              <span>{categoryBadge}</span>
             </>
           ) : (
             <>
               <Zap className="w-3.5 h-3.5 text-amber-400" />
-              <span>Método Prático e Testado • Renda Extra no Celular</span>
+              <span>{categoryBadge}</span>
             </>
           )}
         </div>
 
-        {/* Main Title */}
+        {/* Main Headline */}
         <h1 className="text-3xl sm:text-5xl font-black text-white leading-tight tracking-tight">
-          {effectiveHeadline ? (
-            effectiveHeadline
-          ) : isTarefinhas ? (
-            <>
-              + 100 Tarefinhas Prontas para{' '}
-              <span className="text-emerald-400 underline decoration-emerald-500/50">
-                Educação Infantil e Crianças com Autismo (TEA)
-              </span>
-            </>
-          ) : (
-            <>
-              Como Gerar de{' '}
-              <span className="text-emerald-400 underline decoration-emerald-500/50">
-                R$ 500 a R$ 2.000
-              </span>{' '}
-              de Renda Extra Todo Mês Com Milhas
-            </>
-          )}
+          {effectiveHeadline}
         </h1>
 
         {/* Subtitle */}
         <p className="text-slate-300 text-base sm:text-lg max-w-2xl mx-auto leading-relaxed">
-          {effectiveSubheadline ||
-            (isTarefinhas
-              ? 'Economize dezenas de horas de planejamento com atividades lúdicas, testadas e prontas para imprimir, que estimulam a coordenação motora, foco, linguagem e autonomia das crianças sem causar frustração.'
-              : 'Sem precisar aparecer, sem precisar viajar e transformando os gastos que você já tem no mercado, farmácia e contas básicas em lucro líquido na sua conta.')}
+          {effectiveSubheadline}
         </p>
 
-        {/* Product Cover Image if Tarefinhas or custom imageUrl */}
-        {(campaign.imageUrl || isTarefinhas) && (
-          <div className="max-w-xs mx-auto py-2">
-            <div className="relative group rounded-3xl overflow-hidden border-2 border-emerald-500/40 shadow-2xl shadow-emerald-950/80 transform group-hover:scale-105 transition duration-300">
+        {/* Product Cover Image / Visual Mockup */}
+        {effectiveImageUrl ? (
+          <div className="max-w-sm mx-auto py-2">
+            <div className="relative group rounded-3xl overflow-hidden border-2 border-emerald-500/40 shadow-2xl shadow-emerald-950/80 transform hover:scale-[1.02] transition duration-300">
               <img
-                src={campaign.imageUrl || '/assets/aistudio/image_e9e67204.png'}
+                src={effectiveImageUrl}
+                alt={campaign.title}
+                className="w-full h-auto object-cover max-h-72 mx-auto"
+                onError={(e) => {
+                  (e.target as HTMLElement).style.display = 'none';
+                }}
+              />
+              <div className="absolute top-3 left-3 px-2.5 py-1 bg-slate-900/90 text-white text-[11px] font-bold rounded-lg border border-slate-700 flex items-center gap-1.5 shadow">
+                {isTarefinhas ? <BookOpen className="w-3.5 h-3.5 text-emerald-400" /> : <ShoppingBag className="w-3.5 h-3.5 text-emerald-400" />}
+                <span>{isTarefinhas ? 'eBook em PDF' : 'Produto Oficial'}</span>
+              </div>
+              <div className="absolute top-3 right-3 px-2 py-0.5 bg-emerald-500 text-slate-950 text-[10px] font-black rounded-full uppercase tracking-wider shadow">
+                Vendas Ativas
+              </div>
+            </div>
+          </div>
+        ) : isTarefinhas ? (
+          <div className="max-w-xs mx-auto py-2">
+            <div className="relative group rounded-3xl overflow-hidden border-2 border-emerald-500/40 shadow-2xl shadow-emerald-950/80">
+              <img
+                src="/assets/aistudio/image_e9e67204.png"
                 alt={campaign.title}
                 className="w-full h-auto object-cover"
               />
@@ -262,6 +393,20 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
               </div>
             </div>
           </div>
+        ) : (
+          /* Clean sleek product box card when no image is uploaded */
+          <div className="max-w-md mx-auto py-2">
+            <div className="p-6 bg-gradient-to-br from-slate-900 via-slate-850 to-slate-900 border-2 border-emerald-500/30 rounded-3xl shadow-2xl text-center space-y-3">
+              <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center mx-auto">
+                {isEcom ? <Store className="w-6 h-6" /> : <Layers className="w-6 h-6" />}
+              </div>
+              <h3 className="text-base font-black text-white">{campaign.title}</h3>
+              <p className="text-xs text-slate-300">{campaign.targetAudience}</p>
+              <div className="inline-block px-3 py-1 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-700/60 text-xs font-bold">
+                Liberado por apenas R$ {effectivePrice.toFixed(2).replace('.', ',')}
+              </div>
+            </div>
+          </div>
         )}
 
         {/* Social Proof Star rating */}
@@ -271,11 +416,9 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
               <Star key={i} className="w-4 h-4 fill-amber-400" />
             ))}
           </div>
-          <span className="font-bold text-white">4.9/5 de Avaliação</span>
+          <span className="font-bold text-white">4.9 / 5.0 de Avaliação</span>
           <span className="text-slate-400">
-            {isTarefinhas
-              ? '• Mais de 890 professoras e mães aprovando'
-              : '• Mais de 1.400 pessoas lucrando'}
+            • (+1.420 clientes satisfeitos)
           </span>
         </div>
 
@@ -283,15 +426,13 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
         <div className="p-6 bg-slate-900/90 border border-emerald-900/60 rounded-3xl shadow-2xl space-y-4 max-w-xl mx-auto">
           <div className="space-y-1">
             <span className="text-xs text-slate-400 line-through">
-              De R$ {effectiveOldPrice ? effectiveOldPrice.toFixed(2).replace('.', ',') : (isTarefinhas ? '47,00' : '697,00')}
+              De R$ {effectiveOldPrice ? effectiveOldPrice.toFixed(2).replace('.', ',') : (effectivePrice * 2.2).toFixed(2).replace('.', ',')}
             </span>
             <div className="text-4xl font-black text-emerald-400">
               R$ {effectivePrice.toFixed(2).replace('.', ',')}
             </div>
             <span className="text-xs text-slate-300">
-              {isTarefinhas
-                ? 'Pagamento único via Pix ou Cartão • Acesso imediato no e-mail'
-                : 'ou em até 12x no cartão de crédito / Pix com liberação imediata'}
+              ou em até 12x no cartão de crédito / Pix com liberação imediata
             </span>
           </div>
 
@@ -302,12 +443,7 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
               className="w-full py-4 px-6 bg-gradient-to-r from-emerald-500 to-green-500 hover:from-emerald-400 hover:to-green-400 text-slate-950 font-black text-base sm:text-lg rounded-2xl shadow-xl shadow-emerald-500/25 transition transform active:scale-98 flex items-center justify-center gap-3 cursor-pointer"
             >
               <Lock className="w-5 h-5 text-slate-950" />
-              <span>
-                {effectiveCtaText ||
-                  (isTarefinhas
-                    ? 'QUERO BAIXAR AS 100 TAREFINHAS AGORA'
-                    : 'QUERO ENTRAR NA COMUNIDADE AGORA')}
-              </span>
+              <span>{effectiveCtaText}</span>
               <ArrowRight className="w-5 h-5 text-slate-950" />
             </button>
 
@@ -329,7 +465,7 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
             <span>•</span>
             <span className="flex items-center gap-1">
               <Lock className="w-4 h-4 text-emerald-400" />
-              Checkout Seguro {isTarefinhas ? 'Hotmart' : 'Eduzz'}
+              Checkout Seguro via {checkoutPlatform}
             </span>
           </div>
         </div>
@@ -338,67 +474,19 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
       {/* The 4 Pillars */}
       <div className="max-w-4xl mx-auto px-4 py-8 space-y-6">
         <h2 className="text-2xl font-bold text-white text-center">
-          {isTarefinhas
-            ? 'O Que Está Incluído no Seu Pacote de Atividades:'
-            : 'O Que Você Vai Aprender na Prática:'}
+          O Que Você Terá Acesso na Prática:
         </h2>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="p-5 bg-slate-900/70 border border-slate-800 rounded-2xl space-y-2">
-            <div className="w-9 h-9 rounded-xl bg-emerald-950/80 text-emerald-400 flex items-center justify-center font-bold">
-              1
+          {displayFeatures.map((feat) => (
+            <div key={feat.num} className="p-5 bg-slate-900/70 border border-slate-800 rounded-2xl space-y-2">
+              <div className="w-9 h-9 rounded-xl bg-emerald-950/80 text-emerald-400 flex items-center justify-center font-bold">
+                {feat.num}
+              </div>
+              <h3 className="font-bold text-white text-base">{feat.title}</h3>
+              <p className="text-xs text-slate-300 leading-relaxed">{feat.desc}</p>
             </div>
-            <h3 className="font-bold text-white text-base">
-              {isTarefinhas ? 'Atividades Adaptadas para Autismo (TEA)' : 'Multiplicação de Pontos 10x'}
-            </h3>
-            <p className="text-xs text-slate-300 leading-relaxed">
-              {isTarefinhas
-                ? 'Tarefas com pistas visuais estruturadas, sem sobrecarga sensorial, que auxiliam na compreensão de rotinas, comandos simples e foco.'
-                : 'Como comprar coisas normais (mercado, combustível, roupas) e ganhar até 10 pontos por real gasto, sem mudar seus hábitos.'}
-            </p>
-          </div>
-
-          <div className="p-5 bg-slate-900/70 border border-slate-800 rounded-2xl space-y-2">
-            <div className="w-9 h-9 rounded-xl bg-indigo-950/80 text-indigo-400 flex items-center justify-center font-bold">
-              2
-            </div>
-            <h3 className="font-bold text-white text-base">
-              {isTarefinhas ? 'Coordenação Motora Fina & Grafomotricidade' : 'Venda Segura de Milhas'}
-            </h3>
-            <p className="text-xs text-slate-300 leading-relaxed">
-              {isTarefinhas
-                ? 'Exercícios de pontilhado, recorte, colagem, pintura orientada e encaixes para fortalecer a musculatura das mãos e preparar para a escrita.'
-                : 'Onde e como vender suas milhas acumuladas para receber dinheiro direto no Pix na sua conta bancária.'}
-            </p>
-          </div>
-
-          <div className="p-5 bg-slate-900/70 border border-slate-800 rounded-2xl space-y-2">
-            <div className="w-9 h-9 rounded-xl bg-amber-950/80 text-amber-400 flex items-center justify-center font-bold">
-              3
-            </div>
-            <h3 className="font-bold text-white text-base">
-              {isTarefinhas ? 'Alfabetização Lúdica & Raciocínio Lógico' : 'Passagens e Salas VIP Gratuitas'}
-            </h3>
-            <p className="text-xs text-slate-300 leading-relaxed">
-              {isTarefinhas
-                ? 'Identificação de vogais, números, formas geométricas, cores e associação de quantidades de forma leve e divertida.'
-                : 'Como ter acesso a salas VIP com comida e bebida à vontade nos aeroportos sem pagar anuidade em cartões Black.'}
-            </p>
-          </div>
-
-          <div className="p-5 bg-slate-900/70 border border-slate-800 rounded-2xl space-y-2">
-            <div className="w-9 h-9 rounded-xl bg-purple-950/80 text-purple-400 flex items-center justify-center font-bold">
-              4
-            </div>
-            <h3 className="font-bold text-white text-base">
-              {isTarefinhas ? 'Arquivos em PDF Prontos para Imprimir' : 'Comunidade e Alertas Diários'}
-            </h3>
-            <p className="text-xs text-slate-300 leading-relaxed">
-              {isTarefinhas
-                ? 'Receba o material organizado em alta resolução para imprimir em casa ou gráfica quantas cópias precisar, sem limite de uso.'
-                : 'Você recebe na palma da sua mão os alertas das melhores promoções do dia para só copiar e colar a operação lucrativa.'}
-            </p>
-          </div>
+          ))}
         </div>
       </div>
 
@@ -406,11 +494,9 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
       <div className="max-w-xl mx-auto px-4 py-8 text-center space-y-4">
         <div className="p-6 bg-gradient-to-b from-slate-900 to-slate-950 border border-emerald-900/50 rounded-3xl space-y-4 shadow-xl">
           <Award className="w-10 h-10 text-emerald-400 mx-auto" />
-          <h3 className="text-xl font-bold text-white">Garantia Risco Zero de 7 Dias</h3>
+          <h3 className="text-xl font-bold text-white">Garantia Risco Zero de {effectiveGuaranteeDays} Dias</h3>
           <p className="text-xs text-slate-300 leading-relaxed">
-            {isTarefinhas
-              ? 'Baixe as tarefinhas, imprima e faça com seus alunos ou filhos. Se você não notar a evolução da criança ou não ficar 100% satisfeita, basta solicitar o reembolso na Hotmart.'
-              : 'Entre na Comunidade Milhas 3.0, assista às aulas e teste os métodos. Se você achar que não é para você, basta pedir o reembolso com um único clique na Eduzz.'}
+            Acesse o conteúdo, teste e aplique. Se você não ficar 100% satisfeito ou achar que não é para você, basta solicitar o reembolso na {checkoutPlatform} e devolvemos 100% do seu dinheiro.
           </p>
 
           <button
@@ -418,11 +504,7 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
             className="w-full py-3.5 px-6 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-base rounded-xl transition flex items-center justify-center gap-2 cursor-pointer"
           >
             <Download className="w-5 h-5 text-slate-950" />
-            <span>
-              {isTarefinhas
-                ? `BAIXAR TAREFINHAS POR APENAS R$ ${campaign.price.toFixed(2).replace('.', ',')}`
-                : 'ENTRAR NA COMUNIDADE AGORA'}
-            </span>
+            <span>GARANTIR POR APENAS R$ {effectivePrice.toFixed(2).replace('.', ',')}</span>
           </button>
         </div>
       </div>
@@ -437,13 +519,13 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
               <div className="flex items-center gap-2.5">
                 <div className="relative">
                   <div className="w-8 h-8 rounded-full bg-emerald-600 flex items-center justify-center text-slate-950 font-black text-xs">
-                    {isTarefinhas ? 'EP' : 'AV'}
+                    AV
                   </div>
                   <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-400 border-2 border-slate-900 rounded-full animate-pulse" />
                 </div>
                 <div>
                   <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
-                    <span>{isTarefinhas ? 'Consultora Pedagógica' : 'Consultora Virtual Milhas'}</span>
+                    <span>Consultora Virtual • {campaign.title}</span>
                     <span className="text-[9px] bg-emerald-950 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-800/50">
                       Online 24/7
                     </span>
@@ -454,7 +536,7 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
 
               <button
                 onClick={() => setIsChatOpen(false)}
-                className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition"
+                className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition cursor-pointer"
               >
                 ✕
               </button>
@@ -482,23 +564,15 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
 
             {/* Quick Question Buttons */}
             <div className="px-3 py-2 bg-slate-950/70 border-t border-slate-800 flex flex-wrap gap-1.5">
-              {(isTarefinhas
-                ? [
-                    'Como recebo o material?',
-                    'Posso imprimir quantas vezes quiser?',
-                    'Serve para qual idade?',
-                    'Tem garantia?',
-                  ]
-                : [
-                    'Preciso ter cartão Black?',
-                    'Como recebo o dinheiro?',
-                    'Tem garantia?',
-                  ]
-              ).map((q) => (
+              {[
+                'Como recebo o acesso?',
+                'Quais são as formas de pagamento?',
+                'Tem garantia?',
+              ].map((q) => (
                 <button
                   key={q}
                   onClick={() => handleAskAssistant(q)}
-                  className="text-[11px] px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-full border border-slate-700 transition"
+                  className="text-[11px] px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-full border border-slate-700 transition cursor-pointer"
                 >
                   {q}
                 </button>
@@ -509,15 +583,13 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
             <div className="p-3 bg-slate-950 border-t border-slate-800 flex items-center gap-2">
               <button
                 onClick={handleCheckoutClick}
-                className="flex-1 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl transition text-center shadow-md shadow-emerald-500/20"
+                className="flex-1 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl transition text-center shadow-md shadow-emerald-500/20 cursor-pointer"
               >
-                {isTarefinhas
-                  ? `Baixar Agora (R$ ${campaign.price.toFixed(2).replace('.', ',')})`
-                  : `Garantir Vaga (R$ ${campaign.price.toFixed(2).replace('.', ',')})`}
+                Garantir Vaga (R$ {effectivePrice.toFixed(2).replace('.', ',')})
               </button>
               <button
                 onClick={handleWhatsAppClick}
-                className="p-2 bg-emerald-950 hover:bg-emerald-900 border border-emerald-800 text-emerald-300 rounded-xl transition"
+                className="p-2 bg-emerald-950 hover:bg-emerald-900 border border-emerald-800 text-emerald-300 rounded-xl transition cursor-pointer"
                 title="Chamar no WhatsApp"
               >
                 <MessageSquare className="w-4 h-4" />
@@ -536,8 +608,6 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
           <span>
             {isChatOpen
               ? 'Fechar Atendente'
-              : isTarefinhas
-              ? 'Dúvidas Pedagógicas? Fale com a Consultora 24/7'
               : 'Dúvidas? Fale com a Consultora 24/7'}
           </span>
         </button>
@@ -545,19 +615,16 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
 
       {/* Footer */}
       <footer className="mt-auto border-t border-slate-800/80 py-8 text-center text-xs text-slate-500 px-4 space-y-3">
-        <p>
-          © 2026 {isTarefinhas ? '+ 100 Tarefinha Educação Infantil e Autismo' : 'Comunidade Milhas 3.0'} • Todos os direitos reservados.
-        </p>
+        <p>© 2026 {campaign.title} • Todos os direitos reservados.</p>
         <p className="text-[11px] text-slate-600">
-          Suporte: (41) 99877-8348 • Pagamentos processados com segurança via{' '}
-          {isTarefinhas ? 'Hotmart' : 'Eduzz'}.
+          Suporte: (41) 99877-8348 • Pagamentos processados com segurança via {checkoutPlatform}.
         </p>
 
-        {/* Secret/Discreet Owner Admin Link */}
+        {/* Discreet Owner Admin Link */}
         <div className="pt-4">
           <button
             onClick={onGoToDashboard}
-            className="text-[11px] text-slate-500 hover:text-emerald-400 underline transition"
+            className="text-[11px] text-slate-500 hover:text-emerald-400 underline transition cursor-pointer"
           >
             Acessar Painel do Administrador (AutoViral AI)
           </button>

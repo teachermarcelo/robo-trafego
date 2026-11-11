@@ -17,8 +17,11 @@ import {
   Edit3,
   Save,
   X,
+  Eye,
 } from 'lucide-react';
 import { Campaign, NicheType } from '../types';
+import { getCampaignLandingUrl } from '../utils/campaignSlug';
+import { saveLandingPageSettingsToFirebase } from '../lib/firebase';
 
 interface CampaignManagerTabProps {
   campaigns: Campaign[];
@@ -74,11 +77,18 @@ export const CampaignManagerTab: React.FC<CampaignManagerTabProps> = ({
       whatsappNumber: editWhatsapp.trim() || undefined,
       painPointTargeted: editPainPoint.trim() || editingCampaign.painPointTargeted,
       nicheLabel: editNicheLabel.trim() || editingCampaign.nicheLabel,
+      headline: editTitle.trim(),
+      subheadline: editPainPoint.trim() || editingCampaign.subheadline || editPainPoint.trim(),
+      badgeText: editNicheLabel.trim() || 'PROMOÇÃO EXCLUSIVA • ACESSO IMEDIATO',
     };
 
     if (onUpdateCampaign) {
       onUpdateCampaign(updated);
     }
+    try {
+      localStorage.setItem('autoviral_selected_landing_id', updated.id);
+      saveLandingPageSettingsToFirebase(updated, updated.id).catch(console.warn);
+    } catch {}
     setEditingCampaign(null);
   };
 
@@ -106,6 +116,9 @@ export const CampaignManagerTab: React.FC<CampaignManagerTabProps> = ({
       checkoutUrl: checkoutUrl.trim() || undefined,
       whatsappNumber: whatsappNumber.trim() || '5541998778348',
       price: parseFloat(price) || 97.0,
+      headline: title,
+      subheadline: painPointTargeted || 'Acesso imediato com garantia de 7 dias.',
+      badgeText: nicheLabel || 'PROMOÇÃO EXCLUSIVA • ACESSO IMEDIATO',
       status: 'active',
       createdAt: new Date().toISOString(),
       antiBanOrganicMode: true,
@@ -117,6 +130,10 @@ export const CampaignManagerTab: React.FC<CampaignManagerTabProps> = ({
     };
 
     onAddCampaign(newCamp);
+    try {
+      localStorage.setItem('autoviral_selected_landing_id', newCamp.id);
+      saveLandingPageSettingsToFirebase(newCamp, newCamp.id).catch(console.warn);
+    } catch {}
     setIsCreating(false);
     // Reset
     setTitle('');
@@ -126,7 +143,8 @@ export const CampaignManagerTab: React.FC<CampaignManagerTabProps> = ({
   };
 
   const copySmartLink = (id: string) => {
-    const link = `${window.location.origin}/?camp=${id}`;
+    const camp = campaigns.find(c => c.id === id);
+    const link = camp ? getCampaignLandingUrl(camp) : `${window.location.origin}/?camp=${id}`;
     navigator.clipboard.writeText(link);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);

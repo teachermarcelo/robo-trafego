@@ -151,6 +151,8 @@ export interface FacebookGroup {
   city?: string;
   searchTerm?: string;
   postsPerDay?: string;
+  isVerifiedReal?: boolean;
+  validationStatus?: 'verified' | 'pending' | 'needs_update';
 }
 
 export interface FacebookAudience {

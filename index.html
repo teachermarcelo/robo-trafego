@@ -25,6 +25,22 @@
         font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       }
     </style>
+    <script>
+      // Silence benign iframe WebSocket HMR warnings in AI Studio preview
+      window.addEventListener('error', function (e) {
+        if (e && (e.message?.includes('WebSocket') || e.message?.includes('@vite/client') || e.filename?.includes('@vite/client'))) {
+          e.stopImmediatePropagation();
+          e.preventDefault();
+          return true;
+        }
+      }, true);
+      window.addEventListener('unhandledrejection', function (e) {
+        if (e && (String(e.reason).includes('WebSocket') || String(e.reason).includes('@vite/client'))) {
+          e.stopImmediatePropagation();
+          e.preventDefault();
+        }
+      }, true);
+    </script>
   </head>
   <body class="bg-slate-950 text-slate-100">
     <div id="root">

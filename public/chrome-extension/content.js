@@ -378,16 +378,51 @@
   // =========================================================================
   // 4. INSTAGRAM LOGGED-IN BRIDGE & STORIES DETECTOR
   // =========================================================================
+  // 4. INSTAGRAM LOGGED BROWSER BRIDGE & ANTI-BAN DEFENSE DEVICE
+  // (User requested: "dispositivo de defesa que o Instagram conectado no navegador seja por onde vai fazer as postagens")
+  // =========================================================================
   if (currentHost.includes('instagram.com')) {
-    console.log('[AutoViral AI] Conectado ao Instagram Web. Automação de Stories & Feed ATIVA.');
+    console.log('[AutoViral AI] Conectado ao Instagram Web logado no navegador. Dispositivo de Defesa Anti-Ban ATIVO.');
 
-    // Inject small badge showing connected account
+    // Detect connected account username
+    let connectedHandle = '@conectado';
+    try {
+      const profileLinks = document.querySelectorAll('a[href^="/"]');
+      for (const pl of profileLinks) {
+        const href = pl.getAttribute('href') || '';
+        if (href.length > 2 && !href.includes('/direct/') && !href.includes('/explore/') && !href.includes('/reels/') && !href.includes('/stories/')) {
+          const candidate = href.replace(/\//g, '');
+          if (candidate.length > 2 && !['p', 'reel', 'tv'].includes(candidate)) {
+            connectedHandle = '@' + candidate;
+            break;
+          }
+        }
+      }
+    } catch (e) {}
+
+    // Inject Floating Instagram Defense Widget
     const badge = document.createElement('div');
-    badge.id = 'autoviral-insta-badge';
+    badge.id = 'autoviral-insta-defense-badge';
     badge.innerHTML = `
-      <div style="position: fixed; bottom: 20px; left: 20px; z-index: 999999; background: #0f172a; color: #fff; padding: 8px 14px; border-radius: 9999px; font-family: sans-serif; font-size: 11px; font-weight: 700; border: 1px solid #c084fc; box-shadow: 0 4px 15px rgba(192, 132, 252, 0.4); display: flex; align-items: center; gap: 6px;">
-        <span style="display: inline-block; width: 8px; height: 8px; background: #10b981; border-radius: 50%;"></span>
-        <span>AutoViral AI • Stories com Link Clicável Conectado</span>
+      <div style="position: fixed; bottom: 20px; left: 20px; z-index: 999999; background: #090d16; color: #fff; padding: 12px 18px; border-radius: 16px; font-family: system-ui, -apple-system, sans-serif; font-size: 11px; font-weight: 700; border: 1px solid #a855f7; box-shadow: 0 10px 25px rgba(0,0,0,0.7), 0 0 15px rgba(168, 85, 247, 0.3); display: flex; flex-direction: column; gap: 8px; min-width: 250px;">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <span style="display: inline-block; width: 8px; height: 8px; background: #10b981; border-radius: 50%; box-shadow: 0 0 8px #10b981;"></span>
+            <span style="color: #c084fc; font-weight: 900;">AutoViral AI • Instagram</span>
+          </div>
+          <span style="font-size: 9px; background: rgba(16, 185, 129, 0.15); color: #34d399; padding: 2px 6px; border-radius: 6px; border: 1px solid rgba(16, 185, 129, 0.4);">
+            DEFESA ATIVA
+          </span>
+        </div>
+        <div style="font-size: 10px; color: #94a3b8;">
+          Conta Conectada: <strong style="color: #f1f5f9;">${connectedHandle}</strong>
+        </div>
+        <div style="font-size: 9px; color: #cbd5e1; line-height: 1.3;">
+          🛡️ Dispositivo de Defesa: Disparos humanizados pelo navegador com proteção contra bloqueios temporários da Meta.
+        </div>
+        <button id="btn-sync-insta-to-platform" style="background: linear-gradient(135deg, #9333ea, #c026d3); color: #fff; border: none; padding: 6px 12px; border-radius: 8px; font-size: 10px; font-weight: 800; cursor: pointer; transition: transform 0.1s;">
+          🚀 Sincronizar Conta com Painel AutoViral
+        </button>
       </div>
     `;
     if (document.body) {
@@ -396,9 +431,58 @@
       window.addEventListener('DOMContentLoaded', () => document.body.appendChild(badge));
     }
 
+    setTimeout(() => {
+      const btnSync = document.getElementById('btn-sync-insta-to-platform');
+      if (btnSync) {
+        btnSync.onclick = () => {
+          try {
+            const bc = new BroadcastChannel('autoviral_bridge_channel');
+            bc.postMessage({
+              action: 'AUTOVIRAL_INSTA_ACCOUNT_SYNC',
+              handle: connectedHandle,
+              url: window.location.href,
+              timestamp: new Date().toISOString()
+            });
+            setTimeout(() => bc.close(), 1000);
+          } catch (e) {}
+
+          if (chrome.runtime && chrome.runtime.sendMessage) {
+            chrome.runtime.sendMessage({
+              action: 'AUTOVIRAL_INSTA_ACCOUNT_SYNC',
+              handle: connectedHandle
+            });
+          }
+          alert(`✅ Conta ${connectedHandle} do Instagram sincronizada com o Painel AutoViral! As postagens usarão esta sessão do navegador com dispositivo de defesa ativo.`);
+        };
+      }
+    }, 1000);
+
+    // Defense Monitor: check for Meta restrictions or popups
+    setInterval(() => {
+      const pageText = document.body ? document.body.innerText : '';
+      if (
+        pageText.includes('Tente novamente mais tarde') ||
+        pageText.includes('Ação bloqueada') ||
+        pageText.includes('Action blocked') ||
+        pageText.includes('restringimos determinadas atividades')
+      ) {
+        console.warn('[AutoViral AI] 🛡️ ALERTA DE SEGURANÇA: Aviso de restrição temporária detectado no Instagram!');
+        try {
+          const bc = new BroadcastChannel('autoviral_bridge_channel');
+          bc.postMessage({
+            action: 'AUTOVIRAL_TRIGGER_DEFENSE_PAUSE',
+            platform: 'Instagram',
+            cooldownMinutes: 60,
+            timestamp: new Date().toISOString()
+          });
+          setTimeout(() => bc.close(), 1000);
+        } catch (e) {}
+      }
+    }, 5000);
+
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (request.action === 'AUTOVIRAL_INSTA_PING') {
-        sendResponse({ status: 'active', url: window.location.href, title: document.title });
+        sendResponse({ status: 'active', handle: connectedHandle, url: window.location.href, title: document.title });
       }
       return true;
     });

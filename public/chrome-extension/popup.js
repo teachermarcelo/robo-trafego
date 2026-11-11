@@ -49,6 +49,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const fbTab = tabs.find(t => (t.url || '').includes('facebook.com'));
     const ytTab = tabs.find(t => (t.url || '').includes('youtube.com'));
+    const pinTab = tabs.find(t => (t.url || '').includes('pinterest.com'));
+    const pinStatusEl = document.getElementById('pin-status');
 
     if (fbTab) {
       detectedFbTab = fbTab;
@@ -81,6 +83,16 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
       ytStatusEl.textContent = 'Aguardando YouTube';
       ytStatusEl.style.color = '#94a3b8';
+    }
+
+    if (pinStatusEl) {
+      if (pinTab) {
+        pinStatusEl.textContent = 'Aba Pinterest Aberta!';
+        pinStatusEl.style.color = '#10b981';
+      } else {
+        pinStatusEl.textContent = 'Pins & Pastas Prontos';
+        pinStatusEl.style.color = '#e11d48';
+      }
     }
   });
 

@@ -315,7 +315,30 @@
   }
 
   // =========================================================================
-  // 3. AUTOVIRAL PLATFORM RECEIVER
+  // 3. PINTEREST AUTOMATION & PIN DETECTOR
+  // =========================================================================
+  if (currentHost.includes('pinterest.com')) {
+    console.log('[AutoViral AI] Conectado ao Pinterest. Robô de Pins & Pastas Ativo.');
+
+    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+      if (request.action === 'AUTOVIRAL_PINTEREST_PING') {
+        sendResponse({ status: 'active', url: window.location.href, title: document.title });
+      } else if (request.action === 'AUTOVIRAL_PINTEREST_GET_BOARDS') {
+        // Collect visible board titles if on profile / boards page
+        const boardEls = document.querySelectorAll('div[data-test-id*="board-card"] h2, a[href*="/boards/"]');
+        const boards = [];
+        boardEls.forEach(b => {
+          const name = b.innerText.trim();
+          if (name && !boards.includes(name)) boards.push(name);
+        });
+        sendResponse({ success: true, boards: boards });
+      }
+      return true;
+    });
+  }
+
+  // =========================================================================
+  // 4. AUTOVIRAL PLATFORM RECEIVER
   // =========================================================================
   if (isAutoViral) {
     console.log('[AutoViral AI] Conectado à Plataforma AutoViral.');

@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
-  "name": "AutoViral AI - Mapeador de Grupos Facebook & Robô YouTube",
-  "version": "1.1.0",
-  "description": "Mapeia automaticamente grupos do Facebook conforme você rola a página de busca, sincroniza públicos com o painel AutoViral AI e automatiza postagens com intervalo anti-bloqueio (300s a 400s, até 500 disparos/dia) e automação de comentários/likes no YouTube.",
+  "name": "AutoViral AI - Mapeador FB, YouTube & Robô Pinterest",
+  "version": "1.2.0",
+  "description": "Mapeia automaticamente grupos do Facebook por rolagem, sincroniza públicos qualificados, automatiza postagens humanizadas (300s a 400s), engaja no YouTube e automatiza Pins virais no Pinterest.",
   "action": {
     "default_popup": "popup.html",
-    "default_title": "AutoViral AI - Mapeador FB & YouTube"
+    "default_title": "AutoViral AI - FB, YouTube & Pinterest"
   },
   "permissions": [
     "activeTab",
@@ -16,6 +16,7 @@
   "host_permissions": [
     "*://*.facebook.com/*",
     "*://*.youtube.com/*",
+    "*://*.pinterest.com/*",
     "*://*.kiwify.com.br/*",
     "*://localhost/*",
     "*://*.vercel.app/*",
@@ -28,7 +29,8 @@
     {
       "matches": [
         "*://*.facebook.com/*",
-        "*://*.youtube.com/*"
+        "*://*.youtube.com/*",
+        "*://*.pinterest.com/*"
       ],
       "js": ["content.js"],
       "run_at": "document_idle"

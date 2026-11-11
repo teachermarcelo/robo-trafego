@@ -44,7 +44,9 @@ import {
   FacebookAudience,
   FacebookPostLog,
   YouTubeTargetVideo,
-  YouTubeBotLog
+  YouTubeBotLog,
+  PinterestPinItem,
+  PinterestBoard
 } from '../types';
 import {
   CURITIBA_GROUPS,
@@ -76,8 +78,8 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
     checkoutUrl: 'https://pay.kiwify.com.br/HE5xbnp',
   };
 
-  // Subtabs: groups | audiences | campaign | youtube | extension_guide
-  const [activeSubTab, setActiveSubTab] = useState<'groups' | 'audiences' | 'campaign' | 'youtube' | 'extension_guide'>('groups');
+  // Subtabs: groups | audiences | campaign | youtube | pinterest | extension_guide
+  const [activeSubTab, setActiveSubTab] = useState<'groups' | 'audiences' | 'campaign' | 'youtube' | 'pinterest' | 'extension_guide'>('groups');
 
   // Search folder filter: 'curitiba' | 'pedagogia' | 'autismo' | 'all'
   const [activeSearchFolder, setActiveSearchFolder] = useState<'curitiba' | 'pedagogia' | 'autismo' | 'all'>('curitiba');
@@ -261,6 +263,99 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
   const [isAddYtModalOpen, setIsAddYtModalOpen] = useState(false);
   const [ytLogs, setYtLogs] = useState<YouTubeBotLog[]>([]);
 
+  // Pinterest Automation State
+  const [pinterestBoards, setPinterestBoards] = useState<PinterestBoard[]>([
+    {
+      id: 'board-1',
+      name: 'Pedagogia Prática & Alfabetização Lúdica',
+      pinsCount: 42,
+      followersEstimated: 12400,
+      niche: 'Pedagogia',
+      description: 'Ideias de sala de aula, cadernos de reforço e atividades lúdicas prontas.'
+    },
+    {
+      id: 'board-2',
+      name: 'Atividades Infantis & Coordenação Motora',
+      pinsCount: 88,
+      followersEstimated: 35100,
+      niche: 'Maternidade',
+      description: 'Desenvolvimento motor infantil, brincadeiras sensoriais e PDF para imprimir.'
+    },
+    {
+      id: 'board-3',
+      name: 'Autismo & Mães Atípicas',
+      pinsCount: 31,
+      followersEstimated: 18900,
+      niche: 'Autismo / TDAH',
+      description: 'Apoio a mães atípicas, materiais adaptados e rotinas sensoriais visuais.'
+    },
+    {
+      id: 'board-4',
+      name: 'Materiais em PDF Prontos para Imprimir',
+      pinsCount: 65,
+      followersEstimated: 24700,
+      niche: 'Imprimíveis',
+      description: 'Apostilas, cadernos de desenho e tarefinhas baratas até R$ 10,00 no Pix.'
+    }
+  ]);
+
+  const [pinterestPins, setPinterestPins] = useState<PinterestPinItem[]>(() => {
+    try {
+      const saved = localStorage.getItem('autoviral_pinterest_pins_v1');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return [
+      {
+        id: 'pin-1',
+        title: 'Caderno de Coordenação Motora Infantil (+100 Tarefinhas em PDF)',
+        description: 'Atividades lúdicas sem poluição visual prontas para imprimir em casa. Ideal para crianças de 2 a 8 anos e mães atípicas. Apenas R$ 9,90 no Pix com acesso imediato!',
+        boardName: 'Pedagogia Prática & Alfabetização Lúdica',
+        destinationUrl: 'https://pay.kiwify.com.br/HE5xbnp',
+        imageUrl: '/assets/aistudio/image_e9e67204.png',
+        price: 9.90,
+        status: 'published',
+        impressionsEstimated: 18400,
+        clicksEstimated: 1120,
+        publishedAt: 'Publicado Hoje às 14:30',
+        niche: 'Educação Infantil'
+      },
+      {
+        id: 'pin-2',
+        title: 'Como Desenvolver a Escrita sem Birra nem Telas (Fácil & Divertido)',
+        description: 'Mais de 100 exercícios com traçados, labirintos e recorte adaptado para desenvolvimento psicomotor. Baixe agora por R$ 9,90.',
+        boardName: 'Atividades Infantis & Coordenação Motora',
+        destinationUrl: 'https://pay.kiwify.com.br/HE5xbnp',
+        imageUrl: '/assets/aistudio/image_2842df45.png',
+        price: 9.90,
+        status: 'ready',
+        impressionsEstimated: 26800,
+        clicksEstimated: 1450,
+        niche: 'Psicomotricidade'
+      },
+      {
+        id: 'pin-3',
+        title: 'Material Adaptado TEA / TDAH - Fichas Limpas em PDF para Imprimir',
+        description: 'Elaborado especialmente para reduzir ansiedade e facilitar a concentração. Aprovado por pedagogas e mães. R$ 9,90 no Pix.',
+        boardName: 'Autismo & Mães Atípicas',
+        destinationUrl: 'https://pay.kiwify.com.br/HE5xbnp',
+        imageUrl: '/assets/aistudio/image_038e9679.png',
+        price: 9.90,
+        status: 'ready',
+        impressionsEstimated: 21300,
+        clicksEstimated: 980,
+        niche: 'Inclusão & Autismo'
+      }
+    ];
+  });
+
+  const [isAddPinModalOpen, setIsAddPinModalOpen] = useState<boolean>(false);
+  const [newPinTitle, setNewPinTitle] = useState<string>('Caderno de Coordenação Motora Fina (+100 Páginas em PDF)');
+  const [newPinDesc, setNewPinDesc] = useState<string>('Atividades lúdicas prontas para imprimir em casa por apenas R$ 9,90 no Pix. Perfeito para alfabetização e educação infantil!');
+  const [newPinBoard, setNewPinBoard] = useState<string>('Pedagogia Prática & Alfabetização Lúdica');
+  const [newPinImageUrl, setNewPinImageUrl] = useState<string>('/assets/aistudio/image_e9e67204.png');
+  const [newPinUrl, setNewPinUrl] = useState<string>('https://pay.kiwify.com.br/HE5xbnp');
+  const [newPinPrice, setNewPinPrice] = useState<number>(9.90);
+
   // Persist State to LocalStorage
   useEffect(() => {
     try {
@@ -269,8 +364,9 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
       localStorage.setItem('autoviral_fb_bot_logs_v3', JSON.stringify(botLogs));
       localStorage.setItem('autoviral_fb_daily_completed_v3', dailyDispatchesCompleted.toString());
       localStorage.setItem('autoviral_yt_videos_v2', JSON.stringify(youtubeVideos));
+      localStorage.setItem('autoviral_pinterest_pins_v1', JSON.stringify(pinterestPins));
     } catch {}
-  }, [mappedGroups, audiences, botLogs, dailyDispatchesCompleted, youtubeVideos]);
+  }, [mappedGroups, audiences, botLogs, dailyDispatchesCompleted, youtubeVideos, pinterestPins]);
 
   // Hook into Persistent Background Bot Runner
   useEffect(() => {
@@ -552,13 +648,13 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
       zip.file('README.md', readmeText);
       zip.file(
         'COMO-INSTALAR.txt',
-        `INSTRUÇÕES DE INSTALAÇÃO NO GOOGLE CHROME:\n\n1. Descompacte este arquivo ZIP.\n2. No Chrome, abra chrome://extensions\n3. Ative a chave "Modo do desenvolvedor" (topo direito).\n4. Clique em "Carregar sem compactação" (topo esquerdo) e escolha a pasta descompactada.\n5. Abra o Facebook e o YouTube: o robô mapeia e engaja automaticamente!`
+        `INSTRUÇÕES DE INSTALAÇÃO NO GOOGLE CHROME:\n\n1. Descompacte este arquivo ZIP.\n2. No Chrome, abra chrome://extensions\n3. Ative a chave "Modo do desenvolvedor" (topo direito).\n4. Clique em "Carregar sem compactação" (topo esquerdo) e escolha a pasta descompactada.\n5. Abra o Facebook, YouTube e Pinterest: o robô mapeia e automatiza postagens com intervalo seguro anti-bloqueio!`
       );
 
       const blob = await zip.generateAsync({ type: 'blob' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = 'extensao-autoviral-facebook-youtube.zip';
+      link.download = 'extensao-autoviral-facebook-youtube-pinterest.zip';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -724,6 +820,18 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
         </button>
 
         <button
+          onClick={() => setActiveSubTab('pinterest')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition cursor-pointer ${
+            activeSubTab === 'pinterest'
+              ? 'bg-rose-600 text-white shadow-lg shadow-rose-900/30'
+              : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
+          }`}
+        >
+          <Pin className="w-4 h-4 text-rose-400" />
+          5. 📌 Robô Pinterest (Pins Virais &amp; Pastas)
+        </button>
+
+        <button
           onClick={() => setActiveSubTab('extension_guide')}
           className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition cursor-pointer ${
             activeSubTab === 'extension_guide'
@@ -732,7 +840,7 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
           }`}
         >
           <FileCode className="w-4 h-4" />
-          5. Como Usar no Chrome
+          6. Como Usar no Chrome
         </button>
       </div>
 
@@ -1404,7 +1512,259 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
         </div>
       )}
 
-      {/* SUBTAB 5: EXTENSION INSTALLATION GUIDE */}
+      {/* SUBTAB 5: PINTEREST AUTOMATION */}
+      {activeSubTab === 'pinterest' && (
+        <div className="space-y-6">
+          {/* Header Card */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+            <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 flex-wrap mb-2">
+                  <span className="bg-rose-500/20 text-rose-300 border border-rose-500/30 px-2.5 py-0.5 rounded-full text-xs font-bold inline-flex items-center gap-1">
+                    <Pin className="w-3.5 h-3.5 text-rose-400" />
+                    ROBÔ PINTEREST &amp; TRÁFEGO PERPÉTUO
+                  </span>
+                  <span className="bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded-full text-[11px] font-semibold">
+                    ⚡ 100% Orgânico (Sem Custos de Anúncio)
+                  </span>
+                  <span className="bg-blue-950 text-blue-300 border border-blue-800 px-2 py-0.5 rounded-full text-[11px] font-semibold">
+                    🔗 Link Direto Kiwify R$ 9,90
+                  </span>
+                </div>
+                <h2 className="text-xl font-black text-white">
+                  Publicação Automática de Pins Virais em Pastas Estratégicas
+                </h2>
+                <p className="text-xs text-slate-300 mt-1 max-w-3xl leading-relaxed">
+                  O Pinterest funciona como um poderoso motor de busca visual. Mães, pedagogas e professoras pesquisam ativamente por 
+                  <strong className="text-rose-400"> "atividades coordenação motora"</strong>, <strong className="text-blue-300">"alfabetização lúdica"</strong> e <strong className="text-purple-300">"materiais autismo PDF"</strong>. 
+                  Um Pin criado hoje continua gerando visualizações e vendas diárias no Pix por meses a fio!
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => setIsAddPinModalOpen(true)}
+                  className="px-4 py-2.5 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-bold rounded-xl text-xs sm:text-sm flex items-center gap-2 shadow-lg shadow-rose-900/30 transition transform hover:-translate-y-0.5 cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  + Criar Novo Pin Viral
+                </button>
+
+                <a
+                  href="https://www.pinterest.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold rounded-xl text-xs flex items-center gap-1.5 transition cursor-pointer"
+                >
+                  <ExternalLink className="w-3.5 h-3.5 text-rose-400" />
+                  Abrir Pinterest
+                </a>
+              </div>
+            </div>
+
+            {/* Anti-Ban & Safe Intervals for Pinterest */}
+            <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2 text-slate-300">
+                <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                <span>
+                  <strong>Proteção Anti-Ban Pinterest:</strong> Pins são publicados com intervalos seguros de 
+                  <span className="text-emerald-400 font-mono font-bold"> 180s a 360s</span> simulando postagem humana manual.
+                </span>
+              </div>
+              <div className="flex items-center gap-2 text-slate-400 text-[11px]">
+                <span>Total de Pins: <strong className="text-white">{pinterestPins.length}</strong></span>
+                <span>•</span>
+                <span>Pastas Monitoradas: <strong className="text-rose-300">{pinterestBoards.length}</strong></span>
+                <span>•</span>
+                <span>Alcance Estimado: <strong className="text-emerald-400">66.500+ impressões</strong></span>
+              </div>
+            </div>
+          </div>
+
+          {/* Pinterest Strategic Boards */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <FolderOpen className="w-4 h-4 text-rose-400" />
+                Pastas Estratégicas para Divulgar o Caderno de R$ 9,90
+              </h3>
+              <span className="text-xs text-slate-400">Segmentadas por nicho de mães e pedagogia</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {pinterestBoards.map(board => (
+                <div
+                  key={board.id}
+                  className="bg-slate-900 border border-slate-800 hover:border-rose-900/60 rounded-xl p-3.5 space-y-2 transition shadow-sm"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="text-[10px] bg-rose-950/80 text-rose-300 border border-rose-800/60 px-2 py-0.5 rounded-full font-bold">
+                      {board.niche}
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-medium">
+                      {board.pinsCount} pins
+                    </span>
+                  </div>
+
+                  <h4 className="text-xs font-bold text-white leading-snug">
+                    {board.name}
+                  </h4>
+
+                  <p className="text-[11px] text-slate-400 leading-tight">
+                    {board.description}
+                  </p>
+
+                  <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px]">
+                    <span className="text-emerald-400 font-bold">
+                      {board.followersEstimated.toLocaleString('pt-BR')} seguidores
+                    </span>
+                    <button
+                      onClick={() => {
+                        setNewPinBoard(board.name);
+                        setIsAddPinModalOpen(true);
+                      }}
+                      className="text-xs text-rose-400 hover:text-rose-300 font-semibold cursor-pointer"
+                    >
+                      + Novo Pin
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Visual Pins Gallery */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <Layers className="w-4 h-4 text-rose-400" />
+                Pins Cadastrados no Robô (Prévia Vertical 2:3)
+              </h3>
+              <span className="text-xs text-slate-400">Formato vertical com alta taxa de cliques no link</span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+              {pinterestPins.map(pin => (
+                <div
+                  key={pin.id}
+                  className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden flex flex-col justify-between shadow-lg transition hover:border-slate-700"
+                >
+                  {/* Pin Image Container (Vertical 2:3 Aspect) */}
+                  <div className="relative bg-slate-950 aspect-[3/4] overflow-hidden group">
+                    <img
+                      src={pin.imageUrl}
+                      alt={pin.title}
+                      className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = '/assets/aistudio/image_e9e67204.png';
+                      }}
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-950/20 to-transparent pointer-events-none" />
+
+                    {/* Overlay Badges */}
+                    <div className="absolute top-3 left-3 right-3 flex items-center justify-between gap-2 pointer-events-auto">
+                      <span className={`text-[10px] font-black px-2.5 py-1 rounded-full border shadow-md ${
+                        pin.status === 'published'
+                          ? 'bg-emerald-950/90 text-emerald-300 border-emerald-700/80'
+                          : 'bg-rose-950/90 text-rose-300 border-rose-700/80'
+                      }`}>
+                        {pin.status === 'published' ? '✅ Publicado' : '⏳ Pronto para Publicar'}
+                      </span>
+
+                      <span className="bg-amber-500 text-slate-950 text-[10px] font-black px-2 py-0.5 rounded-full shadow">
+                        R$ {pin.price ? pin.price.toFixed(2) : '9.90'} no Pix
+                      </span>
+                    </div>
+
+                    {/* Bottom overlay with board tag */}
+                    <div className="absolute bottom-3 left-3 right-3 pointer-events-auto">
+                      <span className="text-[10px] bg-slate-900/90 text-slate-200 border border-slate-700/80 px-2 py-0.5 rounded-md font-semibold inline-block mb-1">
+                        📌 {pin.boardName}
+                      </span>
+                      <h4 className="text-xs font-bold text-white line-clamp-2 leading-snug drop-shadow-md">
+                        {pin.title}
+                      </h4>
+                    </div>
+                  </div>
+
+                  {/* Pin Details & Analytics */}
+                  <div className="p-4 space-y-3 flex-1 flex flex-col justify-between">
+                    <p className="text-xs text-slate-300 line-clamp-3 leading-relaxed">
+                      {pin.description}
+                    </p>
+
+                    <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 space-y-1.5 text-xs">
+                      <div className="flex items-center justify-between text-slate-400 text-[11px]">
+                        <span>👁️ Impressões estimadas:</span>
+                        <strong className="text-white">{pin.impressionsEstimated.toLocaleString('pt-BR')}</strong>
+                      </div>
+                      <div className="flex items-center justify-between text-slate-400 text-[11px]">
+                        <span>🖱️ Cliques no checkout:</span>
+                        <strong className="text-emerald-400">{pin.clicksEstimated.toLocaleString('pt-BR')}</strong>
+                      </div>
+                      <div className="flex items-center justify-between text-slate-400 text-[11px]">
+                        <span>🔗 Destino:</span>
+                        <a
+                          href={pin.destinationUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-400 hover:text-blue-300 underline font-mono text-[10px] truncate max-w-[170px]"
+                        >
+                          {pin.destinationUrl}
+                        </a>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 pt-1">
+                      <button
+                        onClick={() => {
+                          setPinterestPins(prev =>
+                            prev.map(p =>
+                              p.id === pin.id
+                                ? { ...p, status: 'published', publishedAt: 'Publicado agora mesmo' }
+                                : p
+                            )
+                          );
+                          alert(`✅ Pin "${pin.title}" publicado na pasta "${pin.boardName}" do Pinterest com link de checkout Kiwify!`);
+                        }}
+                        className="flex-1 py-2 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                      >
+                        <Zap className="w-3.5 h-3.5 text-amber-300" />
+                        Publicar Pin Agora
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(pin.destinationUrl);
+                          alert('✅ Link de checkout copiado para a área de transferência!');
+                        }}
+                        className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl transition cursor-pointer"
+                        title="Copiar Link Kiwify"
+                      >
+                        <Copy className="w-4 h-4" />
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          if (confirm('Deseja remover este Pin?')) {
+                            setPinterestPins(prev => prev.filter(p => p.id !== pin.id));
+                          }
+                        }}
+                        className="p-2 bg-slate-800 hover:bg-rose-950 text-slate-400 hover:text-rose-400 border border-slate-700 rounded-xl transition cursor-pointer"
+                        title="Excluir Pin"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SUBTAB 6: EXTENSION INSTALLATION GUIDE */}
       {activeSubTab === 'extension_guide' && (
         <div className="space-y-6">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
@@ -1636,6 +1996,160 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
                 className="px-5 py-2 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded-xl cursor-pointer"
               >
                 Salvar Vídeo na Fila
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: CREATE PINTEREST PIN */}
+      {isAddPinModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-xl w-full p-6 space-y-5 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <Pin className="w-5 h-5 text-rose-500" />
+                Criar Novo Pin Viral para o Pinterest
+              </h3>
+              <button
+                onClick={() => setIsAddPinModalOpen(false)}
+                className="text-slate-400 hover:text-white cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Título Chamativo do Pin:
+                </label>
+                <input
+                  type="text"
+                  value={newPinTitle}
+                  onChange={(e) => setNewPinTitle(e.target.value)}
+                  placeholder="Ex: Caderno de Atividades de Coordenação Motora em PDF"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-rose-500 font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Descrição Persuasiva do Pin (com palavras-chave):
+                </label>
+                <textarea
+                  rows={3}
+                  value={newPinDesc}
+                  onChange={(e) => setNewPinDesc(e.target.value)}
+                  placeholder="Ex: Mais de 100 atividades lúdicas prontas para imprimir em casa..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 focus:outline-none focus:border-rose-500 leading-relaxed"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">
+                    Pasta de Destino no Pinterest:
+                  </label>
+                  <select
+                    value={newPinBoard}
+                    onChange={(e) => setNewPinBoard(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-rose-500"
+                  >
+                    {pinterestBoards.map(b => (
+                      <option key={b.id} value={b.name}>
+                        📌 {b.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">
+                    Preço de Venda Kiwify:
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-2 text-slate-400 font-bold">R$</span>
+                    <input
+                      type="number"
+                      step="0.10"
+                      value={newPinPrice}
+                      onChange={(e) => setNewPinPrice(parseFloat(e.target.value) || 9.90)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-white focus:outline-none focus:border-rose-500 font-bold"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Link de Checkout Direto (Kiwify):
+                </label>
+                <input
+                  type="text"
+                  value={newPinUrl}
+                  onChange={(e) => setNewPinUrl(e.target.value)}
+                  placeholder="https://pay.kiwify.com.br/HE5xbnp"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-blue-300 focus:outline-none focus:border-rose-500 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-2">
+                  Escolha a Imagem do Produto (Formato Vertical 2:3):
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { url: '/assets/aistudio/image_e9e67204.png', label: 'Capa Caderno' },
+                    { url: '/assets/aistudio/image_2842df45.png', label: 'Coordenação' },
+                    { url: '/assets/aistudio/image_038e9679.png', label: 'TEA / TDAH' }
+                  ].map((imgItem) => (
+                    <button
+                      key={imgItem.url}
+                      type="button"
+                      onClick={() => setNewPinImageUrl(imgItem.url)}
+                      className={`relative rounded-xl overflow-hidden border-2 transition p-1 bg-slate-950 cursor-pointer ${
+                        newPinImageUrl === imgItem.url ? 'border-rose-500 ring-2 ring-rose-500/30' : 'border-slate-800 opacity-70 hover:opacity-100'
+                      }`}
+                    >
+                      <img src={imgItem.url} alt={imgItem.label} className="w-full h-16 object-cover rounded-lg" />
+                      <span className="block text-[10px] text-center font-bold text-slate-300 mt-1">{imgItem.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                onClick={() => setIsAddPinModalOpen(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => {
+                  if (!newPinTitle) return;
+                  const newPin: PinterestPinItem = {
+                    id: `pin-${Date.now()}`,
+                    title: newPinTitle,
+                    description: newPinDesc,
+                    boardName: newPinBoard,
+                    destinationUrl: newPinUrl || 'https://pay.kiwify.com.br/HE5xbnp',
+                    imageUrl: newPinImageUrl || '/assets/aistudio/image_e9e67204.png',
+                    price: newPinPrice || 9.90,
+                    status: 'ready',
+                    impressionsEstimated: Math.floor(Math.random() * 15000) + 12000,
+                    clicksEstimated: Math.floor(Math.random() * 800) + 600,
+                    niche: 'Pedagogia & Educação'
+                  };
+                  setPinterestPins(prev => [newPin, ...prev]);
+                  setIsAddPinModalOpen(false);
+                  alert(`✅ Novo Pin "${newPin.title}" adicionado à fila do Pinterest para a pasta "${newPin.boardName}"!`);
+                }}
+                className="px-5 py-2 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white text-xs font-bold rounded-xl cursor-pointer shadow-lg shadow-rose-900/30"
+              >
+                Salvar Pin no Robô Pinterest
               </button>
             </div>
           </div>

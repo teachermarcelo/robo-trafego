@@ -229,3 +229,27 @@ export interface YouTubeBotLog {
   status: 'success' | 'error';
 }
 
+export interface PinterestPinItem {
+  id: string;
+  title: string;
+  description: string;
+  boardName: string;
+  destinationUrl: string;
+  imageUrl: string;
+  price?: number;
+  status: 'ready' | 'published' | 'scheduled';
+  impressionsEstimated: number;
+  clicksEstimated: number;
+  publishedAt?: string;
+  niche: string;
+}
+
+export interface PinterestBoard {
+  id: string;
+  name: string;
+  pinsCount: number;
+  followersEstimated: number;
+  niche: string;
+  description: string;
+}
+

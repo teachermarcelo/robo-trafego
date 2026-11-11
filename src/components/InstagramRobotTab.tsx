@@ -676,13 +676,24 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
         </div>
       </div>
 
-      {/* Metrics Counters Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
-          <span className="text-slate-400 text-xs uppercase font-bold flex items-center gap-1.5">
-            <Instagram className="w-4 h-4 text-purple-400" />
-            Stories Postados Hoje
+      {/* Metrics Counters Grid with Transparency Notice */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between text-xs px-1">
+          <span className="text-slate-400 flex items-center gap-1.5 font-medium">
+            <TrendingUp className="w-3.5 h-3.5 text-rose-400" />
+            Painel de Desempenho dos Stories
           </span>
+          <span className="bg-amber-500/10 text-amber-300 border border-amber-500/30 px-2.5 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1">
+            ⚠️ Projeção Estimada de Alcance • Para cliques 100% auditados, veja a Aba 9 (Radar de Links)
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+            <span className="text-slate-400 text-xs uppercase font-bold flex items-center gap-1.5">
+              <Instagram className="w-4 h-4 text-purple-400" />
+              Stories Postados Hoje
+            </span>
           <div className="text-2xl font-black text-white mt-1">
             {publishedCount} stories
           </div>
@@ -730,8 +741,9 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
           </div>
         </div>
       </div>
+    </div>
 
-      {/* SUBTAB 1: Stories Queue & Dispatch */}
+    {/* SUBTAB 1: Stories Queue & Dispatch */}
       {activeSubTab === 'stories' && (
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">

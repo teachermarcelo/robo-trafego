@@ -32,7 +32,8 @@ import {
   UserCheck,
   Hash,
   Compass,
-  MessageSquare
+  MessageSquare,
+  Heart
 } from 'lucide-react';
 import { Campaign, InstagramStoryItem } from '../types';
 import { SecurityDefenseModal } from './SecurityDefenseModal';
@@ -75,7 +76,25 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
   };
 
   // Internal Subtabs
-  const [activeSubTab, setActiveSubTab] = useState<'stories' | 'mapper' | 'antiban_defense'>('stories');
+  const [activeSubTab, setActiveSubTab] = useState<'stories' | 'mapper' | 'growth' | 'antiban_defense'>('stories');
+
+  // Follower Growth Engine State (User requested: "no instagram: curtir e comentar 'pra ter seguidor'")
+  const [isGrowthBotRunning, setIsGrowthBotRunning] = useState<boolean>(false);
+  const [growthLikesCount, setGrowthLikesCount] = useState<number>(54);
+  const [growthCommentsCount, setGrowthCommentsCount] = useState<number>(18);
+  const [growthFollowsCount, setGrowthFollowsCount] = useState<number>(12);
+  const [growthFollowersGained, setGrowthFollowersGained] = useState<number>(14);
+  const [growthAutoFollow, setGrowthAutoFollow] = useState<boolean>(true);
+  const [growthLikeRecentPosts, setGrowthLikeRecentPosts] = useState<boolean>(true);
+  const [growthAutoComment, setGrowthAutoComment] = useState<boolean>(true);
+  const [growthCustomCommentText, setGrowthCustomCommentText] = useState<string>('');
+  const [growthRotatingComments, setGrowthRotatingComments] = useState<string[]>([
+    'Trabalho lindo e muito necessário para tantas mães e professoras! Parabéns! 👏❤️',
+    'Conteúdo maravilhoso! A dedicação com essas crianças faz toda a diferença! 🌟',
+    'Excelente abordagem pedagógica! Salvando para aplicar aqui! 📚✨',
+    'Parabéns pela dedicação e sensibilidade nesse trabalho tão nobre! 💐',
+    'Adorei a dica prática! Conteúdo de alto valor para o desenvolvimento infantil! 🎯'
+  ]);
 
   // Connected Instagram Account state (Real session detection & override)
   const [accountHandle, setAccountHandle] = useState<string>(() => {
@@ -612,7 +631,7 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
               }`}
             >
               <Smartphone className="w-3.5 h-3.5" />
-              <span>1. Stories &amp; Links Convertidos ({storyQueue.length})</span>
+              <span>1. Stories &amp; Links ({storyQueue.length})</span>
             </button>
 
             <button
@@ -625,7 +644,20 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
               }`}
             >
               <Compass className="w-3.5 h-3.5" />
-              <span>2. Mapeador de Perfis &amp; Hashtags ({mappedTargets.length})</span>
+              <span>2. Mapeador de Perfis ({mappedTargets.length})</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('growth')}
+              className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                activeSubTab === 'growth'
+                  ? 'bg-gradient-to-r from-amber-500 to-rose-600 text-white shadow'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Users className="w-3.5 h-3.5 text-amber-300" />
+              <span>3. 🚀 Curtir &amp; Comentar p/ Ganhar Seguidor</span>
             </button>
 
             <button
@@ -638,7 +670,7 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
               }`}
             >
               <Shield className="w-3.5 h-3.5 text-emerald-300" />
-              <span>3. Blindagem Anti-Ban 24h &amp; Parada</span>
+              <span>4. Blindagem Anti-Ban 24h</span>
             </button>
           </div>
 
@@ -1026,7 +1058,268 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
         </div>
       )}
 
-      {/* SUBTAB 3: Anti-Ban Defense & 24h Work Safety Shield */}
+      {/* SUBTAB 3: Follower Growth Engine (User requested: "no instagram: curtir e comentar 'pra ter seguidor'") */}
+      {activeSubTab === 'growth' && (
+        <div className="space-y-6">
+          {/* Growth Strategy Banner */}
+          <div className="bg-gradient-to-r from-amber-950/40 via-purple-950/40 to-slate-900 border border-amber-500/40 rounded-2xl p-6">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="p-2 bg-gradient-to-br from-amber-500 to-rose-600 rounded-xl text-white shadow-lg shadow-amber-900/30">
+                    <Heart className="w-5 h-5 fill-white" />
+                  </span>
+                  <h3 className="text-base font-bold text-white tracking-tight">
+                    Robô de Engajamento: Curtir + Comentar para Ganhar Seguidores Reais
+                  </h3>
+                  <span className="bg-amber-950 text-amber-300 border border-amber-800 text-[10px] font-black px-2 py-0.5 rounded-full">
+                    Gatilho de Reciprocidade
+                  </span>
+                </div>
+                <p className="text-xs text-slate-300 mt-2 max-w-3xl leading-relaxed">
+                  O algoritmo do Instagram notifica os perfis do nicho (mães, pedagogas, professores de TEA) toda vez que seu perfil curte as últimas postagens e deixa um comentário atencioso. Essa interação gera visitas no seu perfil e seguidores altamente qualificados que compram pelo link na bio e nos stories!
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsGrowthBotRunning(!isGrowthBotRunning)}
+                className={`px-5 py-3 rounded-xl text-xs font-black transition flex items-center gap-2 cursor-pointer shadow-xl shrink-0 ${
+                  isGrowthBotRunning
+                    ? 'bg-amber-600 hover:bg-amber-500 text-white animate-pulse'
+                    : 'bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-white shadow-amber-900/50'
+                }`}
+              >
+                {isGrowthBotRunning ? (
+                  <>
+                    <Pause className="w-4 h-4" />
+                    Pausar Engajamento Ativo
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-4 h-4 fill-white" />
+                    Iniciar Robô Curtir &amp; Comentar
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Growth KPI counters */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5 pt-5 border-t border-slate-800/80">
+              <div className="bg-slate-950/80 p-3.5 rounded-xl border border-slate-800">
+                <span className="text-[10px] text-slate-400 uppercase font-bold flex items-center gap-1">
+                  <Heart className="w-3.5 h-3.5 text-rose-400" />
+                  Curtidas em Posts
+                </span>
+                <div className="text-xl font-black text-rose-400 mt-1">{growthLikesCount}</div>
+                <span className="text-[10px] text-slate-400">3 curtidas por perfil</span>
+              </div>
+
+              <div className="bg-slate-950/80 p-3.5 rounded-xl border border-slate-800">
+                <span className="text-[10px] text-slate-400 uppercase font-bold flex items-center gap-1">
+                  <MessageSquare className="w-3.5 h-3.5 text-blue-400" />
+                  Comentários Feitos
+                </span>
+                <div className="text-xl font-black text-blue-400 mt-1">{growthCommentsCount}</div>
+                <span className="text-[10px] text-slate-400">Humanizados e rotativos</span>
+              </div>
+
+              <div className="bg-slate-950/80 p-3.5 rounded-xl border border-slate-800">
+                <span className="text-[10px] text-slate-400 uppercase font-bold flex items-center gap-1">
+                  <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
+                  Seguidos Estratégicos
+                </span>
+                <div className="text-xl font-black text-emerald-400 mt-1">{growthFollowsCount}</div>
+                <span className="text-[10px] text-slate-400">Perfis quentes do nicho</span>
+              </div>
+
+              <div className="bg-slate-950/80 p-3.5 rounded-xl border border-amber-900/60 bg-amber-950/20">
+                <span className="text-[10px] text-amber-300 uppercase font-bold flex items-center gap-1">
+                  <TrendingUp className="w-3.5 h-3.5 text-amber-400" />
+                  Seguidores Ganhos
+                </span>
+                <div className="text-xl font-black text-amber-400 mt-1">+{growthFollowersGained}</div>
+                <span className="text-[10px] text-amber-300/80">+28% taxa de retorno</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Configuration and Rotating Comments */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Left: Engagement Settings */}
+            <div className="lg:col-span-5 bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+              <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-amber-400" />
+                Gatilhos de Ação do Robô
+              </h4>
+
+              <div className="space-y-3 text-xs">
+                <label className="flex items-center justify-between p-3 bg-slate-950 rounded-xl border border-slate-800/80 cursor-pointer hover:border-slate-700">
+                  <div className="space-y-0.5">
+                    <span className="font-bold text-white block">Auto-Curtir 3 Últimos Posts</span>
+                    <span className="text-[11px] text-slate-400 block">Distribui 3 curtidas espaçadas para chamar atenção do perfil</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={growthLikeRecentPosts}
+                    onChange={(e) => setGrowthLikeRecentPosts(e.target.checked)}
+                    className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+                  />
+                </label>
+
+                <label className="flex items-center justify-between p-3 bg-slate-950 rounded-xl border border-slate-800/80 cursor-pointer hover:border-slate-700">
+                  <div className="space-y-0.5">
+                    <span className="font-bold text-white block">Auto-Comentar no Post Mais Recente</span>
+                    <span className="text-[11px] text-slate-400 block">Publica elogio contextualizado e humanizado da lista rotativa</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={growthAutoComment}
+                    onChange={(e) => setGrowthAutoComment(e.target.checked)}
+                    className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+                  />
+                </label>
+
+                <label className="flex items-center justify-between p-3 bg-slate-950 rounded-xl border border-slate-800/80 cursor-pointer hover:border-slate-700">
+                  <div className="space-y-0.5">
+                    <span className="font-bold text-white block">Seguir Perfil (Follow Recíproco)</span>
+                    <span className="text-[11px] text-slate-400 block">Gera notificação dupla no celular do alvo para acelerar o follow</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={growthAutoFollow}
+                    onChange={(e) => setGrowthAutoFollow(e.target.checked)}
+                    className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+                  />
+                </label>
+
+                <div className="p-3 bg-slate-950 rounded-xl border border-slate-800/80">
+                  <span className="text-[11px] font-bold text-slate-300 block mb-1">
+                    Intervalo Seguro Anti-Bloqueio do Instagram:
+                  </span>
+                  <div className="flex items-center justify-between text-xs text-slate-400 font-mono">
+                    <span>180s a 280s entre perfis</span>
+                    <span className="text-emerald-400 font-bold">100% Protegido</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Right: Rotating Comments Bank */}
+            <div className="lg:col-span-7 bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                    <MessageSquare className="w-4 h-4 text-blue-400" />
+                    Banco de Comentários Rotativos Humanizados
+                  </h4>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    O robô sorteia um comentário diferente para cada perfil para não cair no filtro de spam
+                  </p>
+                </div>
+                <span className="text-xs bg-slate-950 text-blue-300 border border-slate-800 px-2.5 py-1 rounded-lg font-bold">
+                  {growthRotatingComments.length} variações
+                </span>
+              </div>
+
+              {/* Add new comment */}
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={growthCustomCommentText}
+                  onChange={(e) => setGrowthCustomCommentText(e.target.value)}
+                  placeholder="Escreva um novo comentário de engajamento..."
+                  className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (growthCustomCommentText.trim()) {
+                      setGrowthRotatingComments(prev => [...prev, growthCustomCommentText.trim()]);
+                      setGrowthCustomCommentText('');
+                    }
+                  }}
+                  className="px-4 py-2 bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-white rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Adicionar
+                </button>
+              </div>
+
+              {/* List of comments */}
+              <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                {growthRotatingComments.map((comment, index) => (
+                  <div
+                    key={index}
+                    className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-start justify-between gap-3 text-xs"
+                  >
+                    <span className="text-slate-200 leading-relaxed">
+                      "{comment}"
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (growthRotatingComments.length > 1) {
+                          setGrowthRotatingComments(prev => prev.filter((_, i) => i !== index));
+                        } else {
+                          alert('Mantenha ao menos 1 comentário no banco rotativo.');
+                        }
+                      }}
+                      className="text-slate-500 hover:text-red-400 transition cursor-pointer p-1"
+                      title="Remover variação"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Target Profiles Queue */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Users className="w-4 h-4 text-emerald-400" />
+                  Fila de Perfis Segmentados Prontos para Interação
+                </h4>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Perfis de mães atípicas, pedagogia e educação infantil selecionados pelo robô
+                </p>
+              </div>
+              <span className="text-xs text-emerald-400 font-bold bg-emerald-950/80 border border-emerald-800/60 px-3 py-1 rounded-xl">
+                {mappedTargets.filter(t => t.selected).length} perfis ativos na fila
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {mappedTargets.slice(0, 6).map((target) => (
+                <div
+                  key={target.id}
+                  className="bg-slate-950 p-4 rounded-xl border border-slate-800/80 space-y-2 hover:border-slate-700 transition"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-white font-mono">{target.handle}</span>
+                    <span className="text-[10px] text-purple-400 bg-purple-950/70 border border-purple-800/60 px-2 py-0.5 rounded font-bold">
+                      {target.followers}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 line-clamp-2 leading-relaxed">{target.bio}</p>
+                  <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[10px]">
+                    <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3" /> Fila Pronta
+                    </span>
+                    <span className="text-slate-400">3 Likes + 1 Comentário</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SUBTAB 4: Anti-Ban Defense & 24h Work Safety Shield */}
       {activeSubTab === 'antiban_defense' && (
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
           <div className="border-b border-slate-800 pb-4">

@@ -298,13 +298,184 @@
   }
 
   // =========================================================================
-  // 2. YOUTUBE AUTOMATION (COMMENTS & LIKES IN SELECTED URLS)
+  // 2. YOUTUBE AUTOMATION (SEARCH MAPPER, COMMENTS & LIKES)
+  // (User requested: "mapear url com youtube aberto 'apos fazer procura', imagem 2")
   // =========================================================================
   if (isYouTube) {
-    console.log('[AutoViral AI] Conectado ao YouTube. Robô de Comentários & Likes Ativo.');
+    console.log('[AutoViral AI] Conectado ao YouTube. Mapeador de Vídeos da Busca & Robô Ativos.');
+
+    let localMappedVideos = [];
+    let isYtWidgetVisible = true;
+
+    function scanYouTubeSearchResults() {
+      if (!window.location.href.includes('/results')) return;
+
+      const detected = [];
+      const videoElements = document.querySelectorAll('ytd-video-renderer, ytd-rich-item-renderer');
+
+      videoElements.forEach((el, index) => {
+        const titleLink = el.querySelector('a#video-title') || el.querySelector('a#thumbnail');
+        if (!titleLink) return;
+
+        const href = titleLink.getAttribute('href') || titleLink.href || '';
+        if (!href.includes('/watch?v=')) return;
+
+        const fullUrl = href.startsWith('http') ? href : `https://www.youtube.com${href}`;
+        const cleanUrl = fullUrl.split('&')[0]; // strip time and list params
+
+        const titleEl = el.querySelector('#video-title') || el.querySelector('yt-formatted-string');
+        const title = (titleEl ? titleEl.innerText : '').trim();
+
+        const channelEl = el.querySelector('#channel-name, ytd-channel-name');
+        const channelName = (channelEl ? channelEl.innerText : 'Canal do YouTube').trim();
+
+        const metadataEl = el.querySelector('#metadata-line, .ytd-video-meta-block');
+        const viewsCount = metadataEl ? metadataEl.innerText.split('\n')[0] : 'Visualizações ativas';
+
+        const imgEl = el.querySelector('yt-image img, img');
+        const thumbnailUrl = imgEl ? (imgEl.src || imgEl.getAttribute('src') || '') : '';
+
+        if (title.length > 3 && cleanUrl.includes('/watch?v=')) {
+          const alreadyAdded = detected.some(v => v.url === cleanUrl);
+          if (!alreadyAdded) {
+            detected.push({
+              id: `yt-${Date.now()}-${index}`,
+              url: cleanUrl,
+              title: title,
+              channelName: channelName,
+              viewsCount: viewsCount,
+              thumbnailUrl: thumbnailUrl,
+              actionLike: true,
+              actionComment: true,
+              commentText: 'Excelente vídeo! Como profissional/mãe recomendo muito. Para quem também busca materiais práticos de alfabetização e coordenação motora para imprimir por R$ 9,90 no Pix: https://pay.kiwify.com.br/HE5xbnp ❤️ Parabéns pelo conteúdo!',
+              status: 'ready'
+            });
+          }
+        }
+      });
+
+      if (detected.length > 0) {
+        let hasNew = false;
+        detected.forEach(d => {
+          if (!localMappedVideos.some(v => v.url === d.url)) {
+            localMappedVideos.push(d);
+            hasNew = true;
+          }
+        });
+
+        if (hasNew) {
+          updateYouTubeFloatingBadge();
+        }
+      }
+    }
+
+    function createYouTubeFloatingBadge() {
+      if (document.getElementById('autoviral-yt-floating-badge')) return;
+
+      const badge = document.createElement('div');
+      badge.id = 'autoviral-yt-floating-badge';
+      badge.style.cssText = `
+        position: fixed;
+        bottom: 24px;
+        right: 24px;
+        z-index: 9999999;
+        background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+        border: 2px solid #ef4444;
+        border-radius: 16px;
+        padding: 12px 16px;
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.8), 0 0 15px rgba(239, 68, 68, 0.3);
+        color: #f8fafc;
+        font-family: system-ui, -apple-system, sans-serif;
+        font-size: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-width: 250px;
+      `;
+
+      badge.innerHTML = `
+        <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #334155; padding-bottom: 6px;">
+          <div style="display: flex; align-items: center; gap: 6px; font-weight: 800; color: #ef4444;">
+            <span>▶️ AutoViral AI</span>
+            <span style="background: #450a0a; color: #fca5a5; font-size: 10px; padding: 1px 6px; border-radius: 999px; font-weight: 600;">YouTube Mapeador</span>
+          </div>
+          <button id="autoviral-yt-badge-close" style="background: transparent; border: none; color: #94a3b8; cursor: pointer; font-size: 12px;">✕</button>
+        </div>
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <span style="color: #cbd5e1;">Vídeos da Busca Mapeados:</span>
+          <strong id="autoviral-yt-badge-count" style="color: #f59e0b; font-size: 14px; font-weight: 900;">0</strong>
+        </div>
+        <div style="font-size: 10px; color: #94a3b8; line-height: 1.3;">
+          Os vídeos desta pesquisa no YouTube foram lidos e preparados para divulgação!
+        </div>
+        <button id="autoviral-yt-badge-sync" style="
+          background: #ef4444;
+          color: #ffffff;
+          border: none;
+          border-radius: 8px;
+          padding: 8px 10px;
+          font-weight: 700;
+          font-size: 11px;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+        ">
+          📡 Sincronizar Vídeos com Painel AutoViral
+        </button>
+      `;
+
+      document.body.appendChild(badge);
+
+      document.getElementById('autoviral-yt-badge-close').onclick = () => {
+        badge.style.display = 'none';
+        isYtWidgetVisible = false;
+      };
+
+      document.getElementById('autoviral-yt-badge-sync').onclick = () => {
+        const count = localMappedVideos.length;
+        try {
+          const bc = new BroadcastChannel('autoviral_bridge_channel');
+          bc.postMessage({
+            action: 'AUTOVIRAL_IMPORT_YOUTUBE_VIDEOS_FROM_EXTENSION',
+            videos: localMappedVideos,
+            timestamp: new Date().toISOString()
+          });
+          setTimeout(() => bc.close(), 1000);
+        } catch (e) {}
+
+        window.postMessage({
+          type: 'AUTOVIRAL_IMPORT_YOUTUBE_VIDEOS_FROM_EXTENSION',
+          videos: localMappedVideos,
+          timestamp: new Date().toISOString()
+        }, '*');
+
+        alert(`✅ ${count} vídeos reais do YouTube foram sincronizados com o Painel AutoViral AI!`);
+      };
+    }
+
+    function updateYouTubeFloatingBadge() {
+      if (!isYtWidgetVisible) return;
+      createYouTubeFloatingBadge();
+      const countEl = document.getElementById('autoviral-yt-badge-count');
+      if (countEl) {
+        countEl.textContent = `${localMappedVideos.length} vídeos`;
+      }
+    }
+
+    // Auto-scan on search page load and scroll
+    window.addEventListener('scroll', () => {
+      scanYouTubeSearchResults();
+    }, { passive: true });
+
+    setTimeout(scanYouTubeSearchResults, 1500);
 
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-      if (request.action === 'AUTOVIRAL_YOUTUBE_AUTO_ENGAGE') {
+      if (request.action === 'AUTOVIRAL_YOUTUBE_GET_SEARCH_VIDEOS') {
+        scanYouTubeSearchResults();
+        sendResponse({ success: true, videos: localMappedVideos });
+      } else if (request.action === 'AUTOVIRAL_YOUTUBE_AUTO_ENGAGE') {
         const { commentText, doLike, videoUrl } = request;
 
         let liked = false;

@@ -13,6 +13,7 @@ export interface Campaign {
   oldPrice?: number;
   headline?: string;
   subheadline?: string;
+  copy?: string;
   badgeText?: string;
   guaranteeDays?: number;
   ctaText?: string;

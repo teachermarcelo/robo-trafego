@@ -588,6 +588,113 @@ export default function App() {
     fetch(`/api/customers/${id}`, { method: 'DELETE' }).catch(() => {});
   };
 
+  // Global background bridge: persist Instagram profiles & YouTube URLs from Chrome Extension regardless of active tab
+  useEffect(() => {
+    const persistInstaAccounts = (accounts: any[], connectedHandle?: string, sourceUrl?: string) => {
+      if (connectedHandle && connectedHandle !== '@conectado') {
+        const cleanOrig = '@' + String(connectedHandle).replace(/^@+/, '').toLowerCase();
+        try {
+          localStorage.setItem('autoviral_insta_handle', cleanOrig);
+        } catch {}
+      }
+      if (!Array.isArray(accounts) || accounts.length === 0) return;
+
+      // 1. Save into InstagramRobotTab list (autoviral_insta_mapped_targets_v2)
+      try {
+        const existingRaw = localStorage.getItem('autoviral_insta_mapped_targets_v2');
+        const existing: any[] = existingRaw ? JSON.parse(existingRaw) : [];
+        const byHandle = new Map<string, any>();
+        existing.forEach((item) => {
+          if (item?.handle) byHandle.set(String(item.handle).toLowerCase(), item);
+        });
+        accounts.forEach((acc, i) => {
+          const uname = String(acc.username || acc.handle || '').replace(/^@+/, '').trim().toLowerCase();
+          if (!uname) return;
+          const handle = '@' + uname;
+          if (!byHandle.has(handle)) {
+            byHandle.set(handle, {
+              id: `ext-ig-${uname}-${Date.now()}-${i}`,
+              handle,
+              name: acc.name || uname,
+              followers: acc.followers || 'Conta Real (Chrome)',
+              bio: acc.sourceUrl ? `Mapeado no Instagram (${acc.sourceUrl})` : 'Mapeado pela extensão AutoViral',
+              category: 'profile_follower',
+              sourceQuery: sourceUrl || 'extensao_chrome',
+              score: 95,
+              city: 'Brasil',
+              selected: true,
+              status: 'pending'
+            });
+          }
+        });
+        const merged = Array.from(byHandle.values());
+        localStorage.setItem('autoviral_insta_mapped_targets_v2', JSON.stringify(merged));
+      } catch {}
+    };
+
+    const persistYtVideos = (videos: any[]) => {
+      if (!Array.isArray(videos) || videos.length === 0) return;
+      try {
+        const existingRaw = localStorage.getItem('autoviral_yt_videos_v2');
+        const existing: any[] = existingRaw ? JSON.parse(existingRaw) : [];
+        const merged = [...existing];
+        videos.forEach((v) => {
+          if (v?.url && !merged.some((m) => m.url === v.url)) {
+            merged.unshift({
+              actionLike: true,
+              actionComment: true,
+              actionPinCampaign: true,
+              status: 'ready',
+              ...v
+            });
+          }
+        });
+        localStorage.setItem('autoviral_yt_videos_v2', JSON.stringify(merged));
+      } catch {}
+    };
+
+    const onInstaAccounts = (ev: Event) => {
+      const detail = (ev as CustomEvent).detail || {};
+      persistInstaAccounts(detail.accounts || [], detail.connectedHandle, detail.sourceUrl);
+    };
+    const onYtVideos = (ev: Event) => {
+      const detail = (ev as CustomEvent).detail || {};
+      persistYtVideos(detail.videos || []);
+    };
+
+    window.addEventListener('autoviral_extension_instagram_accounts_received', onInstaAccounts);
+    window.addEventListener('autoviral_extension_youtube_videos_received', onYtVideos);
+
+    let bc: BroadcastChannel | null = null;
+    try {
+      bc = new BroadcastChannel('autoviral_bridge_channel');
+      bc.onmessage = (msg) => {
+        const data = msg.data;
+        if (!data) return;
+        if (data.action === 'AUTOVIRAL_IMPORT_INSTAGRAM_ACCOUNTS') {
+          persistInstaAccounts(data.accounts || [], data.connectedHandle, data.sourceUrl);
+        } else if (data.action === 'AUTOVIRAL_IMPORT_YOUTUBE_VIDEOS_FROM_EXTENSION') {
+          persistYtVideos(data.videos || []);
+        } else if (data.action === 'AUTOVIRAL_IMPORT_GROUPS_FROM_EXTENSION') {
+          if (Array.isArray(data.instaAccounts)) {
+            persistInstaAccounts(data.instaAccounts, data.connectedHandle, data.sourceUrl);
+          }
+          if (Array.isArray(data.ytVideos)) {
+            persistYtVideos(data.ytVideos);
+          }
+        }
+      };
+    } catch {}
+
+    return () => {
+      window.removeEventListener('autoviral_extension_instagram_accounts_received', onInstaAccounts);
+      window.removeEventListener('autoviral_extension_youtube_videos_received', onYtVideos);
+      if (bc) {
+        try { bc.close(); } catch {}
+      }
+    };
+  }, []);
+
   // Bridge from Pain Finder to Creative Studio
   const handleSelectPainForCreative = (pain: PainPointData, nicheName: string) => {
     setSelectedPainForCreative(pain);

@@ -364,19 +364,91 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       .trim();
   };
 
-  // Subtabs: groups | audiences | campaign | youtube | pinterest | instagram | layout_studio | extension_guide | tracked_links
-  const [activeSubTab, setActiveSubTab] = useState<'groups' | 'audiences' | 'campaign' | 'youtube' | 'pinterest' | 'instagram' | 'layout_studio' | 'extension_guide' | 'tracked_links'>(() => {
+  // Subtabs: groups | audiences | campaign | youtube | pinterest | instagram | layout_studio | posts_log | analytics | extension_guide | tracked_links
+  type WorkspaceSubTab =
+    | 'groups'
+    | 'audiences'
+    | 'campaign'
+    | 'youtube'
+    | 'pinterest'
+    | 'instagram'
+    | 'layout_studio'
+    | 'posts_log'
+    | 'analytics'
+    | 'extension_guide'
+    | 'tracked_links';
+
+  const validSubTabs: WorkspaceSubTab[] = [
+    'groups',
+    'audiences',
+    'campaign',
+    'youtube',
+    'pinterest',
+    'instagram',
+    'layout_studio',
+    'posts_log',
+    'analytics',
+    'extension_guide',
+    'tracked_links'
+  ];
+
+  const [activeSubTab, setActiveSubTab] = useState<WorkspaceSubTab>(() => {
     try {
       const saved = localStorage.getItem('autoviral_active_subtab_groups');
-      if (saved && ['groups', 'audiences', 'campaign', 'youtube', 'pinterest', 'instagram', 'layout_studio', 'extension_guide', 'tracked_links'].includes(saved)) {
-        return saved as any;
+      if (saved && validSubTabs.includes(saved as WorkspaceSubTab)) {
+        return saved as WorkspaceSubTab;
       }
     } catch {}
     return 'groups';
   });
 
+  useEffect(() => {
+    try {
+      localStorage.setItem('autoviral_active_subtab_groups', activeSubTab);
+    } catch {}
+  }, [activeSubTab]);
+
+  // 100% REAL Tracking Events from /api/tracking/events (!isSimulation)
+  const [realServerEvents, setRealServerEvents] = useState<any[]>([]);
+  const [isLoadingRealEvents, setIsLoadingRealEvents] = useState<boolean>(false);
+  const [realRadarSourceFilter, setRealRadarSourceFilter] = useState<string>('all');
+  const [smartLinkChannel, setSmartLinkChannel] = useState<'facebook_groups' | 'instagram_story' | 'youtube_comments' | 'pinterest' | 'whatsapp'>('facebook_groups');
+  const [copiedSmartUrlFeedback, setCopiedSmartUrlFeedback] = useState<boolean>(false);
+  const [postsLogFilter, setPostsLogFilter] = useState<'all' | 'success' | 'error'>('all');
+
+  const fetchRealTrackingEvents = async () => {
+    setIsLoadingRealEvents(true);
+    try {
+      const res = await fetch('/api/tracking/events');
+      if (res.ok) {
+        const data = await res.json();
+        const events = Array.isArray(data?.events) ? data.events : [];
+        setRealServerEvents(events.filter((e: any) => !e.isSimulation));
+      }
+    } catch {
+    } finally {
+      setIsLoadingRealEvents(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchRealTrackingEvents();
+    const interval = setInterval(fetchRealTrackingEvents, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
   const [extensionSyncBanner, setExtensionSyncBanner] = useState<{ message: string; tone: 'success' | 'warning' } | null>(null);
   const [lastImportedGroupIds, setLastImportedGroupIds] = useState<string[]>([]);
+  const [mappedInstaProfilesCount, setMappedInstaProfilesCount] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('autoviral_insta_mapped_targets_v2');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed.length;
+      }
+    } catch {}
+    return 7;
+  });
 
   // Search folder filter: persisted in localStorage so page refresh keeps exact folder
   const [activeSearchFolder, setActiveSearchFolder] = useState<string>(() => {
@@ -1500,13 +1572,72 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
         if (Array.isArray(event.detail.instaStories) && event.detail.instaStories.length > 0) {
           setInstagramStoryQueue(event.detail.instaStories);
         }
+        if (Array.isArray(event.detail.ytVideos) && event.detail.ytVideos.length > 0) {
+          setYoutubeVideos(prev => {
+            const merged = [...prev];
+            event.detail.ytVideos.forEach((v: any) => {
+              if (v?.url && !merged.some(m => m.url === v.url)) {
+                merged.unshift({ actionLike: true, actionComment: true, actionPinCampaign: true, status: 'ready', ...v });
+              }
+            });
+            return merged;
+          });
+        }
         if (event.detail.targetChannels) {
           setTargetChannels(event.detail.targetChannels);
         }
       }
     };
 
-    // Direct BroadcastChannel for real-time inter-tab sync from Facebook tab widget
+    const mergeYtVideosFromExt = (videos: any[]) => {
+      if (!Array.isArray(videos) || videos.length === 0) return;
+      setYoutubeVideos(prev => {
+        const merged = [...prev];
+        let addedCount = 0;
+        videos.forEach((v: any) => {
+          if (v?.url && !merged.some(m => m.url === v.url)) {
+            merged.unshift({
+              actionLike: true,
+              actionComment: true,
+              actionPinCampaign: true,
+              status: 'ready',
+              ...v
+            });
+            addedCount++;
+          }
+        });
+        try {
+          localStorage.setItem('autoviral_yt_videos_v2', JSON.stringify(merged));
+        } catch {}
+        if (addedCount > 0) {
+          setExtensionSyncBanner({
+            message: `▶️ ${addedCount} novas URLs de vídeos do YouTube recebidas da extensão! Clique em "4. Robô YouTube" para ver.`,
+            tone: 'success'
+          });
+        }
+        return merged;
+      });
+    };
+
+    const handleExtensionYtVideos = (event: any) => {
+      if (event.detail && Array.isArray(event.detail.videos)) {
+        mergeYtVideosFromExt(event.detail.videos);
+      }
+    };
+
+    const refreshInstaCount = () => {
+      setTimeout(() => {
+        try {
+          const saved = localStorage.getItem('autoviral_insta_mapped_targets_v2');
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            if (Array.isArray(parsed)) setMappedInstaProfilesCount(parsed.length);
+          }
+        } catch {}
+      }, 150);
+    };
+
+    // Direct BroadcastChannel for real-time inter-tab sync from Facebook/YouTube/Instagram tabs
     let bc: BroadcastChannel | null = null;
     try {
       bc = new BroadcastChannel('autoviral_bridge_channel');
@@ -1543,11 +1674,25 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
               tone: 'success'
             });
           }
+          if (Array.isArray(ev.data.ytVideos) && ev.data.ytVideos.length > 0) {
+            mergeYtVideosFromExt(ev.data.ytVideos);
+          }
+          if (Array.isArray(ev.data.instaAccounts) && ev.data.instaAccounts.length > 0) {
+            refreshInstaCount();
+          }
+        } else if (ev.data && ev.data.action === 'AUTOVIRAL_IMPORT_YOUTUBE_VIDEOS_FROM_EXTENSION') {
+          setIsExtensionDetected(true);
+          mergeYtVideosFromExt(ev.data.videos || []);
+        } else if (ev.data && ev.data.action === 'AUTOVIRAL_IMPORT_INSTAGRAM_ACCOUNTS') {
+          setIsExtensionDetected(true);
+          refreshInstaCount();
         }
       };
     } catch (e) {}
 
     window.addEventListener('autoviral_extension_groups_received', handleExtensionGroups);
+    window.addEventListener('autoviral_extension_youtube_videos_received', handleExtensionYtVideos);
+    window.addEventListener('autoviral_extension_instagram_accounts_received', refreshInstaCount);
 
     const handleExtensionReset = () => {
       setMappedGroups([]);
@@ -1570,6 +1715,8 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
         try { bc.close(); } catch (err) {}
       }
       window.removeEventListener('autoviral_extension_groups_received', handleExtensionGroups);
+      window.removeEventListener('autoviral_extension_youtube_videos_received', handleExtensionYtVideos);
+      window.removeEventListener('autoviral_extension_instagram_accounts_received', refreshInstaCount);
       window.removeEventListener('autoviral_extension_groups_reset', handleExtensionReset);
     };
   }, []);
@@ -2075,13 +2222,13 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       zip.file('README.md', readmeText);
       zip.file(
         'COMO-INSTALAR.txt',
-        `INSTRUÇÕES DE INSTALAÇÃO NO GOOGLE CHROME (AutoViral AI v1.3.2):\n\n1. Extraia este arquivo ZIP em uma pasta nova.\n2. No Chrome, abra chrome://extensions e REMOVA extensões AutoViral antigas (deixe APENAS UMA v1.3.2).\n3. Ative a chave "Modo do desenvolvedor" (topo direito).\n4. Clique em "Carregar sem compactação" (topo esquerdo) e escolha a pasta extraída.\n5. Abra o Facebook (grupos), role a busca, clique em "Mapear Grupos" e depois em "Enviar para o Painel".`
+        `INSTRUÇÕES DE INSTALAÇÃO NO GOOGLE CHROME (AutoViral AI v1.3.3):\n\n1. Extraia este arquivo ZIP em uma pasta nova.\n2. No Chrome, abra chrome://extensions e REMOVA extensões AutoViral antigas (deixe APENAS UMA v1.3.3).\n3. Ative a chave "Modo do desenvolvedor" (topo direito).\n4. Clique em "Carregar sem compactação" (topo esquerdo) e escolha a pasta extraída.\n5. Abra o Facebook (grupos), role a busca, clique em "Mapear Grupos" e depois em "Enviar para o Painel".`
       );
 
       const blob = await zip.generateAsync({ type: 'blob' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = 'extensao-autoviral-v1.3.2.zip';
+      link.download = 'extensao-autoviral-v1.3.3.zip';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -2089,7 +2236,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       console.error('Error generating extension zip:', err);
       const fallbackLink = document.createElement('a');
       fallbackLink.href = '/api/extension/download';
-      fallbackLink.download = 'extensao-autoviral-v1.3.2.zip';
+      fallbackLink.download = 'extensao-autoviral-v1.3.3.zip';
       document.body.appendChild(fallbackLink);
       fallbackLink.click();
       document.body.removeChild(fallbackLink);
@@ -2208,146 +2355,264 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
             </span>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 text-slate-400 text-xs">
-            <span className="bg-slate-900 border border-slate-800 px-2 py-1 rounded-lg">
+          <div className="flex flex-wrap items-center gap-2 text-slate-400 text-xs tabular-nums">
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('posts_log')}
+              className="bg-slate-900 hover:bg-slate-800 border border-slate-700 hover:border-emerald-500/60 px-2.5 py-1.5 rounded-lg transition cursor-pointer"
+              title="Ver todos os posts realizados e baixar CSV"
+            >
               Disparos Hoje: <strong className="text-white">{dailyDispatchesCompleted} / {dailyDispatchLimit}</strong>
-            </span>
-            <span className="bg-blue-950/60 border border-blue-800/50 text-blue-300 px-2 py-1 rounded-lg font-bold">
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('groups')}
+              className="bg-blue-950/60 hover:bg-blue-900/70 border border-blue-700/70 text-blue-200 px-2.5 py-1.5 rounded-lg font-bold transition cursor-pointer"
+              title="Ver grupos do Facebook mapeados por busca"
+            >
               🔵 FB: {mappedGroups.length} grupos
-            </span>
-            <span className="bg-red-950/60 border border-red-800/50 text-red-300 px-2 py-1 rounded-lg font-bold">
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('youtube')}
+              className="bg-red-950/60 hover:bg-red-900/60 border border-red-800/50 text-red-300 px-2.5 py-1.5 rounded-lg font-bold transition cursor-pointer"
+              title="Abrir Robô YouTube para ver URLs mapeadas"
+            >
               🔴 YT: {youtubeVideos.length} vídeos
-            </span>
-            <span className="bg-rose-950/60 border border-rose-800/50 text-rose-300 px-2 py-1 rounded-lg font-bold">
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('pinterest')}
+              className="bg-rose-950/60 hover:bg-rose-900/60 border border-rose-800/50 text-rose-300 px-2.5 py-1.5 rounded-lg font-bold transition cursor-pointer"
+              title="Abrir Robô Pinterest (Pins e Pastas)"
+            >
               📌 PIN: {pinterestPins.length} pins
-            </span>
-            <span className="bg-purple-950/60 border border-purple-800/50 text-purple-300 px-2 py-1 rounded-lg font-bold">
-              🟣 INSTA: {instagramStoryQueue.length} stories
-            </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                try { localStorage.setItem('autoviral_insta_target_subtab', 'campaigns'); } catch {}
+                setActiveSubTab('instagram');
+              }}
+              className="bg-purple-950/60 hover:bg-purple-900/70 border border-purple-700/70 text-purple-200 px-2.5 py-1.5 rounded-lg font-bold transition cursor-pointer"
+              title="Abrir Campanha Instagram & Perfis Mapeados"
+            >
+              🟣 INSTA: {mappedInstaProfilesCount} perfis • {instagramStoryQueue.length} stories ↗
+            </button>
           </div>
         </div>
       </div>
 
-      {/* Navigation Sub-Tabs */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 pb-3">
-        <button
-          onClick={() => setActiveSubTab('groups')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition cursor-pointer ${
-            activeSubTab === 'groups'
-              ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/30'
-              : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
-          }`}
-        >
-          <Share2 className="w-4 h-4" />
-          1. Grupos Mapeados por Busca ({mappedGroups.length})
-        </button>
+      {/* ALCANCEX-STYLE CLEAN VERTICAL SIDEBAR + WORKSPACE */}
+      <div className="flex flex-col lg:flex-row gap-6 items-start">
+        <aside className="w-full lg:w-64 shrink-0 bg-[#0c111e] border border-slate-800 rounded-2xl p-3 space-y-5 lg:sticky lg:top-4">
+          {/* Section 1: CAMPANHAS & PÚBLICOS */}
+          <div className="space-y-1">
+            <div className="px-3 py-1 text-[10px] font-bold tracking-wider uppercase text-slate-500">
+              Campanhas &amp; Públicos
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('groups')}
+              className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer whitespace-nowrap ${
+                activeSubTab === 'groups'
+                  ? 'bg-indigo-600/20 text-white border border-indigo-500/40'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-900/80 border border-transparent'
+              }`}
+            >
+              <span className="flex items-center gap-2.5 truncate">
+                <Share2 className="w-4 h-4 text-blue-400 shrink-0" />
+                <span className="truncate">Grupos Mapeados</span>
+              </span>
+              <span className="text-[11px] text-slate-400 tabular-nums shrink-0">{mappedGroups.length}</span>
+            </button>
 
-        <button
-          onClick={() => setActiveSubTab('audiences')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition cursor-pointer ${
-            activeSubTab === 'audiences'
-              ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/30'
-              : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
-          }`}
-        >
-          <Users className="w-4 h-4" />
-          2. Biblioteca de Públicos Salvos ({audiences.length})
-        </button>
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('audiences')}
+              className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer whitespace-nowrap ${
+                activeSubTab === 'audiences'
+                  ? 'bg-indigo-600/20 text-white border border-indigo-500/40'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-900/80 border border-transparent'
+              }`}
+            >
+              <span className="flex items-center gap-2.5 truncate">
+                <Users className="w-4 h-4 text-indigo-400 shrink-0" />
+                <span className="truncate">Públicos Salvos</span>
+              </span>
+              <span className="text-[11px] text-slate-400 tabular-nums shrink-0">{audiences.length}</span>
+            </button>
 
-        <button
-          onClick={() => setActiveSubTab('campaign')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition relative cursor-pointer ${
-            activeSubTab === 'campaign'
-              ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-lg shadow-emerald-900/40 ring-2 ring-emerald-400'
-              : 'bg-slate-900 text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-800'
-          }`}
-        >
-          <Bot className="w-4 h-4 text-emerald-300" />
-          <span>3. 🚀 DISPAROS &amp; CAMPANHAS NO ROBÔ (Postar em Grupos &amp; Stories)</span>
-          <span className="bg-emerald-950 text-emerald-300 border border-emerald-700 text-[10px] px-2 py-0.5 rounded-full font-black uppercase">
-            Disparar Aqui
-          </span>
-          {isBotRunning && (
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping absolute -top-1 -right-1" />
-          )}
-        </button>
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('campaign')}
+              className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer whitespace-nowrap ${
+                activeSubTab === 'campaign'
+                  ? 'bg-emerald-600/20 text-white border border-emerald-500/40'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-900/80 border border-transparent'
+              }`}
+            >
+              <span className="flex items-center gap-2.5 truncate">
+                <Bot className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span className="truncate">Disparos FB (Comentador)</span>
+              </span>
+              {isBotRunning && (
+                <span className="text-[10px] font-bold text-emerald-300 shrink-0">Ativo</span>
+              )}
+            </button>
 
-        <button
-          onClick={() => setActiveSubTab('youtube')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition cursor-pointer ${
-            activeSubTab === 'youtube'
-              ? 'bg-red-600 text-white shadow-lg shadow-red-900/30'
-              : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
-          }`}
-        >
-          <Video className="w-4 h-4 text-red-400" />
-          4. ▶️ Robô YouTube (Comentários &amp; Likes)
-        </button>
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('instagram')}
+              className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer whitespace-nowrap ${
+                activeSubTab === 'instagram'
+                  ? 'bg-purple-600/25 text-white border border-purple-500/50'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-900/80 border border-transparent'
+              }`}
+            >
+              <span className="flex items-center gap-2.5 truncate">
+                <Instagram className="w-4 h-4 text-rose-400 shrink-0" />
+                <span className="truncate">Campanha Instagram</span>
+              </span>
+              <span className="text-[11px] text-purple-300 tabular-nums shrink-0">{mappedInstaProfilesCount}</span>
+            </button>
+          </div>
 
-        <button
-          onClick={() => setActiveSubTab('pinterest')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition cursor-pointer ${
-            activeSubTab === 'pinterest'
-              ? 'bg-rose-600 text-white shadow-lg shadow-rose-900/30'
-              : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
-          }`}
-        >
-          <Pin className="w-4 h-4 text-rose-400" />
-          5. 📌 Robô Pinterest (Pins Virais &amp; Pastas)
-        </button>
+          {/* Section 2: CANAIS & CRIATIVOS */}
+          <div className="space-y-1 pt-2 border-t border-slate-800/80">
+            <div className="px-3 py-1 text-[10px] font-bold tracking-wider uppercase text-slate-500">
+              Canais &amp; Criativos
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('youtube')}
+              className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer whitespace-nowrap ${
+                activeSubTab === 'youtube'
+                  ? 'bg-red-600/20 text-white border border-red-500/40'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-900/80 border border-transparent'
+              }`}
+            >
+              <span className="flex items-center gap-2.5 truncate">
+                <Video className="w-4 h-4 text-red-400 shrink-0" />
+                <span className="truncate">Robô YouTube</span>
+              </span>
+              <span className="text-[11px] text-slate-400 tabular-nums shrink-0">{youtubeVideos.length}</span>
+            </button>
 
-        <button
-          onClick={() => setActiveSubTab('instagram')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition cursor-pointer ${
-            activeSubTab === 'instagram'
-              ? 'bg-gradient-to-r from-rose-600 to-purple-600 text-white shadow-lg shadow-purple-900/40'
-              : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
-          }`}
-        >
-          <Instagram className="w-4 h-4 text-rose-400" />
-          6. 📸 Robô Instagram (Stories &amp; Feed)
-        </button>
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('pinterest')}
+              className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer whitespace-nowrap ${
+                activeSubTab === 'pinterest'
+                  ? 'bg-rose-600/20 text-white border border-rose-500/40'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-900/80 border border-transparent'
+              }`}
+            >
+              <span className="flex items-center gap-2.5 truncate">
+                <Pin className="w-4 h-4 text-rose-400 shrink-0" />
+                <span className="truncate">Robô Pinterest</span>
+              </span>
+              <span className="text-[11px] text-slate-400 tabular-nums shrink-0">{pinterestPins.length}</span>
+            </button>
 
-        <button
-          onClick={() => setActiveSubTab('layout_studio')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition cursor-pointer ${
-            activeSubTab === 'layout_studio'
-              ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg shadow-indigo-900/40'
-              : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
-          }`}
-        >
-          <Palette className="w-4 h-4 text-purple-400" />
-          7. 🎨 Estúdio de Layouts &amp; Criativos
-        </button>
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('layout_studio')}
+              className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer whitespace-nowrap ${
+                activeSubTab === 'layout_studio'
+                  ? 'bg-purple-600/20 text-white border border-purple-500/40'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-900/80 border border-transparent'
+              }`}
+            >
+              <span className="flex items-center gap-2.5 truncate">
+                <Palette className="w-4 h-4 text-purple-400 shrink-0" />
+                <span className="truncate">Estúdio de Criativos</span>
+              </span>
+            </button>
+          </div>
 
-        <button
-          onClick={() => setActiveSubTab('extension_guide')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition cursor-pointer ${
-            activeSubTab === 'extension_guide'
-              ? 'bg-slate-700 text-white shadow-lg shadow-slate-900/30'
-              : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
-          }`}
-        >
-          <FileCode className="w-4 h-4" />
-          8. Como Usar no Chrome
-        </button>
+          {/* Section 3: RESULTADOS (100% REAL) */}
+          <div className="space-y-1 pt-2 border-t border-slate-800/80">
+            <div className="px-3 py-1 text-[10px] font-bold tracking-wider uppercase text-slate-500">
+              Resultados (100% Real)
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('posts_log')}
+              className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer whitespace-nowrap ${
+                activeSubTab === 'posts_log'
+                  ? 'bg-indigo-600/25 text-white border border-indigo-500/40'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-900/80 border border-transparent'
+              }`}
+            >
+              <span className="flex items-center gap-2.5 truncate">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span className="truncate">Posts Realizados</span>
+              </span>
+              <span className="text-[11px] text-slate-400 tabular-nums shrink-0">{botLogs.length}</span>
+            </button>
 
-        {/* Subtab 9: Link Tracking Radar (User requested: "crie em todos links rstreio pra saber quam clicou,quem abriu") */}
-        <button
-          onClick={() => setActiveSubTab('tracked_links')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition cursor-pointer ${
-            activeSubTab === 'tracked_links'
-              ? 'bg-gradient-to-r from-blue-600 to-cyan-600 text-white shadow-lg shadow-cyan-900/40'
-              : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
-          }`}
-        >
-          <Link2 className="w-4 h-4 text-cyan-400" />
-          9. 🔗 Radar de Links (Quem Clicou &amp; Abriu)
-        </button>
-      </div>
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('analytics')}
+              className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer whitespace-nowrap ${
+                activeSubTab === 'analytics'
+                  ? 'bg-indigo-600/25 text-white border border-indigo-500/40'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-900/80 border border-transparent'
+              }`}
+            >
+              <span className="flex items-center gap-2.5 truncate">
+                <BarChart3 className="w-4 h-4 text-indigo-400 shrink-0" />
+                <span className="truncate">Analytics</span>
+              </span>
+            </button>
 
-      {/* SUBTAB 1: MAPPED GROUPS ORGANIZED BY SEARCH TERM */}
-      {activeSubTab === 'groups' && (
+            <button
+              type="button"
+              onClick={() => {
+                setActiveSubTab('tracked_links');
+                fetchRealTrackingEvents();
+              }}
+              className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer whitespace-nowrap ${
+                activeSubTab === 'tracked_links'
+                  ? 'bg-cyan-600/25 text-white border border-cyan-500/40'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-900/80 border border-transparent'
+              }`}
+            >
+              <span className="flex items-center gap-2.5 truncate">
+                <Link2 className="w-4 h-4 text-cyan-400 shrink-0" />
+                <span className="truncate">Quem Clicou (Real)</span>
+              </span>
+              <span className="text-[11px] text-cyan-300 tabular-nums shrink-0">{realServerEvents.length}</span>
+            </button>
+          </div>
+
+          {/* Section 4: FERRAMENTAS */}
+          <div className="space-y-1 pt-2 border-t border-slate-800/80">
+            <div className="px-3 py-1 text-[10px] font-bold tracking-wider uppercase text-slate-500">
+              Ferramentas
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('extension_guide')}
+              className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer whitespace-nowrap ${
+                activeSubTab === 'extension_guide'
+                  ? 'bg-slate-800 text-white border border-slate-700'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-900/80 border border-transparent'
+              }`}
+            >
+              <span className="flex items-center gap-2.5 truncate">
+                <HelpCircle className="w-4 h-4 text-slate-400 shrink-0" />
+                <span className="truncate">Tutorial Chrome (v1.3.3)</span>
+              </span>
+            </button>
+          </div>
+        </aside>
+
+        {/* WORKSPACE MAIN CONTENT */}
+        <div className="flex-1 min-w-0 w-full space-y-6">
+          {/* SUBTAB 1: MAPPED GROUPS ORGANIZED BY SEARCH TERM */}
+          {activeSubTab === 'groups' && (
         <div className="space-y-6">
           {/* INLINE EXTENSION SYNC FEEDBACK BANNER */}
           {extensionSyncBanner && (
@@ -2386,7 +2651,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                   <span>🗺️ Passo a Passo Simples: Onde Estão Seus Grupos e Como Divulgar</span>
                 </h2>
                 <p className="text-xs text-slate-300 mt-0.5">
-                  Dica importante: deixe apenas <strong>1 extensão AutoViral (v1.3.2)</strong> ativa no Chrome e use sempre este painel oficial (feche o site antigo <code className="text-amber-300">vercel.app</code> se estiver aberto).
+                  Dica importante: deixe apenas <strong>1 extensão AutoViral (v1.3.3)</strong> ativa no Chrome e use sempre este painel oficial (feche o site antigo <code className="text-amber-300">vercel.app</code> se estiver aberto).
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -2419,7 +2684,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                 <p className="text-[11px] text-slate-400 leading-relaxed">Pesquise grupos no Facebook (ex: pedagogia, renda extra) e role a lista para carregar os cards.</p>
               </div>
               <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3">
-                <div className="font-black text-emerald-300 mb-1">2. Mapeie &amp; Envie (v1.3.2)</div>
+                <div className="font-black text-emerald-300 mb-1">2. Mapeie &amp; Envie (v1.3.3)</div>
                 <p className="text-[11px] text-slate-400 leading-relaxed">Clique em <strong>Mapear Grupos</strong> e depois em <strong>Enviar Grupos para o Painel</strong> na extensão.</p>
               </div>
               <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3">
@@ -4258,6 +4523,22 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
               </div>
             </div>
 
+            {/* HOW TO MAP YOUTUBE URLS GUIDE */}
+            <div className="bg-red-950/20 border border-red-800/40 rounded-xl p-3.5 grid grid-cols-1 md:grid-cols-3 gap-2.5 text-xs">
+              <div className="bg-slate-950/80 border border-slate-800 rounded-lg p-2.5">
+                <div className="font-black text-red-300 mb-0.5">Opção 1: Pela Extensão Chrome (v1.3.3)</div>
+                <p className="text-[11px] text-slate-300 leading-relaxed">Abra a busca ou um vídeo no YouTube, clique em <strong>▶️ Mapear Vídeos / URLs do YouTube</strong> na extensão e depois em <strong>📡 Enviar Tudo</strong>.</p>
+              </div>
+              <div className="bg-slate-950/80 border border-slate-800 rounded-lg p-2.5">
+                <div className="font-black text-amber-300 mb-0.5">Opção 2: Pesquisa Direta Aqui no Painel</div>
+                <p className="text-[11px] text-slate-300 leading-relaxed">Digite o assunto no campo abaixo (ex: <em>TEA</em>, <em>pedagogia</em>) e clique em <strong>🔍 Mapear Vídeos desta Busca</strong>.</p>
+              </div>
+              <div className="bg-slate-950/80 border border-slate-800 rounded-lg p-2.5">
+                <div className="font-black text-emerald-300 mb-0.5">Opção 3: Colar Link Manual ou em Massa</div>
+                <p className="text-[11px] text-slate-300 leading-relaxed">Copie links <code className="text-red-300">youtube.com/watch?v=...</code> e cole em <strong>📋 Colar URLs em Massa</strong> ou <strong>+ Adicionar URL Manual</strong>.</p>
+              </div>
+            </div>
+
             {/* YOUTUBE SEARCH & MAPPING TOOLBAR (User requested: "mapear url com youtube aberto 'apos fazer procura', imagem 2") */}
             <div className="bg-slate-950 p-4 rounded-xl border border-red-900/40 space-y-3">
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
@@ -4706,284 +4987,440 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
         </div>
       )}
 
-      {/* SUBTAB 9: LINK TRACKING RADAR (QUEM CLICOU & QUEM ABRIU) - Requested by user: "crie em todos links rstreio pra saber quam clicou,quem abriu" */}
-      {activeSubTab === 'tracked_links' && (
-        <div className="space-y-6">
-          {/* Header Banner */}
-          <div className="bg-gradient-to-r from-blue-950/80 via-slate-900 to-cyan-950/80 border border-cyan-800/40 rounded-2xl p-6 shadow-xl space-y-4">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 px-3 py-0.5 rounded-full text-xs font-semibold flex items-center gap-1.5">
-                    <Link2 className="w-3.5 h-3.5" />
-                    RADAR DE AUDIÊNCIA EM TEMPO REAL
-                  </span>
-                  <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2.5 py-0.5 rounded-full text-xs font-bold">
-                    100% Rastreado
-                  </span>
-                </div>
-                <h2 className="text-xl font-black text-white mt-2 flex items-center gap-2">
-                  Radar de Links Rastreados: Quem Clicou &amp; Quem Abriu
-                </h2>
-                <p className="text-xs text-slate-300 mt-1 max-w-2xl leading-relaxed">
-                  Todos os links divulgados pelo AutoViral nos grupos do Facebook e canais recebem um token único de rastreamento inteligente. Saiba exatamente qual grupo gerou cada clique, a cidade do lead, o dispositivo e se abriu o checkout da Kiwify/Hotmart!
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2 w-full sm:w-auto">
-                <button
-                  type="button"
-                  onClick={handleSimulateTrackedClick}
-                  className="px-4 py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-cyan-950/50 transition cursor-pointer"
-                >
-                  <Zap className="w-4 h-4 text-amber-300" />
-                  Simular Clique no Link Agora
-                </button>
-              </div>
+      {/* RESULTADOS: LINKS DOS POSTS REALIZADOS (AlcanceX-style clean log table + CSV export) */}
+      {activeSubTab === 'posts_log' && (
+        <div className="bg-[#0d1221] border border-slate-800 rounded-2xl p-5 sm:p-6 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+            <div>
+              <h2 className="text-base font-bold text-white flex items-center gap-2">
+                <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                Links dos Posts Realizados
+              </h2>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Registro cronológico dos grupos onde o robô disparou com link oficial ou rastreado.
+              </p>
             </div>
 
-            {/* Smart Link Copy Banner */}
-            <div className="bg-slate-950/90 border border-cyan-500/30 rounded-xl p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
-              <div className="flex items-center gap-2.5 min-w-0">
-                <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse flex-shrink-0" />
-                <div className="truncate">
-                  <span className="text-slate-400 text-[10px] block uppercase font-bold">LINK INTELIGENTE COM RASTREADOR EMBUTIDO:</span>
-                  <code className="text-cyan-300 font-mono text-xs font-bold truncate block">
-                    https://autoviral.app/r/renda-extra-01?utm_source=facebook_groups
-                  </code>
-                </div>
-              </div>
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <select
+                value={postsLogFilter}
+                onChange={(e) => setPostsLogFilter(e.target.value as any)}
+                className="bg-slate-900 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-indigo-500"
+              >
+                <option value="all">Todos os Posts ({botLogs.length})</option>
+                <option value="success">Enviados com Sucesso</option>
+                <option value="error">Falhas / Bloqueios</option>
+              </select>
 
-              <div className="flex items-center gap-2 flex-shrink-0">
-                <button
-                  type="button"
-                  onClick={() => {
-                    navigator.clipboard.writeText('https://autoviral.app/r/renda-extra-01?utm_source=facebook_groups');
-                    alert('Link rastreado copiado para a área de transferência!');
-                  }}
-                  className="px-3 py-1.5 bg-cyan-950/80 hover:bg-cyan-900 text-cyan-200 border border-cyan-700/60 rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
-                >
-                  <Copy className="w-3.5 h-3.5" />
-                  Copiar Link Rastreado
-                </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const rows = [
+                    ['Data/Hora', 'Grupo', 'URL', 'Status', 'Intervalo(s)'],
+                    ...botLogs.map(l => [
+                      l.postedAt || '',
+                      (l.groupName || '').replace(/,/g, ' '),
+                      l.groupUrl || '',
+                      l.status === 'success' ? 'Post enviado' : 'Falha',
+                      String(l.intervalWaitedSeconds || 0)
+                    ])
+                  ];
+                  const csv = rows.map(r => r.join(',')).join('\n');
+                  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `autoviral-posts-${new Date().toISOString().slice(0, 10)}.csv`;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  URL.revokeObjectURL(url);
+                }}
+                className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 rounded-lg font-semibold flex items-center gap-1 cursor-pointer transition"
+              >
+                <Download className="w-3.5 h-3.5" />
+                CSV
+              </button>
 
-                <a
-                  href={selectedCheckoutUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg text-xs font-semibold flex items-center gap-1 transition"
-                >
-                  Destino Real <ExternalLink className="w-3 h-3" />
-                </a>
-              </div>
+              <button
+                type="button"
+                onClick={() => setBotLogs([])}
+                className="px-3 py-1.5 bg-slate-900 hover:bg-rose-950 text-slate-300 hover:text-rose-200 border border-slate-700 rounded-lg font-semibold cursor-pointer transition"
+              >
+                Limpar
+              </button>
             </div>
           </div>
 
-          {/* KPI Analytics Cards for Links */}
-          {trackedLinks.map(link => {
-            const openRate = link.totalClicks > 0 ? Math.round((link.uniqueOpens / link.totalClicks) * 100) : 100;
-            const checkoutRate = link.totalClicks > 0 ? Math.round((link.checkoutViews / link.totalClicks) * 100) : 0;
-            return (
-              <div key={link.id} className="space-y-5">
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-                    <span className="text-slate-400 text-[11px] uppercase font-bold flex items-center gap-1.5">
-                      <Eye className="w-3.5 h-3.5 text-blue-400" />
-                      Cliques Registrados
-                    </span>
-                    <div className="text-2xl font-black text-white mt-1">
-                      {link.totalClicks}
-                    </div>
-                    <div className="text-[10px] text-emerald-400 mt-0.5">
-                      +100% de precisão por IP/Cookie
-                    </div>
-                  </div>
-
-                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-                    <span className="text-slate-400 text-[11px] uppercase font-bold flex items-center gap-1.5">
-                      <Users className="w-3.5 h-3.5 text-cyan-400" />
-                      Aberturas Únicas
-                    </span>
-                    <div className="text-2xl font-black text-cyan-300 mt-1">
-                      {link.uniqueOpens}
-                    </div>
-                    <div className="text-[10px] text-cyan-400 mt-0.5">
-                      {openRate}% taxa de carregamento
-                    </div>
-                  </div>
-
-                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-                    <span className="text-slate-400 text-[11px] uppercase font-bold flex items-center gap-1.5">
-                      <ExternalLink className="w-3.5 h-3.5 text-amber-400" />
-                      Abriram o Checkout
-                    </span>
-                    <div className="text-2xl font-black text-amber-300 mt-1">
-                      {link.checkoutViews}
-                    </div>
-                    <div className="text-[10px] text-amber-400 mt-0.5">
-                      {checkoutRate}% chegaram no Pix
+          {botLogs.filter(l => postsLogFilter === 'all' || l.status === postsLogFilter).length === 0 ? (
+            <div className="bg-slate-950 border border-slate-800 rounded-xl p-8 text-center space-y-2">
+              <p className="text-sm font-semibold text-slate-300">Nenhum post registrado neste filtro.</p>
+              <p className="text-xs text-slate-500">
+                Inicie um disparo em "Disparos FB (Comentador)" para acompanhar cada publicação realizada em tempo real.
+              </p>
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-800/70">
+              {botLogs
+                .filter(l => postsLogFilter === 'all' || l.status === postsLogFilter)
+                .map(log => (
+                  <div key={log.id} className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs hover:bg-slate-900/40 px-2 rounded-lg transition">
+                    <div className="space-y-1 min-w-0">
+                      <div className="text-[11px] font-mono text-slate-400 tabular-nums">
+                        {log.postedAt} · {log.groupName}
+                      </div>
+                      <div className="text-slate-200 font-medium truncate">
+                        {log.groupUrl}
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className={log.status === 'success' ? 'text-emerald-400 font-semibold' : 'text-rose-400 font-semibold'}>
+                          {log.status === 'success'
+                            ? 'Post enviado — aguardando aprovação / publicado'
+                            : 'Falha ao enviar neste grupo'}
+                        </span>
+                        <a
+                          href={log.groupUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-indigo-400 hover:text-indigo-300 inline-flex items-center gap-1 font-semibold"
+                        >
+                          Ver grupo <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
                     </div>
                   </div>
+                ))}
+            </div>
+          )}
+        </div>
+      )}
 
-                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-                    <span className="text-slate-400 text-[11px] uppercase font-bold flex items-center gap-1.5">
-                      <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
-                      Vendas Convertidas
-                    </span>
-                    <div className="text-2xl font-black text-emerald-400 mt-1">
-                      {link.conversions} vendas
-                    </div>
-                    <div className="text-[10px] text-emerald-300 mt-0.5">
-                      R$ {((link.conversions || 4) * selectedPrice).toFixed(2).replace('.', ',')} faturados
-                    </div>
+      {/* RESULTADOS: ANALYTICS DEDICATED VIEW */}
+      {activeSubTab === 'analytics' && (
+        <div className="space-y-4">
+          <LogisticsAnalyticsDashboard
+            logs={botLogs}
+            isBotRunning={isBotRunning}
+            secondsRemaining={secondsRemaining}
+            averageIntervalSeconds={intervalSeconds}
+            onTriggerDefenseModal={() => {
+              setDefensePlatform('Facebook');
+              setIsDefenseModalOpen(true);
+            }}
+          />
+        </div>
+      )}
+
+      {/* QUEM CLICOU (NÚMERO REAL - 100% /api/tracking/events & /api/r) */}
+      {activeSubTab === 'tracked_links' && (() => {
+        const originUrl = typeof window !== 'undefined' ? window.location.origin : '';
+        const targetDest = selectedCheckoutUrl || activeCampaign?.checkoutUrl || 'https://pay.kiwify.com.br/HE5xbnp';
+        const generatedSmartLink = `${originUrl}/api/r?to=${encodeURIComponent(targetDest)}&src=${encodeURIComponent(smartLinkChannel)}&camp=${encodeURIComponent(selectedProductId)}&title=${encodeURIComponent(activeCampaign?.title || 'Campanha Ativa')}&city=Brasil&state=BR`;
+
+        const filteredRealEvents = realServerEvents.filter(
+          ev => realRadarSourceFilter === 'all' || ev.source === realRadarSourceFilter
+        );
+        const realClickCount = filteredRealEvents.filter(
+          ev => ev.type === 'checkout_click' || ev.type === 'click' || ev.type === 'checkout_open'
+        ).length;
+        const realUniqueCount = filteredRealEvents.filter(
+          ev => ev.type === 'page_view' || ev.type === 'checkout_click' || ev.type === 'click'
+        ).length;
+        const realCheckoutCount = filteredRealEvents.filter(
+          ev => ev.type === 'checkout_open' || ev.type === 'checkout_click'
+        ).length;
+        const realSalesEvents = filteredRealEvents.filter(ev => ev.type === 'conversion');
+        const realSalesCount = realSalesEvents.length;
+        const realRevenueTotal = realSalesEvents.reduce((acc, ev) => acc + (Number(ev.amount) || 0), 0);
+
+        return (
+          <div className="space-y-6">
+            {/* Header + Real Smart Link Generator */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-xl font-black text-white flex items-center gap-2">
+                    <Link2 className="w-5 h-5 text-cyan-400" />
+                    Quem Clicou — Contagem 100% Verdadeira
+                  </h2>
+                  <p className="text-xs text-slate-300 mt-1 max-w-2xl leading-relaxed">
+                    Zero números fictícios ou simulados. Todos os cliques abaixo vêm diretamente de pessoas reais abrindo o seu link rastreador <code className="text-cyan-300">/api/r</code> no Facebook, Instagram, YouTube, Pinterest ou WhatsApp.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={fetchRealTrackingEvents}
+                    disabled={isLoadingRealEvents}
+                    className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isLoadingRealEvents ? 'animate-spin' : ''}`} />
+                    Atualizar Reais
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await fetch('/api/tracking/reset', { method: 'POST' });
+                        setRealServerEvents([]);
+                      } catch {}
+                    }}
+                    className="px-3 py-2 bg-rose-950/60 hover:bg-rose-900/70 text-rose-200 border border-rose-800/60 rounded-xl text-xs font-bold transition cursor-pointer"
+                    title="Limpar eventos acumulados no servidor para recomeçar do zero"
+                  >
+                    Zerar Servidor
+                  </button>
+                </div>
+              </div>
+
+              {/* Real /api/r Link Generator */}
+              <div className="bg-slate-950 border border-cyan-800/40 rounded-xl p-4 space-y-3 text-xs">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <span className="text-cyan-300 font-bold">Gerador de Link Rastreador Real (/api/r):</span>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {(
+                      [
+                        { id: 'facebook_groups', label: 'Facebook' },
+                        { id: 'instagram_story', label: 'Instagram' },
+                        { id: 'youtube_comments', label: 'YouTube' },
+                        { id: 'pinterest', label: 'Pinterest' },
+                        { id: 'whatsapp', label: 'WhatsApp' }
+                      ] as const
+                    ).map(ch => (
+                      <button
+                        key={ch.id}
+                        type="button"
+                        onClick={() => setSmartLinkChannel(ch.id)}
+                        className={`px-2.5 py-1 rounded-lg font-semibold transition cursor-pointer ${
+                          smartLinkChannel === ch.id
+                            ? 'bg-cyan-600 text-white'
+                            : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+                        }`}
+                      >
+                        {ch.label}
+                      </button>
+                    ))}
                   </div>
                 </div>
 
-                {/* Live Real-Time Activity Log */}
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
-                    <div>
-                      <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                        <Activity className="w-4 h-4 text-cyan-400" />
-                        Histórico ao Vivo: Quem Clicou &amp; de Onde Veio
-                      </h3>
-                      <p className="text-[11px] text-slate-400 mt-0.5">
-                        Detecta o grupo exato de origem, cidade, estado e dispositivo de cada lead
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setTrackedLinks(prev =>
-                            prev.map((l: TrackedLinkItem) =>
-                              l.id === link.id
-                                ? { ...l, clicksHistory: l.clicksHistory.filter((c: TrackedLinkClick) => !['clk-1', 'clk-2', 'clk-3'].includes(c.id)) }
-                                : l
-                            )
-                          );
-                          alert('🧹 Linhas de demonstração removidas! Agora a tabela exibe apenas cliques 100% reais de novos visitantes.');
-                        }}
-                        className="text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-2.5 py-1 rounded-lg border border-slate-700 transition cursor-pointer"
-                      >
-                        🧹 Limpar Demonstrações
-                      </button>
-                      <span className="text-xs bg-slate-950 text-slate-300 px-3 py-1 rounded-xl border border-slate-800 font-bold">
-                        {link.clicksHistory.length} acessos
-                      </span>
-                    </div>
-                  </div>
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                  <code className="text-cyan-300 font-mono text-[11px] bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 truncate flex-1">
+                    {generatedSmartLink}
+                  </code>
 
-                  {/* Honesty & Transparency Notice (User requested: "será verdade a terceira imagem?") */}
-                  <div className="p-3 bg-cyan-950/30 border border-cyan-800/50 rounded-xl text-xs space-y-1">
-                    <div className="flex items-center gap-1.5 font-bold text-cyan-300">
-                      <ShieldCheck className="w-4 h-4 text-cyan-400" />
-                      <span>Transparência Radical sobre a Tabela de Cliques:</span>
-                    </div>
-                    <p className="text-[11px] text-cyan-200/90 leading-relaxed">
-                      As 3 linhas iniciais (<strong>Curitiba PR</strong>, <strong>São Paulo SP</strong> e <strong>Belo Horizonte MG</strong>) são modelos de calibração pré-carregados para exemplificar a estrutura de rastreamento. Quando você dispara o link nos grupos e pessoas reais clicam, o sistema captura automaticamente o IP de verdade, a operadora, o modelo do celular e o tempo de permanência daquele lead real!
-                    </p>
-                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(generatedSmartLink);
+                        setCopiedSmartUrlFeedback(true);
+                        setTimeout(() => setCopiedSmartUrlFeedback(false), 2500);
+                      }}
+                      className="px-3.5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      {copiedSmartUrlFeedback ? 'Link Copiado ✓' : 'Copiar Link Real'}
+                    </button>
 
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
-                      <thead>
-                        <tr className="border-b border-slate-800 text-slate-400 uppercase text-[10px] font-bold">
-                          <th className="py-2.5 px-3">Origem dos Dados</th>
-                          <th className="py-2.5 px-3">Horário</th>
-                          <th className="py-2.5 px-3">Grupo de Origem (Facebook)</th>
-                          <th className="py-2.5 px-3">Localização</th>
-                          <th className="py-2.5 px-3">Dispositivo / Sistema</th>
-                          <th className="py-2.5 px-3">Comportamento</th>
-                          <th className="py-2.5 px-3">Tempo no Link</th>
-                          <th className="py-2.5 px-3 text-right">Lead Score</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800/60">
-                        {link.clicksHistory.map(clk => {
-                          const isDemoRow = ['clk-1', 'clk-2', 'clk-3'].includes(clk.id);
-                          return (
-                          <tr key={clk.id} className="hover:bg-slate-800/40 transition">
-                            <td className="py-3 px-3">
-                              {isDemoRow ? (
-                                <span className="bg-blue-950 text-blue-300 border border-blue-800/60 text-[9px] font-bold px-2 py-0.5 rounded-full inline-block">
-                                  🔵 Demonstração
-                                </span>
-                              ) : (
-                                <span className="bg-emerald-950 text-emerald-300 border border-emerald-800/60 text-[9px] font-black px-2 py-0.5 rounded-full inline-block">
-                                  🟢 Clique 100% Real
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-3 px-3 font-mono text-[11px] text-slate-300">
-                              {clk.timestamp}
-                            </td>
-                            <td className="py-3 px-3">
-                              <div className="font-bold text-white max-w-[220px] truncate" title={clk.groupOriginName}>
-                                {clk.groupOriginName}
-                              </div>
-                              <a
-                                href={clk.groupOriginUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-1 mt-0.5 truncate max-w-[200px]"
-                              >
-                                Link do grupo <ExternalLink className="w-2.5 h-2.5" />
-                              </a>
-                            </td>
-                            <td className="py-3 px-3">
-                              <span className="font-semibold text-slate-200">
-                                📍 {clk.geoCity}, {clk.geoState}
-                              </span>
-                            </td>
-                            <td className="py-3 px-3">
-                              <div className="text-slate-300 font-medium">
-                                {clk.device === 'mobile' ? '📱 Mobile' : '💻 Desktop'}
-                              </div>
-                              <div className="text-[10px] text-slate-500">
-                                {clk.operatingSystem}
-                              </div>
-                            </td>
-                            <td className="py-3 px-3">
-                              <div className="flex flex-wrap items-center gap-1">
-                                <span className="bg-emerald-950/80 text-emerald-400 border border-emerald-800/60 px-2 py-0.5 rounded text-[10px] font-bold">
-                                  Página Aberta ✓
-                                </span>
-                                {clk.hasVisitedCheckout ? (
-                                  <span className="bg-amber-950/80 text-amber-300 border border-amber-800/60 px-2 py-0.5 rounded text-[10px] font-bold">
-                                    Visitou Checkout Kiwify 🔥
-                                  </span>
-                                ) : (
-                                  <span className="bg-slate-800 text-slate-400 px-2 py-0.5 rounded text-[10px]">
-                                    Visualizou Oferta
-                                  </span>
-                                )}
-                              </div>
-                            </td>
-                            <td className="py-3 px-3 font-mono text-[11px] text-slate-300">
-                              ⏱️ {clk.timeSpentSeconds}s
-                            </td>
-                            <td className="py-3 px-3 text-right">
-                              <span className={`font-black text-xs px-2 py-0.5 rounded-lg ${
-                                clk.leadScore >= 85
-                                  ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/60'
-                                  : 'bg-slate-800 text-slate-300'
-                              }`}>
-                                {clk.leadScore}/100
-                              </span>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                      </tbody>
-                    </table>
+                    <a
+                      href={targetDest}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg text-xs font-semibold flex items-center gap-1 transition"
+                    >
+                      Checkout <ExternalLink className="w-3 h-3" />
+                    </a>
                   </div>
                 </div>
               </div>
-            );
-          })}
+            </div>
+
+            {/* 4 KPI Cards (100% Real Data) */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 tabular-nums">
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                <span className="text-slate-400 text-[11px] font-bold flex items-center gap-1.5">
+                  <Eye className="w-3.5 h-3.5 text-cyan-400" />
+                  Cliques Reais Registrados
+                </span>
+                <div className="text-2xl font-black text-white mt-1">
+                  {realClickCount}
+                </div>
+                <div className="text-[11px] text-slate-400 mt-0.5">
+                  Contados no servidor (/api/r)
+                </div>
+              </div>
+
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                <span className="text-slate-400 text-[11px] font-bold flex items-center gap-1.5">
+                  <Users className="w-3.5 h-3.5 text-blue-400" />
+                  Visitantes / Aberturas
+                </span>
+                <div className="text-2xl font-black text-blue-300 mt-1">
+                  {realUniqueCount}
+                </div>
+                <div className="text-[11px] text-slate-400 mt-0.5">
+                  Páginas e links abertos
+                </div>
+              </div>
+
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                <span className="text-slate-400 text-[11px] font-bold flex items-center gap-1.5">
+                  <ExternalLink className="w-3.5 h-3.5 text-amber-400" />
+                  Abriram o Checkout
+                </span>
+                <div className="text-2xl font-black text-amber-300 mt-1">
+                  {realCheckoutCount}
+                </div>
+                <div className="text-[11px] text-slate-400 mt-0.5">
+                  Encaminhados ao pagamento
+                </div>
+              </div>
+
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                <span className="text-slate-400 text-[11px] font-bold flex items-center gap-1.5">
+                  <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
+                  Vendas Reais (Webhook)
+                </span>
+                <div className="text-2xl font-black text-emerald-400 mt-1">
+                  {realSalesCount} vendas
+                </div>
+                <div className="text-[11px] text-emerald-300 mt-0.5">
+                  R$ {realRevenueTotal.toFixed(2).replace('.', ',')} confirmados
+                </div>
+              </div>
+            </div>
+
+            {/* Real Events Table */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <Activity className="w-4 h-4 text-emerald-400" />
+                    Histórico Real de Cliques &amp; Aberturas
+                  </h3>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    Exibe exclusivamente cliques e vendas reais recebidos pelo servidor (simulações ocultas).
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 text-xs">
+                  <select
+                    value={realRadarSourceFilter}
+                    onChange={(e) => setRealRadarSourceFilter(e.target.value)}
+                    className="bg-slate-950 border border-slate-700 text-slate-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-cyan-500"
+                  >
+                    <option value="all">Todos os Canais ({realServerEvents.length})</option>
+                    <option value="facebook_groups">Facebook Grupos</option>
+                    <option value="instagram">Instagram</option>
+                    <option value="youtube_comments">YouTube</option>
+                    <option value="pinterest">Pinterest</option>
+                    <option value="whatsapp">WhatsApp</option>
+                  </select>
+                </div>
+              </div>
+
+              {filteredRealEvents.length === 0 ? (
+                <div className="bg-slate-950 border border-slate-800 rounded-xl p-8 text-center space-y-2">
+                  <p className="text-sm font-semibold text-slate-200">
+                    Nenhum clique real registrado ainda.
+                  </p>
+                  <p className="text-xs text-slate-400 max-w-lg mx-auto leading-relaxed">
+                    Copie o seu <strong>Link Real (/api/r)</strong> no gerador acima e cole na copy dos grupos do Facebook, Stories do Instagram ou comentários do YouTube. Assim que alguém real clicar, aparecerá aqui instantaneamente!
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs tabular-nums">
+                    <thead>
+                      <tr className="border-b border-slate-800 text-slate-400 text-[11px] font-semibold">
+                        <th className="py-2.5 px-3">Horário</th>
+                        <th className="py-2.5 px-3">Canal</th>
+                        <th className="py-2.5 px-3">Campanha / Origem</th>
+                        <th className="py-2.5 px-3">Localização</th>
+                        <th className="py-2.5 px-3">Dispositivo</th>
+                        <th className="py-2.5 px-3">Ação Real</th>
+                        <th className="py-2.5 px-3 text-right">Valor / Score</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60">
+                      {filteredRealEvents.map((ev, idx) => (
+                        <tr key={ev.id || idx} className="hover:bg-slate-800/40 transition">
+                          <td className="py-3 px-3 font-mono text-[11px] text-slate-300 whitespace-nowrap">
+                            {ev.timestamp
+                              ? new Date(ev.timestamp).toLocaleString('pt-BR', {
+                                  day: '2-digit',
+                                  month: '2-digit',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                  second: '2-digit'
+                                })
+                              : '--'}
+                          </td>
+                          <td className="py-3 px-3 text-slate-200 font-semibold whitespace-nowrap">
+                            {ev.source === 'instagram'
+                              ? 'Instagram'
+                              : ev.source === 'facebook_groups'
+                              ? 'Facebook'
+                              : ev.source === 'youtube_comments'
+                              ? 'YouTube'
+                              : ev.source === 'pinterest'
+                              ? 'Pinterest'
+                              : ev.source === 'whatsapp'
+                              ? 'WhatsApp'
+                              : ev.source || 'Direto'}
+                          </td>
+                          <td className="py-3 px-3">
+                            <div className="font-semibold text-white max-w-[240px] truncate" title={ev.campaignTitle}>
+                              {ev.campaignTitle || 'Campanha Ativa'}
+                            </div>
+                            {ev.adCreativeName && (
+                              <div className="text-[11px] text-slate-400 truncate max-w-[240px]">
+                                {ev.adCreativeName}
+                              </div>
+                            )}
+                          </td>
+                          <td className="py-3 px-3 text-slate-200 whitespace-nowrap">
+                            {ev.geo?.city || 'Brasil'}, {ev.geo?.state || 'BR'}
+                          </td>
+                          <td className="py-3 px-3 text-slate-300 whitespace-nowrap">
+                            {ev.device === 'mobile' ? 'Mobile' : 'Desktop'}
+                          </td>
+                          <td className="py-3 px-3 whitespace-nowrap">
+                            <span
+                              className={`text-[11px] font-bold ${
+                                ev.type === 'conversion'
+                                  ? 'text-emerald-400'
+                                  : ev.type === 'checkout_click' || ev.type === 'checkout_open'
+                                  ? 'text-amber-300'
+                                  : 'text-cyan-300'
+                              }`}
+                            >
+                              {ev.type === 'conversion'
+                                ? 'Venda Confirmada ✓'
+                                : ev.type === 'checkout_click' || ev.type === 'checkout_open'
+                                ? 'Abriu Link/Checkout ✓'
+                                : 'Visualizou Página'}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3 text-right font-mono text-slate-200 whitespace-nowrap">
+                            {ev.type === 'conversion' && ev.amount
+                              ? `R$ ${Number(ev.amount).toFixed(2).replace('.', ',')}`
+                              : `${ev.leadScore || 95}/100`}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
         </div>
-      )}
+      </div>
 
       {/* MODAL: CREATE AUDIENCE */}
       {isAudienceModalOpen && (

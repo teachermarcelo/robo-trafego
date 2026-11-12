@@ -15,6 +15,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const btnScan = document.getElementById('btn-scan');
   const btnScanInsta = document.getElementById('btn-scan-insta');
+  const btnScanYt = document.getElementById('btn-scan-yt');
   const btnSync = document.getElementById('btn-sync');
   const btnResetMapped = document.getElementById('btn-reset-mapped');
   const btnOpenPlatform = document.getElementById('btn-open-platform');
@@ -296,6 +297,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if (ytTab) {
       ytStatusEl.textContent = 'Aba YouTube Detectada!';
       ytStatusEl.style.color = '#10b981';
+      sendToTabWithAutoInject(ytTab.id, { action: 'AUTOVIRAL_YOUTUBE_GET_SEARCH_VIDEOS' }, (res) => {
+        if (res && Array.isArray(res.videos) && res.videos.length > 0) {
+          saveAndRenderYtVideos(res.videos);
+        }
+      });
     } else {
       ytStatusEl.textContent = 'Aguardando YouTube';
       ytStatusEl.style.color = '#94a3b8';
@@ -385,6 +391,37 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // Manual YouTube URL Scan button
+  if (btnScanYt) {
+    btnScanYt.addEventListener('click', () => {
+      btnScanYt.textContent = '⏳ Capturando URLs do YouTube...';
+      btnScanYt.disabled = true;
+
+      chrome.tabs.query({}, (tabs) => {
+        const ytTab = findPreferredTab(tabs, 'youtube.com');
+
+        if (!ytTab) {
+          showStatus('Abra o YouTube (pesquisa de vídeos ou um vídeo aberto) para mapear as URLs!', true);
+          btnScanYt.textContent = '▶️ Mapear Vídeos / URLs do YouTube';
+          btnScanYt.disabled = false;
+          return;
+        }
+
+        sendToTabWithAutoInject(ytTab.id, { action: 'AUTOVIRAL_YOUTUBE_GET_SEARCH_VIDEOS' }, (response) => {
+          btnScanYt.textContent = '▶️ Mapear Vídeos / URLs do YouTube';
+          btnScanYt.disabled = false;
+
+          if (response && Array.isArray(response.videos) && response.videos.length > 0) {
+            saveAndRenderYtVideos(response.videos);
+            showStatus(`▶️ ${response.videos.length} URLs de vídeos do YouTube mapeadas! Clique em "Enviar Tudo" abaixo.`);
+          } else {
+            showStatus('Abra uma pesquisa no YouTube (ou um vídeo) e role um pouco antes de clicar novamente.', true);
+          }
+        });
+      });
+    });
+  }
+
   // ZERAR MAPEAMENTO
   btnResetMapped.addEventListener('click', () => {
     currentMappedGroups = [];
@@ -468,6 +505,13 @@ document.addEventListener('DOMContentLoaded', () => {
           timestamp: new Date().toISOString()
         });
       }
+      if (currentYtVideos.length > 0) {
+        bc.postMessage({
+          action: 'AUTOVIRAL_IMPORT_YOUTUBE_VIDEOS_FROM_EXTENSION',
+          videos: currentYtVideos,
+          timestamp: new Date().toISOString()
+        });
+      }
       setTimeout(() => bc.close(), 1000);
     } catch (err) {}
 
@@ -493,17 +537,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 timestamp: new Date().toISOString()
               }, () => { void chrome.runtime.lastError; });
             }
+            if (currentYtVideos.length > 0) {
+              chrome.tabs.sendMessage(tab.id, {
+                action: 'AUTOVIRAL_IMPORT_YOUTUBE_VIDEOS_FROM_EXTENSION',
+                videos: currentYtVideos,
+                timestamp: new Date().toISOString()
+              }, () => { void chrome.runtime.lastError; });
+            }
           });
         }
       });
 
       setTimeout(() => {
-        btnSync.textContent = '📡 Enviar Grupos + Contas Insta para o Painel';
+        btnSync.textContent = '📡 Enviar Tudo (FB + Insta + YouTube) para o Painel';
         btnSync.disabled = false;
         showStatus(
           platformTabFound
-            ? `✅ Sincronizado! FB: ${enrichedGroups.length} grupos • Insta: ${currentInstaAccounts.length} contas.`
-            : `✅ Dados salvos (FB: ${enrichedGroups.length} • Insta: ${currentInstaAccounts.length}). Abra a aba do AutoViral AI!`
+            ? `✅ Sincronizado! FB: ${enrichedGroups.length} • YT: ${currentYtVideos.length} • Insta: ${currentInstaAccounts.length}.`
+            : `✅ Salvo! FB: ${enrichedGroups.length} • YT: ${currentYtVideos.length} • Insta: ${currentInstaAccounts.length}. Abra o AutoViral AI!`
         );
       }, 600);
     });
@@ -573,6 +624,22 @@ document.addEventListener('DOMContentLoaded', () => {
     currentInstaAccounts = Array.from(map.values());
     if (chrome.storage && chrome.storage.local) {
       chrome.storage.local.set({ autoviral_insta_accounts: currentInstaAccounts });
+    }
+    updateCounts();
+    renderItems();
+  }
+
+  function saveAndRenderYtVideos(newVideos) {
+    if (!newVideos || newVideos.length === 0) return;
+    const map = new Map();
+    [...newVideos, ...currentYtVideos].forEach(v => {
+      if (v && v.url) {
+        map.set(v.url, v);
+      }
+    });
+    currentYtVideos = Array.from(map.values());
+    if (chrome.storage && chrome.storage.local) {
+      chrome.storage.local.set({ autoviral_yt_videos: currentYtVideos });
     }
     updateCounts();
     renderItems();

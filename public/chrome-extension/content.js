@@ -438,14 +438,58 @@
     let localMappedVideos = [];
     let isYtWidgetVisible = true;
 
+    if (chrome.storage && chrome.storage.local) {
+      chrome.storage.local.get(['autoviral_yt_videos'], (res) => {
+        if (Array.isArray(res.autoviral_yt_videos)) {
+          localMappedVideos = res.autoviral_yt_videos;
+          updateYouTubeFloatingBadge();
+        }
+      });
+    }
+
     function scanYouTubeSearchResults() {
-      if (!window.location.href.includes('/results')) return;
+      const hrefNow = window.location.href;
+      const isSupportedYtPage =
+        hrefNow.includes('/results') ||
+        hrefNow.includes('/watch?v=') ||
+        hrefNow.includes('/@') ||
+        hrefNow.includes('/channel/') ||
+        hrefNow.includes('/c/');
+      if (!isSupportedYtPage) return;
 
       const detected = [];
-      const videoElements = document.querySelectorAll('ytd-video-renderer, ytd-rich-item-renderer');
+
+      // If watching a specific video directly, capture it immediately
+      if (hrefNow.includes('/watch?v=')) {
+        const cleanCurrentUrl = hrefNow.split('&')[0];
+        const titleEl = document.querySelector('h1.ytd-watch-metadata yt-formatted-string, h1.ytd-video-primary-info-renderer');
+        const currentTitle = ((titleEl && titleEl.innerText) || document.title || '')
+          .replace(/\s*-\s*YouTube$/i, '')
+          .trim();
+        const chEl = document.querySelector('ytd-video-owner-renderer #channel-name a, #owner #channel-name');
+        const currentChannel = ((chEl && chEl.innerText) || 'Canal do YouTube').trim();
+        const videoIdMatch = cleanCurrentUrl.match(/[?&]v=([^&]+)/);
+        const thumb = videoIdMatch ? `https://i.ytimg.com/vi/${videoIdMatch[1]}/hqdefault.jpg` : '';
+        if (currentTitle.length > 2) {
+          detected.push({
+            id: `yt-${videoIdMatch ? videoIdMatch[1] : Date.now()}`,
+            url: cleanCurrentUrl,
+            title: currentTitle,
+            channelName: currentChannel,
+            viewsCount: 'Vídeo Aberto',
+            thumbnailUrl: thumb,
+            actionLike: true,
+            actionComment: true,
+            commentText: 'Excelente vídeo! Como profissional/mãe recomendo muito. Para quem também busca materiais práticos de alfabetização e coordenação motora para imprimir por R$ 9,90 no Pix: https://pay.kiwify.com.br/HE5xbnp ❤️ Parabéns pelo conteúdo!',
+            status: 'ready'
+          });
+        }
+      }
+
+      const videoElements = document.querySelectorAll('ytd-video-renderer, ytd-rich-item-renderer, ytd-grid-video-renderer, ytd-compact-video-renderer');
 
       videoElements.forEach((el, index) => {
-        const titleLink = el.querySelector('a#video-title') || el.querySelector('a#thumbnail');
+        const titleLink = el.querySelector('a#video-title, a#video-title-link') || el.querySelector('a#thumbnail, a[href*="/watch?v="]');
         if (!titleLink) return;
 
         const href = titleLink.getAttribute('href') || titleLink.href || '';
@@ -454,8 +498,8 @@
         const fullUrl = href.startsWith('http') ? href : `https://www.youtube.com${href}`;
         const cleanUrl = fullUrl.split('&')[0]; // strip time and list params
 
-        const titleEl = el.querySelector('#video-title') || el.querySelector('yt-formatted-string');
-        const title = (titleEl ? titleEl.innerText : '').trim();
+        const titleEl = el.querySelector('#video-title, #video-title-link, span#video-title') || el.querySelector('yt-formatted-string');
+        const title = (titleEl ? titleEl.innerText : (titleLink.getAttribute('title') || '')).trim();
 
         const channelEl = el.querySelector('#channel-name, ytd-channel-name');
         const channelName = (channelEl ? channelEl.innerText : 'Canal do YouTube').trim();
@@ -463,14 +507,15 @@
         const metadataEl = el.querySelector('#metadata-line, .ytd-video-meta-block');
         const viewsCount = metadataEl ? metadataEl.innerText.split('\n')[0] : 'Visualizações ativas';
 
+        const videoIdMatch = cleanUrl.match(/[?&]v=([^&]+)/);
         const imgEl = el.querySelector('yt-image img, img');
-        const thumbnailUrl = imgEl ? (imgEl.src || imgEl.getAttribute('src') || '') : '';
+        const thumbnailUrl = (imgEl && (imgEl.src || imgEl.getAttribute('src'))) || (videoIdMatch ? `https://i.ytimg.com/vi/${videoIdMatch[1]}/hqdefault.jpg` : '');
 
         if (title.length > 3 && cleanUrl.includes('/watch?v=')) {
           const alreadyAdded = detected.some(v => v.url === cleanUrl);
           if (!alreadyAdded) {
             detected.push({
-              id: `yt-${Date.now()}-${index}`,
+              id: `yt-${videoIdMatch ? videoIdMatch[1] : Date.now()}-${index}`,
               url: cleanUrl,
               title: title,
               channelName: channelName,
@@ -489,12 +534,15 @@
         let hasNew = false;
         detected.forEach(d => {
           if (!localMappedVideos.some(v => v.url === d.url)) {
-            localMappedVideos.push(d);
+            localMappedVideos.unshift(d);
             hasNew = true;
           }
         });
 
         if (hasNew) {
+          if (chrome.storage && chrome.storage.local) {
+            chrome.storage.local.set({ autoviral_yt_videos: localMappedVideos });
+          }
           updateYouTubeFloatingBadge();
         }
       }
@@ -565,6 +613,7 @@
       };
 
       document.getElementById('autoviral-yt-badge-sync').onclick = () => {
+        scanYouTubeSearchResults();
         const count = localMappedVideos.length;
         try {
           const bc = new BroadcastChannel('autoviral_bridge_channel');
@@ -581,6 +630,14 @@
           videos: localMappedVideos,
           timestamp: new Date().toISOString()
         }, '*');
+
+        if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
+          chrome.runtime.sendMessage({
+            action: 'AUTOVIRAL_IMPORT_YOUTUBE_VIDEOS_FROM_EXTENSION',
+            videos: localMappedVideos,
+            timestamp: new Date().toISOString()
+          }, () => { void chrome.runtime.lastError; });
+        }
 
         const ytBtn = document.getElementById('autoviral-yt-badge-sync');
         if (ytBtn) {
@@ -1061,6 +1118,21 @@
             }
           }));
         }
+        if (Array.isArray(data.ytVideos) && data.ytVideos.length > 0) {
+          window.dispatchEvent(new CustomEvent('autoviral_extension_youtube_videos_received', {
+            detail: {
+              videos: data.ytVideos,
+              timestamp: data.timestamp
+            }
+          }));
+        }
+      } else if (data.action === 'AUTOVIRAL_IMPORT_YOUTUBE_VIDEOS_FROM_EXTENSION') {
+        window.dispatchEvent(new CustomEvent('autoviral_extension_youtube_videos_received', {
+          detail: {
+            videos: data.videos || [],
+            timestamp: data.timestamp
+          }
+        }));
       } else if (data.action === 'AUTOVIRAL_IMPORT_INSTAGRAM_ACCOUNTS') {
         window.dispatchEvent(new CustomEvent('autoviral_extension_instagram_accounts_received', {
           detail: {
@@ -1093,6 +1165,7 @@
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (
         message.action === 'AUTOVIRAL_IMPORT_GROUPS_FROM_EXTENSION' ||
+        message.action === 'AUTOVIRAL_IMPORT_YOUTUBE_VIDEOS_FROM_EXTENSION' ||
         message.action === 'AUTOVIRAL_IMPORT_INSTAGRAM_ACCOUNTS' ||
         message.action === 'AUTOVIRAL_INSTA_ACCOUNT_SYNC'
       ) {

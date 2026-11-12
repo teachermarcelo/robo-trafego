@@ -60,10 +60,25 @@ interface InstagramRobotTabProps {
   externalStoryQueue?: InstagramStoryItem[];
 }
 
+export interface InstagramCampaignItem {
+  id: string;
+  name: string;
+  baseCampaignId: string;
+  price: number;
+  checkoutUrl: string;
+  trackedUrl: string;
+  format: 'stories_sticker' | 'feed_bio' | 'direct_dm';
+  headline: string;
+  caption: string;
+  imageUrl: string;
+  targetHandles: string[];
+  status: 'active' | 'paused';
+  createdAt: string;
+}
+
 export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
   campaigns,
   onAddTrackingEvent,
-  onSimulateSale,
   onNavigateTab,
   externalStoryQueue = []
 }) => {
@@ -75,15 +90,51 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
     imageUrl: '/assets/aistudio/image_e9e67204.png',
   };
 
-  // Internal Subtabs
-  const [activeSubTab, setActiveSubTab] = useState<'stories' | 'mapper' | 'growth' | 'antiban_defense'>('stories');
+  // Internal Subtabs (0: Campanha Instagram | 1: Stories & Links | 2: Mapeador | 3: Ganhar Seguidor | 4: Anti-Ban)
+  const [activeSubTab, setActiveSubTab] = useState<'campaigns' | 'stories' | 'mapper' | 'growth' | 'antiban_defense'>(() => {
+    try {
+      const target = localStorage.getItem('autoviral_insta_target_subtab');
+      if (target && ['campaigns', 'stories', 'mapper', 'growth', 'antiban_defense'].includes(target)) {
+        localStorage.removeItem('autoviral_insta_target_subtab');
+        return target as any;
+      }
+    } catch {}
+    return 'campaigns';
+  });
 
-  // Follower Growth Engine State (User requested: "no instagram: curtir e comentar 'pra ter seguidor'")
+  // 100% Real Server Tracking Events (/api/tracking/events, filtered !isSimulation)
+  const [realInstaEvents, setRealInstaEvents] = useState<any[]>([]);
+  const [isLoadingRealMetrics, setIsLoadingRealMetrics] = useState<boolean>(false);
+
+  const fetchRealInstaMetrics = async () => {
+    setIsLoadingRealMetrics(true);
+    try {
+      const res = await fetch('/api/tracking/events');
+      if (res.ok) {
+        const data = await res.json();
+        const events = Array.isArray(data?.events) ? data.events : [];
+        setRealInstaEvents(
+          events.filter((e: any) => !e.isSimulation && e.source === 'instagram')
+        );
+      }
+    } catch {
+    } finally {
+      setIsLoadingRealMetrics(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchRealInstaMetrics();
+    const timer = setInterval(fetchRealInstaMetrics, 6000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Follower Growth Engine State (Zeroed real baseline)
   const [isGrowthBotRunning, setIsGrowthBotRunning] = useState<boolean>(false);
-  const [growthLikesCount, setGrowthLikesCount] = useState<number>(54);
-  const [growthCommentsCount, setGrowthCommentsCount] = useState<number>(18);
-  const [growthFollowsCount, setGrowthFollowsCount] = useState<number>(12);
-  const [growthFollowersGained, setGrowthFollowersGained] = useState<number>(14);
+  const [growthLikesCount, setGrowthLikesCount] = useState<number>(0);
+  const [growthCommentsCount, setGrowthCommentsCount] = useState<number>(0);
+  const [growthFollowsCount, setGrowthFollowsCount] = useState<number>(0);
+  const [growthFollowersGained, setGrowthFollowersGained] = useState<number>(0);
   const [growthAutoFollow, setGrowthAutoFollow] = useState<boolean>(true);
   const [growthLikeRecentPosts, setGrowthLikeRecentPosts] = useState<boolean>(true);
   const [growthAutoComment, setGrowthAutoComment] = useState<boolean>(true);
@@ -118,16 +169,28 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
   const [isRandomJitter, setIsRandomJitter] = useState<boolean>(true);
   const [countdown, setCountdown] = useState<number>(240);
 
-  // Daily quota & stops
-  const [dailyQuotaLimit, setDailyQuotaLimit] = useState<number>(40); // Safe threshold for human accounts
-  const [dailyStoriesDispatched, setDailyStoriesDispatched] = useState<number>(14);
+  // Daily quota & stops (Real count from 0)
+  const [dailyQuotaLimit, setDailyQuotaLimit] = useState<number>(40);
+  const [dailyStoriesDispatched, setDailyStoriesDispatched] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('autoviral_insta_daily_dispatched_v2');
+      if (saved) return Number(saved) || 0;
+    } catch {}
+    return 0;
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('autoviral_insta_daily_dispatched_v2', String(dailyStoriesDispatched));
+    } catch {}
+  }, [dailyStoriesDispatched]);
 
   // Anti-Ban 24h parameters
   const [isNightRestActive, setIsNightRestActive] = useState<boolean>(true);
   const [nightRestStart, setNightRestStart] = useState<string>('23:30');
   const [nightRestEnd, setNightRestEnd] = useState<string>('06:30');
   const [isAutoCooldownActive, setIsAutoCooldownActive] = useState<boolean>(true);
-  const [actionsInCurrentCycle, setActionsInCurrentCycle] = useState<number>(3);
+  const [actionsInCurrentCycle, setActionsInCurrentCycle] = useState<number>(0);
   const [cycleCooldownThreshold, setCycleCooldownThreshold] = useState<number>(8); // After 8 stories, pauses 1h
   const [isDefenseModalOpen, setIsDefenseModalOpen] = useState<boolean>(false);
   const [defenseTriggerReason, setDefenseTriggerReason] = useState<string>('Instagram Stories Anti-Ban Shield');
@@ -235,52 +298,26 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
   const [targetCategoryFilter, setTargetCategoryFilter] = useState<'all' | 'hashtag' | 'profile_follower' | 'influencer'>('all');
   const [isMappingActive, setIsMappingActive] = useState<boolean>(false);
 
-  // Queue of Stories to be posted automatically
+  // Queue of Stories (Zero fake views/clicks/sales; uses real /api/r link)
   const [storyQueue, setStoryQueue] = useState<InstagramStoryItem[]>(() => {
     try {
-      const saved = localStorage.getItem('autoviral_insta_story_queue');
+      const saved = localStorage.getItem('autoviral_insta_story_queue_v2');
       if (saved) return JSON.parse(saved);
     } catch {}
 
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const buildTracked = (rawUrl: string, campId: string, title: string) =>
+      `${origin}/api/r?to=${encodeURIComponent(rawUrl)}&src=instagram_story&city=Brasil&state=BR&camp=${encodeURIComponent(campId)}&title=${encodeURIComponent(title)}`;
+
     return [
       {
-        id: 'story-1',
-        title: 'POSTE OFERTAS NOS STORIES! • Economize Tempo & Links Convertidos',
-        mediaUrl: '/assets/aistudio/image_5456885b.png',
-        mediaType: 'story_9_16',
-        stickerText: '👉 TOQUE AQUI P/ COMPRAR',
-        stickerUrl: 'https://pay.kiwify.com.br/HE5xbnp',
-        caption: 'Postagem 100% automática com link convertido nos stories. Venda todos os dias no orgânico!',
-        status: 'published',
-        publishedAt: 'Há 12 min',
-        viewsEstimated: 342,
-        linkClicksEstimated: 41,
-        salesEstimated: 2,
-        targetCampaignId: defaultCampaign.id,
-      },
-      {
-        id: 'story-2',
-        title: 'Caderno de Coordenação Motora • Apenas R$ 9,90 no Pix',
+        id: 'story-tpl-1',
+        title: 'Caderno de Coordenação Motora • R$ 9,90 no Pix',
         mediaUrl: '/assets/aistudio/image_e9e67204.png',
         mediaType: 'story_9_16',
         stickerText: '🔗 BAIXAR CADERNO (R$ 9,90)',
-        stickerUrl: 'https://pay.kiwify.com.br/HE5xbnp',
-        caption: 'Material em PDF para pais e pedagogas desenvolverem a coordenação motora sem estresse.',
-        status: 'published',
-        publishedAt: 'Há 38 min',
-        viewsEstimated: 512,
-        linkClicksEstimated: 68,
-        salesEstimated: 4,
-        targetCampaignId: defaultCampaign.id,
-      },
-      {
-        id: 'story-3',
-        title: 'Loja Pronta Sem Estoque • Lucre no E-commerce',
-        mediaUrl: '/assets/aistudio/image_25d5ade9.png',
-        mediaType: 'story_9_16',
-        stickerText: '👉 LIBERAR MINHA LOJA',
-        stickerUrl: 'https://pay.kiwify.com.br/',
-        caption: '20 produtos validados e fornecedores inclusos. Acesso imediato no Pix.',
+        stickerUrl: buildTracked(defaultCampaign.checkoutUrl || 'https://pay.kiwify.com.br/HE5xbnp', defaultCampaign.id, defaultCampaign.title),
+        caption: 'Material em PDF pronto para imprimir. Pais e pedagogas acessam direto no Pix!',
         status: 'ready',
         viewsEstimated: 0,
         linkClicksEstimated: 0,
@@ -288,13 +325,13 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
         targetCampaignId: defaultCampaign.id,
       },
       {
-        id: 'story-4',
-        title: '3 Dicas para Renda Familiar com Tráfego Orgânico',
-        mediaUrl: '/assets/aistudio/image_d6e91a85.png',
+        id: 'story-tpl-2',
+        title: 'Loja Pronta Sem Estoque • Comece Hoje',
+        mediaUrl: '/assets/aistudio/image_25d5ade9.png',
         mediaType: 'story_9_16',
-        stickerText: '🔥 VER ESTRATÉGIA COMPLETA',
-        stickerUrl: 'https://pay.kiwify.com.br/',
-        caption: 'Economize tempo com postagens automáticas e links prontos que convertem!',
+        stickerText: '👉 LIBERAR MINHA LOJA',
+        stickerUrl: buildTracked(defaultCampaign.checkoutUrl || 'https://pay.kiwify.com.br/HE5xbnp', defaultCampaign.id, defaultCampaign.title),
+        caption: 'Produtos validados e acesso imediato com link 100% rastreado via /api/r.',
         status: 'ready',
         viewsEstimated: 0,
         linkClicksEstimated: 0,
@@ -303,6 +340,38 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
       }
     ];
   });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('autoviral_insta_story_queue_v2', JSON.stringify(storyQueue));
+    } catch {}
+  }, [storyQueue]);
+
+  // Saved Instagram Campaigns (User requested: "ultima imagme deveria criar ' campanha instagram'")
+  const [instaCampaigns, setInstaCampaigns] = useState<InstagramCampaignItem[]>(() => {
+    try {
+      const saved = localStorage.getItem('autoviral_insta_campaigns_v1');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return [];
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('autoviral_insta_campaigns_v1', JSON.stringify(instaCampaigns));
+    } catch {}
+  }, [instaCampaigns]);
+
+  // New Instagram Campaign Builder Form State
+  const [campBuilderBaseId, setCampBuilderBaseId] = useState<string>(defaultCampaign.id);
+  const [campBuilderName, setCampBuilderName] = useState<string>(defaultCampaign.title || 'Campanha Instagram Orgânica');
+  const [campBuilderPrice, setCampBuilderPrice] = useState<number>(defaultCampaign.price || 9.9);
+  const [campBuilderCheckoutUrl, setCampBuilderCheckoutUrl] = useState<string>(defaultCampaign.checkoutUrl || 'https://pay.kiwify.com.br/HE5xbnp');
+  const [campBuilderFormat, setCampBuilderFormat] = useState<'stories_sticker' | 'feed_bio' | 'direct_dm'>('stories_sticker');
+  const [campBuilderHeadline, setCampBuilderHeadline] = useState<string>('👉 Material em PDF pronto para imprimir (Acesso Imediato)');
+  const [campBuilderCaption, setCampBuilderCaption] = useState<string>('Toque no link oficial abaixo e garanta o seu acesso hoje mesmo no Pix com envio imediato.');
+  const [campBuilderImageUrl, setCampBuilderImageUrl] = useState<string>(defaultCampaign.imageUrl || '/assets/aistudio/image_e9e67204.png');
+  const [copiedCampLinkId, setCopiedCampLinkId] = useState<string | null>(null);
 
   // Modal to add quick story
   const [isAddStoryModalOpen, setIsAddStoryModalOpen] = useState<boolean>(false);
@@ -387,8 +456,20 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
       }
     };
 
+    const onOpenMapperSubtab = () => {
+      setActiveSubTab('mapper');
+      try {
+        const saved = localStorage.getItem('autoviral_insta_mapped_targets_v2');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) setMappedTargets(parsed);
+        }
+      } catch {}
+    };
+
     window.addEventListener('autoviral_extension_insta_account_synced', onHandleSyncEvent);
     window.addEventListener('autoviral_extension_instagram_accounts_received', onAccountsEvent);
+    window.addEventListener('autoviral_open_insta_mapper_subtab', onOpenMapperSubtab);
     window.addEventListener('storage', onStorageEvent);
 
     let bc: BroadcastChannel | null = null;
@@ -409,6 +490,7 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
     return () => {
       window.removeEventListener('autoviral_extension_insta_account_synced', onHandleSyncEvent);
       window.removeEventListener('autoviral_extension_instagram_accounts_received', onAccountsEvent);
+      window.removeEventListener('autoviral_open_insta_mapper_subtab', onOpenMapperSubtab);
       window.removeEventListener('storage', onStorageEvent);
       if (bc) bc.close();
     };
@@ -489,68 +571,46 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
     }
 
     const targetItem = storyQueue[readyIndex];
-    const newViews = Math.floor(Math.random() * 320) + 110;
-    const newClicks = Math.floor(Math.random() * 35) + 8;
-    const newSales = Math.random() > 0.4 ? 1 : 0;
+    const nowTime = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
     const updatedQueue = [...storyQueue];
     updatedQueue[readyIndex] = {
       ...targetItem,
       status: 'published',
-      publishedAt: 'Agora mesmo',
-      viewsEstimated: newViews,
-      linkClicksEstimated: newClicks,
-      salesEstimated: newSales,
+      publishedAt: `Hoje ${nowTime}`,
+      viewsEstimated: 0,
+      linkClicksEstimated: 0,
+      salesEstimated: 0,
     };
 
     setStoryQueue(updatedQueue);
     setDailyStoriesDispatched(prev => prev + 1);
     setActionsInCurrentCycle(prev => prev + 1);
-
-    // Track simulated events
-    if (onAddTrackingEvent) {
-      onAddTrackingEvent({
-        campaignId: targetItem.targetCampaignId || defaultCampaign.id,
-        campaignTitle: targetItem.title,
-        niche: 'instagram_stories',
-        type: 'checkout_click',
-        source: 'instagram',
-        geo: { city: 'Curitiba', state: 'PR', country: 'Brasil' },
-        device: 'mobile',
-        ageBracket: '25-34',
-        leadScore: 92,
-        durationSeconds: 45,
-        isSimulation: true,
-      });
-
-      if (newSales > 0 && onSimulateSale) {
-        onSimulateSale('Seguidor do Instagram Stories', 'São Paulo', 9.90);
-      }
-    }
+    setInstaSyncNotice(`✅ Story "${targetItem.title}" marcado como publicado em ${accountHandle}. Cliques reais serão contabilizados automaticamente pelo link /api/r!`);
+    setTimeout(() => setInstaSyncNotice(null), 5000);
   };
 
-  // Quick manual post now
+  // Quick manual post now (zero fake clicks/sales!)
   const handlePostNow = (id: string) => {
     const idx = storyQueue.findIndex(s => s.id === id);
     if (idx === -1) return;
 
     const targetItem = storyQueue[idx];
+    const nowTime = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     const updated = [...storyQueue];
     updated[idx] = {
       ...targetItem,
       status: 'published',
-      publishedAt: 'Agora mesmo',
-      viewsEstimated: Math.floor(Math.random() * 280) + 90,
-      linkClicksEstimated: Math.floor(Math.random() * 28) + 6,
-      salesEstimated: 1,
+      publishedAt: `Hoje ${nowTime}`,
+      viewsEstimated: 0,
+      linkClicksEstimated: 0,
+      salesEstimated: 0,
     };
     setStoryQueue(updated);
     setDailyStoriesDispatched(prev => prev + 1);
     setActionsInCurrentCycle(prev => prev + 1);
-
-    if (onSimulateSale) {
-      onSimulateSale('Lead Instagram (Sticker)', 'Belo Horizonte', 9.90);
-    }
+    setInstaSyncNotice(`✅ Story publicado em ${accountHandle}! Compartilhe o link rastreado /api/r para ver cliques reais.`);
+    setTimeout(() => setInstaSyncNotice(null), 5000);
   };
 
   // Simulate Mapping from Open Instagram Web Tab
@@ -624,6 +684,55 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
     return `${window.location.origin}/api/r?to=${encodeURIComponent(rawUrl)}&src=instagram_story&city=Brasil&state=BR&camp=${encodeURIComponent(camp.id)}&title=${encodeURIComponent(camp.title)}&ig=${encodeURIComponent(accountHandle)}`;
   };
 
+  // Create & Save Instagram Campaign
+  const handleSaveInstagramCampaign = (sendToStoryQueue: boolean = true) => {
+    const selectedHandles = mappedTargets.filter(t => t.selected).map(t => t.handle);
+    const baseCamp = campaigns.find(c => c.id === campBuilderBaseId) || defaultCampaign;
+    const rawCheckout = (campBuilderCheckoutUrl || baseCamp.checkoutUrl || 'https://pay.kiwify.com.br/HE5xbnp').trim();
+    const campId = `ig-camp-${Date.now()}`;
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const trackedUrl = `${origin}/api/r?to=${encodeURIComponent(rawCheckout)}&src=${encodeURIComponent(campBuilderFormat === 'stories_sticker' ? 'instagram_story' : campBuilderFormat === 'direct_dm' ? 'instagram_direct' : 'instagram_bio')}&city=Brasil&state=BR&camp=${encodeURIComponent(campId)}&title=${encodeURIComponent(campBuilderName.trim() || baseCamp.title)}&ig=${encodeURIComponent(accountHandle)}`;
+
+    const newIgCamp: InstagramCampaignItem = {
+      id: campId,
+      name: campBuilderName.trim() || baseCamp.title,
+      baseCampaignId: baseCamp.id,
+      price: campBuilderPrice > 0 ? campBuilderPrice : 9.9,
+      checkoutUrl: rawCheckout,
+      trackedUrl,
+      format: campBuilderFormat,
+      headline: campBuilderHeadline.trim() || 'Confira agora no link oficial!',
+      caption: campBuilderCaption.trim(),
+      imageUrl: campBuilderImageUrl || baseCamp.imageUrl || '/assets/aistudio/image_e9e67204.png',
+      targetHandles: selectedHandles,
+      status: 'active',
+      createdAt: new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+    };
+
+    setInstaCampaigns(prev => [newIgCamp, ...prev]);
+
+    if (sendToStoryQueue) {
+      const storyItem: InstagramStoryItem = {
+        id: `story-ig-${Date.now()}`,
+        title: newIgCamp.name,
+        mediaUrl: newIgCamp.imageUrl,
+        mediaType: campBuilderFormat === 'feed_bio' ? 'feed_1_1' : 'story_9_16',
+        stickerText: newIgCamp.headline.slice(0, 34),
+        stickerUrl: trackedUrl,
+        caption: newIgCamp.caption,
+        status: 'ready',
+        viewsEstimated: 0,
+        linkClicksEstimated: 0,
+        salesEstimated: 0,
+        targetCampaignId: newIgCamp.id,
+      };
+      setStoryQueue(prev => [storyItem, ...prev]);
+    }
+
+    setInstaSyncNotice(`✅ Campanha Instagram "${newIgCamp.name}" salva com link real /api/r para ${selectedHandles.length} perfis mapeados!`);
+    setTimeout(() => setInstaSyncNotice(null), 5000);
+  };
+
   // Add new story
   const handleAddNewStory = () => {
     const camp = campaigns.find(c => c.id === newStoryCampaignId) || defaultCampaign;
@@ -647,10 +756,16 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
     setIsAddStoryModalOpen(false);
   };
 
-  // Metrics summary
-  const totalViews = storyQueue.reduce((acc, curr) => acc + (curr.viewsEstimated || 0), 0);
-  const totalClicks = storyQueue.reduce((acc, curr) => acc + (curr.linkClicksEstimated || 0), 0);
-  const totalSales = storyQueue.reduce((acc, curr) => acc + (curr.salesEstimated || 0), 0);
+  // 100% REAL Metrics summary from /api/tracking/events (!isSimulation && source === 'instagram')
+  const realInstaClicks = realInstaEvents.filter(
+    e => e.type === 'checkout_click' || e.type === 'click' || e.type === 'checkout_open'
+  ).length;
+  const realInstaCheckoutOpens = realInstaEvents.filter(
+    e => e.type === 'checkout_open' || e.type === 'checkout_click'
+  ).length;
+  const realInstaSalesEvents = realInstaEvents.filter(e => e.type === 'conversion');
+  const realInstaSalesCount = realInstaSalesEvents.length;
+  const realInstaRevenue = realInstaSalesEvents.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
   const publishedCount = storyQueue.filter(s => s.status === 'published').length;
   const readyCount = storyQueue.filter(s => s.status === 'ready').length;
 
@@ -740,64 +855,87 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
 
         {/* Subtabs Controller */}
         <div className="mt-5 pt-4 border-t border-purple-900/30 flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-1.5 bg-slate-950/70 p-1 rounded-xl border border-purple-900/40">
+          <div className="flex flex-wrap items-center gap-1.5 bg-slate-950/70 p-1 rounded-xl border border-purple-900/40">
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('campaigns')}
+              className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 ${
+                activeSubTab === 'campaigns'
+                  ? 'bg-gradient-to-r from-purple-600 to-rose-600 text-white shadow'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Campanha Instagram ({instaCampaigns.length})</span>
+            </button>
+
             <button
               type="button"
               onClick={() => setActiveSubTab('stories')}
-              className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 cursor-pointer ${
+              className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 ${
                 activeSubTab === 'stories'
                   ? 'bg-purple-600 text-white shadow'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               <Smartphone className="w-3.5 h-3.5" />
-              <span>1. Stories &amp; Links ({storyQueue.length})</span>
+              <span>Stories &amp; Links ({storyQueue.length})</span>
             </button>
 
             <button
               type="button"
               onClick={() => setActiveSubTab('mapper')}
-              className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 cursor-pointer ${
+              className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 ${
                 activeSubTab === 'mapper'
                   ? 'bg-gradient-to-r from-rose-600 to-purple-600 text-white shadow'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               <Compass className="w-3.5 h-3.5" />
-              <span>2. Mapeador de Perfis ({mappedTargets.length})</span>
+              <span>Mapeador de Perfis ({mappedTargets.length})</span>
             </button>
 
             <button
               type="button"
               onClick={() => setActiveSubTab('growth')}
-              className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 cursor-pointer ${
+              className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 ${
                 activeSubTab === 'growth'
                   ? 'bg-gradient-to-r from-amber-500 to-rose-600 text-white shadow'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               <Users className="w-3.5 h-3.5 text-amber-300" />
-              <span>3. 🚀 Curtir &amp; Comentar p/ Ganhar Seguidor</span>
+              <span>Curtir &amp; Comentar</span>
             </button>
 
             <button
               type="button"
               onClick={() => setActiveSubTab('antiban_defense')}
-              className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 cursor-pointer ${
+              className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 ${
                 activeSubTab === 'antiban_defense'
                   ? 'bg-emerald-600 text-white shadow'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               <Shield className="w-3.5 h-3.5 text-emerald-300" />
-              <span>4. Blindagem Anti-Ban 24h</span>
+              <span>Anti-Ban 24h</span>
             </button>
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
             <button
+              type="button"
+              onClick={() => setActiveSubTab('campaigns')}
+              className="px-3.5 py-2 bg-gradient-to-r from-rose-600 to-purple-600 hover:from-rose-500 hover:to-purple-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-md whitespace-nowrap shrink-0"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Criar Campanha Instagram</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setIsInstagramBotRunning(!isInstagramBotRunning)}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-md ${
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-md whitespace-nowrap shrink-0 ${
                 isInstagramBotRunning
                   ? 'bg-amber-600 hover:bg-amber-500 text-white'
                   : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white'
@@ -811,89 +949,339 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
               ) : (
                 <>
                   <Play className="w-4 h-4" />
-                  Iniciar Robô 24h (Pausas Humanizadas)
+                  Iniciar Robô ({readyCount} na fila)
                 </>
               )}
             </button>
+          </div>
+        </div>
+      </div>
 
+      {/* 100% REAL Metrics Counters Grid (Zero Simulated Numbers) */}
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs px-1">
+          <span className="text-slate-300 flex items-center gap-1.5 font-semibold">
+            <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
+            Desempenho Real do Instagram (Sem Simulações)
+          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-emerald-300 font-medium">
+              Contagem auditada via redirecionador /api/r e Webhook
+            </span>
             <button
-              onClick={() => setIsDefenseModalOpen(true)}
-              className="px-3 py-2 bg-blue-950/80 hover:bg-blue-900 border border-blue-600/70 text-blue-300 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
-              title="Testar o modal de defesa de segurança de 1h"
+              type="button"
+              onClick={fetchRealInstaMetrics}
+              disabled={isLoadingRealMetrics}
+              className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 rounded-lg text-[11px] font-semibold flex items-center gap-1 cursor-pointer transition"
             >
-              <Shield className="w-3.5 h-3.5 text-blue-400" />
-              <span>Simular Defesa (59:50)</span>
+              <RefreshCw className={`w-3 h-3 ${isLoadingRealMetrics ? 'animate-spin' : ''}`} />
+              Atualizar Reais
             </button>
           </div>
         </div>
-      </div>
 
-      {/* Metrics Counters Grid with Transparency Notice */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between text-xs px-1">
-          <span className="text-slate-400 flex items-center gap-1.5 font-medium">
-            <TrendingUp className="w-3.5 h-3.5 text-rose-400" />
-            Painel de Desempenho dos Stories
-          </span>
-          <span className="bg-amber-500/10 text-amber-300 border border-amber-500/30 px-2.5 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1">
-            ⚠️ Projeção Estimada de Alcance • Para cliques 100% auditados, veja a Aba 9 (Radar de Links)
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 tabular-nums">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
-            <span className="text-slate-400 text-xs uppercase font-bold flex items-center gap-1.5">
+            <span className="text-slate-400 text-xs font-bold flex items-center gap-1.5">
               <Instagram className="w-4 h-4 text-purple-400" />
-              Stories Postados Hoje
+              Stories Publicados
             </span>
-          <div className="text-2xl font-black text-white mt-1">
-            {publishedCount} stories
+            <div className="text-2xl font-black text-white mt-1">
+              {publishedCount} stories
+            </div>
+            <div className="text-[11px] text-slate-400 mt-1">
+              Fila pronta: {readyCount} · Cota hoje: {dailyStoriesDispatched} / {dailyQuotaLimit}
+            </div>
           </div>
-          <div className="text-[11px] text-slate-400 mt-1">
-            Cota Segura: <strong className="text-emerald-400">{dailyStoriesDispatched} / {dailyQuotaLimit} max/dia</strong>
-          </div>
-        </div>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
-          <span className="text-slate-400 text-xs uppercase font-bold flex items-center gap-1.5">
-            <Eye className="w-4 h-4 text-rose-400" />
-            Visualizações nos Stories
-          </span>
-          <div className="text-2xl font-black text-rose-400 mt-1">
-            {totalViews.toLocaleString('pt-BR')} views
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+            <span className="text-slate-400 text-xs font-bold flex items-center gap-1.5">
+              <MousePointerClick className="w-4 h-4 text-cyan-400" />
+              Cliques Reais (/api/r)
+            </span>
+            <div className="text-2xl font-black text-cyan-300 mt-1">
+              {realInstaClicks} cliques
+            </div>
+            <div className="text-[11px] text-slate-400 mt-1">
+              Apenas visitantes reais no link do Story/Bio
+            </div>
           </div>
-          <div className="text-[11px] text-slate-400 mt-1">
-            Alcance orgânico 100% gratuito
-          </div>
-        </div>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
-          <span className="text-slate-400 text-xs uppercase font-bold flex items-center gap-1.5">
-            <MousePointerClick className="w-4 h-4 text-blue-400" />
-            Cliques no Sticker de Link
-          </span>
-          <div className="text-2xl font-black text-blue-400 mt-1">
-            {totalClicks} toques
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+            <span className="text-slate-400 text-xs font-bold flex items-center gap-1.5">
+              <ExternalLink className="w-4 h-4 text-amber-400" />
+              Abriram o Checkout
+            </span>
+            <div className="text-2xl font-black text-amber-300 mt-1">
+              {realInstaCheckoutOpens} aberturas
+            </div>
+            <div className="text-[11px] text-slate-400 mt-1">
+              Redirecionados com sucesso para Kiwify/Hotmart
+            </div>
           </div>
-          <div className="text-[11px] text-blue-300 mt-1">
-            Taxa de clique: <strong className="text-white">{totalViews > 0 ? ((totalClicks / totalViews) * 100).toFixed(1) : '0'}%</strong>
-          </div>
-        </div>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
-          <span className="text-slate-400 text-xs uppercase font-bold flex items-center gap-1.5">
-            <DollarSign className="w-4 h-4 text-emerald-400" />
-            Vendas Aprovadas no Pix
-          </span>
-          <div className="text-2xl font-black text-emerald-400 mt-1">
-            {totalSales} vendas
-          </div>
-          <div className="text-[11px] text-emerald-300 mt-1">
-            R$ {(totalSales * 9.90).toFixed(2).replace('.', ',')} faturado nos Stories
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+            <span className="text-slate-400 text-xs font-bold flex items-center gap-1.5">
+              <DollarSign className="w-4 h-4 text-emerald-400" />
+              Vendas Reais no Pix
+            </span>
+            <div className="text-2xl font-black text-emerald-400 mt-1">
+              {realInstaSalesCount} vendas
+            </div>
+            <div className="text-[11px] text-emerald-300 mt-1">
+              R$ {realInstaRevenue.toFixed(2).replace('.', ',')} confirmados via Webhook
+            </div>
           </div>
         </div>
       </div>
-    </div>
+
+      {/* SUBTAB 0: CAMPANHA INSTAGRAM (User requested: "ultima imagme deveria criar ' campanha instagram'") */}
+      {activeSubTab === 'campaigns' && (
+        <div className="space-y-6">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+              <div>
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-rose-400" />
+                  Criar Campanha Instagram (Com Link Rastreado Real /api/r)
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Configure sua campanha para Stories Próprio ({accountHandle}), Feed + Bio ou Direct nos {selectedTargetCount} perfis mapeados.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveSubTab('mapper')}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-purple-200 border border-purple-700/50 rounded-lg text-xs font-semibold transition cursor-pointer whitespace-nowrap shrink-0"
+              >
+                Selecionar Perfis Mapeados ({selectedTargetCount})
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 text-xs">
+              <div className="lg:col-span-7 space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">Produto / Campanha Base:</label>
+                    <select
+                      value={campBuilderBaseId}
+                      onChange={(e) => {
+                        const chosen = campaigns.find(c => c.id === e.target.value);
+                        setCampBuilderBaseId(e.target.value);
+                        if (chosen) {
+                          setCampBuilderName(chosen.title);
+                          setCampBuilderPrice(chosen.price || 9.9);
+                          setCampBuilderCheckoutUrl(chosen.checkoutUrl || 'https://pay.kiwify.com.br/HE5xbnp');
+                          setCampBuilderImageUrl(chosen.imageUrl || '/assets/aistudio/image_e9e67204.png');
+                          if (chosen.headline) setCampBuilderHeadline(chosen.headline);
+                          if (chosen.copy) setCampBuilderCaption(chosen.copy);
+                        }
+                      }}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-rose-500"
+                    >
+                      {campaigns.map(c => (
+                        <option key={c.id} value={c.id}>
+                          {c.title} (R$ {(c.price || 9.9).toFixed(2).replace('.', ',')})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">Formato no Instagram:</label>
+                    <select
+                      value={campBuilderFormat}
+                      onChange={(e) => setCampBuilderFormat(e.target.value as any)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-rose-500"
+                    >
+                      <option value="stories_sticker">Stories Próprio (9:16 + Sticker Link)</option>
+                      <option value="feed_bio">Feed / Reels + Link na Bio</option>
+                      <option value="direct_dm">Direct para Perfis Mapeados</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="sm:col-span-2">
+                    <label className="block text-slate-300 font-semibold mb-1">Nome da Campanha Instagram:</label>
+                    <input
+                      type="text"
+                      value={campBuilderName}
+                      onChange={(e) => setCampBuilderName(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-rose-500"
+                      placeholder="Ex: Stories Tarefinhas TEA Curitiba"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">Valor (R$):</label>
+                    <input
+                      type="number"
+                      step="0.10"
+                      value={campBuilderPrice}
+                      onChange={(e) => setCampBuilderPrice(Number(e.target.value) || 9.9)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white tabular-nums focus:outline-none focus:border-rose-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Link Oficial do Checkout (Destino):</label>
+                  <input
+                    type="text"
+                    value={campBuilderCheckoutUrl}
+                    onChange={(e) => setCampBuilderCheckoutUrl(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-cyan-300 font-mono focus:outline-none focus:border-cyan-500"
+                    placeholder="https://pay.kiwify.com.br/HE5xbnp"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Texto da Figurinha / Chamada Principal:</label>
+                  <input
+                    type="text"
+                    value={campBuilderHeadline}
+                    onChange={(e) => setCampBuilderHeadline(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-semibold focus:outline-none focus:border-rose-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Legenda / Copy da Campanha:</label>
+                  <textarea
+                    rows={3}
+                    value={campBuilderCaption}
+                    onChange={(e) => setCampBuilderCaption(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-slate-200 focus:outline-none focus:border-rose-500"
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => handleSaveInstagramCampaign(true)}
+                    className="px-4 py-2.5 bg-gradient-to-r from-rose-600 to-purple-600 hover:from-rose-500 hover:to-purple-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg transition cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Salvar Campanha + Enviar p/ Fila de Stories
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSaveInstagramCampaign(false)}
+                    className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold transition cursor-pointer"
+                  >
+                    Apenas Salvar Campanha
+                  </button>
+                </div>
+              </div>
+
+              <div className="lg:col-span-5 bg-slate-950 border border-slate-800 rounded-2xl p-4 space-y-3 flex flex-col justify-between">
+                <div className="space-y-2">
+                  <div className="text-[11px] text-slate-400 font-semibold">Prévia da Conta &amp; Público:</div>
+                  <div className="flex items-center gap-3">
+                    <img
+                      src={campBuilderImageUrl}
+                      alt={campBuilderName}
+                      referrerPolicy="no-referrer"
+                      className="w-16 h-20 rounded-xl object-cover border border-slate-700 shrink-0"
+                    />
+                    <div className="min-w-0 space-y-1">
+                      <div className="text-sm font-bold text-white truncate">{campBuilderName}</div>
+                      <div className="text-xs text-purple-300 font-mono">{accountHandle}</div>
+                      <div className="text-[11px] text-slate-400">
+                        {selectedTargetCount} perfis mapeados selecionados · R$ {campBuilderPrice.toFixed(2).replace('.', ',')}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 space-y-1.5">
+                  <div className="text-[11px] text-cyan-300 font-bold">Rastreamento Automático /api/r Ativado</div>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Ao salvar, é gerado um link real conectado ao servidor. Todo clique real no seu Story, Bio ou Direct aparece na hora em <strong>Quem Clicou (Número Real)</strong> e nos cards acima.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Saved Instagram Campaigns List */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-sm font-bold text-white">
+                Campanhas Instagram Salvas ({instaCampaigns.length})
+              </h3>
+              <span className="text-[11px] text-slate-400">Persistência automática garantida</span>
+            </div>
+
+            {instaCampaigns.length === 0 ? (
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-6 text-center space-y-2">
+                <p className="text-xs text-slate-300 font-semibold">
+                  Nenhuma campanha Instagram criada ainda.
+                </p>
+                <p className="text-[11px] text-slate-500">
+                  Preencha o formulário acima e clique em "Salvar Campanha + Enviar p/ Fila de Stories" para gerar seu link real rastreado.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {instaCampaigns.map((camp) => (
+                  <div key={camp.id} className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="text-sm font-bold text-white truncate">{camp.name}</div>
+                        <div className="text-[11px] text-slate-400 mt-0.5">
+                          {camp.format === 'stories_sticker' ? 'Stories 9:16' : camp.format === 'feed_bio' ? 'Feed + Bio' : 'Direct'} · {camp.targetHandles.length} perfis · {camp.createdAt}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setInstaCampaigns(prev => prev.filter(item => item.id !== camp.id))}
+                        className="text-slate-500 hover:text-rose-400 p-1 cursor-pointer"
+                        title="Excluir campanha"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    <div className="bg-slate-900 border border-slate-800 rounded-lg p-2.5 flex items-center justify-between gap-2">
+                      <code className="text-[11px] text-cyan-300 font-mono truncate">{camp.trackedUrl}</code>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(camp.trackedUrl);
+                          setCopiedCampLinkId(camp.id);
+                          setTimeout(() => setCopiedCampLinkId(null), 2000);
+                        }}
+                        className="px-2.5 py-1 bg-cyan-950 hover:bg-cyan-900 text-cyan-200 border border-cyan-800 rounded text-[11px] font-bold shrink-0 cursor-pointer"
+                      >
+                        {copiedCampLinkId === camp.id ? 'Copiado ✓' : 'Copiar Link'}
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 text-[11px]">
+                      <a
+                        href={camp.trackedUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-blue-400 hover:text-blue-300 flex items-center gap-1 font-semibold"
+                      >
+                        Testar Redirecionamento Real <ExternalLink className="w-3 h-3" />
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => setActiveSubTab('stories')}
+                        className="text-purple-300 hover:text-purple-200 font-semibold cursor-pointer"
+                      >
+                        Ver na Fila de Stories →
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
     {/* SUBTAB 1: Stories Queue & Dispatch */}
       {activeSubTab === 'stories' && (
@@ -994,18 +1382,11 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
                   )}
                 </div>
 
-                {/* Bottom stats */}
+                {/* Bottom status & real link audit */}
                 <div className="mt-3 pt-2.5 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-400">
-                  <span className="flex items-center gap-1">
-                    <Eye className="w-3.5 h-3.5 text-rose-400" />
-                    <strong>{item.viewsEstimated}</strong> views
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <MousePointerClick className="w-3.5 h-3.5 text-blue-400" />
-                    <strong>{item.linkClicksEstimated}</strong> cliques no link
-                  </span>
-                  <span className="flex items-center gap-1 text-emerald-400 font-bold">
-                    ✓ {item.salesEstimated} vendas
+                  <span>Conta: <strong className="text-slate-200">{accountHandle}</strong></span>
+                  <span className="text-cyan-300 font-medium">
+                    Link rastreado (/api/r) ativo
                   </span>
                 </div>
               </div>

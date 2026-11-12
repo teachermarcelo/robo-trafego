@@ -283,16 +283,20 @@ Acesse diretamente: ${checkout}`,
 
 interface ChromeFbGroupsTabProps {
   campaigns: Campaign[];
+  initialCampaignId?: string;
   onAddTrackingEvent?: (event: any) => void;
   onSimulateSale?: (customerName: string, city: string, amount: number) => void;
   onNavigateTab?: (tab: string) => void;
+  onAddCampaign?: (newCampaign: Campaign) => void;
 }
 
 export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
   campaigns,
+  initialCampaignId,
   onAddTrackingEvent,
   onSimulateSale,
-  onNavigateTab
+  onNavigateTab,
+  onAddCampaign,
 }) => {
   const defaultProduct = campaigns[0] || {
     id: 'camp-tarefinhas-autismo',
@@ -302,13 +306,23 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
     checkoutUrl: 'https://pay.kiwify.com.br/HE5xbnp',
   };
 
-  // Managed Campaigns (User requested: "poder criar várias campanha e ativar/desativar/pausar garantindo a campanha certa")
+  // Managed Campaigns (User requested: "agora todas minhas campanhas criadas irao aparecer no disparo?")
   const [managedCampaigns, setManagedCampaigns] = useState<Campaign[]>(() => {
     try {
       const saved = localStorage.getItem('autoviral_managed_campaigns_v5');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          // Merge prop campaigns with saved to guarantee any newly created campaigns are included
+          const savedIds = new Set(parsed.map((c: any) => c.id));
+          const allMerged = [...parsed];
+          (campaigns || []).forEach(c => {
+            if (!savedIds.has(c.id)) {
+              allMerged.push({ ...c, status: c.status || 'active' });
+            }
+          });
+          return allMerged;
+        }
       }
     } catch {}
     const initialList = campaigns && campaigns.length > 0 ? campaigns : [defaultProduct];
@@ -317,6 +331,28 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       status: c.status || 'active'
     }));
   });
+
+  // Keep managedCampaigns strictly synced with all campaigns created or updated anywhere in the platform
+  useEffect(() => {
+    if (!campaigns || campaigns.length === 0) return;
+    setManagedCampaigns(prev => {
+      const currentMap = new Map(prev.map(c => [c.id, c]));
+      const nextMerged: Campaign[] = campaigns.map(c => {
+        const existing = currentMap.get(c.id);
+        return existing ? { ...c, status: existing.status || c.status || 'active' } : { ...c, status: c.status || 'active' };
+      });
+      // Also retain any campaigns created only locally
+      prev.forEach(p => {
+        if (!nextMerged.some(m => m.id === p.id)) {
+          nextMerged.push(p);
+        }
+      });
+      try {
+        localStorage.setItem('autoviral_managed_campaigns_v5', JSON.stringify(nextMerged));
+      } catch {}
+      return nextMerged;
+    });
+  }, [campaigns]);
 
   const availableCampaigns = managedCampaigns;
 
@@ -425,13 +461,41 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
   const [isRandomJitterActive, setIsRandomJitterActive] = useState<boolean>(true);
 
   // Campaign & Bot Execution State
-  const [selectedProductId, setSelectedProductId] = useState<string>(defaultProduct.id);
+  const [selectedProductId, setSelectedProductId] = useState<string>(() => {
+    if (initialCampaignId) return initialCampaignId;
+    try {
+      const saved = localStorage.getItem('autoviral_selected_product_id');
+      if (saved) return saved;
+    } catch {}
+    return defaultProduct.id;
+  });
   const [selectedCheckoutUrl, setSelectedCheckoutUrl] = useState<string>(defaultProduct.checkoutUrl || 'https://pay.kiwify.com.br/HE5xbnp');
   const [selectedPrice, setSelectedPrice] = useState<number>(defaultProduct.price || 9.90);
   const [activeCopyTemplateIndex, setActiveCopyTemplateIndex] = useState<number>(0);
 
   const activeCampaign = availableCampaigns.find(c => c.id === selectedProductId) || availableCampaigns[0] || defaultProduct;
   const currentTemplates = getCampaignCopyTemplates(activeCampaign);
+
+  // React immediately to initialCampaignId or stored selection changes
+  useEffect(() => {
+    const targetId = initialCampaignId || localStorage.getItem('autoviral_selected_product_id');
+    if (targetId) {
+      const found = availableCampaigns.find(c => c.id === targetId);
+      if (found) {
+        setSelectedProductId(targetId);
+        setSelectedCheckoutUrl(found.checkoutUrl || 'https://pay.kiwify.com.br/HE5xbnp');
+        setSelectedPrice(found.price || 9.90);
+        const templates = getCampaignCopyTemplates(found);
+        if (templates[0]) {
+          setPostHeadline(templates[0].headline);
+          setPostCopy(templates[0].copy);
+        }
+        if (initialCampaignId) {
+          setActiveSubTab('campaign');
+        }
+      }
+    }
+  }, [initialCampaignId, availableCampaigns]);
 
   const [postHeadline, setPostHeadline] = useState(
     '🌸 Meninas e colegas de Curitiba, achei esse material de coordenação motora que facilitou demais minha rotina!'
@@ -569,6 +633,10 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
     try {
       localStorage.setItem('autoviral_managed_campaigns_v5', JSON.stringify(updated));
     } catch {}
+
+    if (onAddCampaign) {
+      onAddCampaign(newCamp);
+    }
 
     handleSetActiveCampaign(newCamp);
     setIsCreateCampaignModalOpen(false);

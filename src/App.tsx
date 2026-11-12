@@ -50,6 +50,7 @@ import {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [selectedCampaignForDispatches, setSelectedCampaignForDispatches] = useState<string | null>(null);
   const [deletedCampaignIds, setDeletedCampaignIds] = useState<Set<string>>(() => {
     try {
       const saved = localStorage.getItem('autoviral_deleted_campaign_ids');
@@ -896,6 +897,8 @@ export default function App() {
         {activeTab === 'chrome_fb_groups' && (
           <ChromeFbGroupsTab
             campaigns={campaigns}
+            initialCampaignId={selectedCampaignForDispatches || undefined}
+            onAddCampaign={handleAddCampaign}
             onAddTrackingEvent={handleAddTrackingEvent}
             onSimulateSale={(customerName, city, amount) => {
               const notif: PushNotification = {
@@ -1005,6 +1008,7 @@ export default function App() {
               try {
                 localStorage.setItem('autoviral_selected_product_id', camp.id);
               } catch {}
+              setSelectedCampaignForDispatches(camp.id);
               setActiveTab('chrome_fb_groups');
             }}
           />

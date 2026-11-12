@@ -581,47 +581,219 @@
   // (User requested: "dispositivo de defesa que o Instagram conectado no navegador seja por onde vai fazer as postagens")
   // =========================================================================
   if (currentHost.includes('instagram.com')) {
-    console.log('[AutoViral AI] Conectado ao Instagram Web logado no navegador. Dispositivo de Defesa Anti-Ban ATIVO.');
+    console.log('[AutoViral AI] Conectado ao Instagram Web logado no navegador. Dispositivo de Defesa Anti-Ban & Mapeador Ilimitado ATIVO.');
 
-    // Detect connected account username
+    const RESERVED_INSTA_PATHS = new Set([
+      'p', 'reel', 'reels', 'tv', 'stories', 'direct', 'explore', 'accounts',
+      'notifications', 'create', 'about', 'legal', 'developer', 'directory',
+      'nametag', 'session', 'emails', 'challenge', 'privacy', 'terms', 'help',
+      'api', 'static', 'graphql', 'oauth', 'your_activity', 'archive'
+    ]);
+
     let connectedHandle = '@conectado';
-    try {
-      const profileLinks = document.querySelectorAll('a[href^="/"]');
-      for (const pl of profileLinks) {
-        const href = pl.getAttribute('href') || '';
-        if (href.length > 2 && !href.includes('/direct/') && !href.includes('/explore/') && !href.includes('/reels/') && !href.includes('/stories/')) {
-          const candidate = href.replace(/\//g, '');
-          if (candidate.length > 2 && !['p', 'reel', 'tv'].includes(candidate)) {
-            connectedHandle = '@' + candidate;
-            break;
+    const detectConnectedInstagramHandle = () => {
+      try {
+        const imgs = document.querySelectorAll('img[alt*="Foto do perfil de"], img[alt*="profile picture"]');
+        for (const img of imgs) {
+          const alt = img.getAttribute('alt') || '';
+          const matchPt = alt.match(/Foto do perfil de\s+([a-zA-Z0-9._]+)/i);
+          const matchEn = alt.match(/([a-zA-Z0-9._]+)'s profile picture/i);
+          const candidate = (matchPt && matchPt[1]) || (matchEn && matchEn[1]);
+          if (candidate && !RESERVED_INSTA_PATHS.has(candidate.toLowerCase())) {
+            connectedHandle = '@' + candidate.toLowerCase();
+            return connectedHandle;
           }
         }
-      }
-    } catch (e) {}
+        const navLinks = document.querySelectorAll('nav a[href^="/"], a[role="link"][href^="/"]');
+        for (const pl of navLinks) {
+          const href = pl.getAttribute('href') || '';
+          const clean = href.replace(/^\/+|\/+$/g, '').split('/')[0];
+          if (
+            clean &&
+            clean.length >= 2 &&
+            clean.length <= 30 &&
+            /^[a-zA-Z0-9._]+$/.test(clean) &&
+            !RESERVED_INSTA_PATHS.has(clean.toLowerCase()) &&
+            pl.querySelector('img')
+          ) {
+            connectedHandle = '@' + clean.toLowerCase();
+            return connectedHandle;
+          }
+        }
+      } catch (e) {}
+      return connectedHandle;
+    };
 
-    // Inject Floating Instagram Defense Widget
+    detectConnectedInstagramHandle();
+
+    // Unlimited Instagram Account Mapper (Feed, Busca, Seguidores & Explore)
+    const mappedInstaMap = new Map();
+
+    if (chrome.storage && chrome.storage.local) {
+      chrome.storage.local.get(['autoviral_insta_accounts', 'autoviral_insta_connected_handle'], (res) => {
+        if (res.autoviral_insta_connected_handle && connectedHandle === '@conectado') {
+          connectedHandle = res.autoviral_insta_connected_handle;
+        }
+        if (Array.isArray(res.autoviral_insta_accounts)) {
+          res.autoviral_insta_accounts.forEach((acc) => {
+            if (acc && acc.username) {
+              mappedInstaMap.set(acc.username.toLowerCase(), acc);
+            }
+          });
+        }
+        updateInstaBadgeCounts();
+      });
+    }
+
+    function updateInstaBadgeCounts() {
+      const countEl = document.getElementById('autoviral-insta-mapped-count');
+      if (countEl) {
+        countEl.textContent = `${mappedInstaMap.size} contas mapeadas (Ilimitado)`;
+      }
+      const handleEl = document.getElementById('autoviral-insta-connected-handle');
+      if (handleEl) {
+        handleEl.textContent = connectedHandle;
+      }
+    }
+
+    function setInstaWidgetStatus(msg, color) {
+      const st = document.getElementById('autoviral-insta-widget-status');
+      if (st) {
+        st.textContent = msg;
+        st.style.color = color || '#34d399';
+      }
+    }
+
+    function scanVisibleInstagramAccounts() {
+      detectConnectedInstagramHandle();
+      let newFound = 0;
+
+      try {
+        const anchors = document.querySelectorAll('a[href^="/"]');
+        anchors.forEach((a) => {
+          const href = a.getAttribute('href') || '';
+          if (!href || href === '/' || href.includes('?')) return;
+
+          // Match exact single-segment profile URLs like /username/ or /username
+          const match = href.match(/^\/([a-zA-Z0-9._]{2,30})\/?$/);
+          if (!match) return;
+
+          const username = match[1].toLowerCase();
+          if (RESERVED_INSTA_PATHS.has(username)) return;
+          if ('@' + username === connectedHandle.toLowerCase()) return;
+
+          // Extract display name from card or link text
+          let displayName = '';
+          const container = a.closest('div[role="button"], li, div');
+          if (a.textContent && a.textContent.trim().length >= 2 && a.textContent.trim().length <= 50) {
+            const txt = a.textContent.trim().split('\n')[0].trim();
+            if (txt && !txt.startsWith('http') && txt.toLowerCase() !== username) {
+              displayName = txt;
+            }
+          }
+          if (!displayName && container) {
+            const spans = container.querySelectorAll('span');
+            for (const sp of spans) {
+              const t = (sp.textContent || '').trim();
+              if (t && t.length >= 2 && t.length <= 45 && t.toLowerCase() !== username && !t.includes('Seguir') && !t.includes('Follow')) {
+                displayName = t;
+                break;
+              }
+            }
+          }
+
+          const handle = '@' + username;
+          if (!mappedInstaMap.has(username)) {
+            newFound++;
+            mappedInstaMap.set(username, {
+              handle,
+              username,
+              name: displayName || username,
+              url: `https://www.instagram.com/${username}/`,
+              sourceUrl: window.location.href,
+              mappedAt: new Date().toISOString()
+            });
+          }
+        });
+      } catch (e) {}
+
+      const list = Array.from(mappedInstaMap.values());
+      if (chrome.storage && chrome.storage.local) {
+        chrome.storage.local.set({
+          autoviral_insta_accounts: list,
+          autoviral_insta_connected_handle: connectedHandle
+        });
+      }
+      updateInstaBadgeCounts();
+      return { list, newFound };
+    }
+
+    function sendInstagramAccountsToAutoViral() {
+      const { list } = scanVisibleInstagramAccounts();
+      const payload = {
+        action: 'AUTOVIRAL_IMPORT_INSTAGRAM_ACCOUNTS',
+        accounts: list,
+        connectedHandle,
+        sourceUrl: window.location.href,
+        timestamp: new Date().toISOString()
+      };
+
+      try {
+        const bc = new BroadcastChannel('autoviral_bridge_channel');
+        bc.postMessage(payload);
+        bc.postMessage({
+          action: 'AUTOVIRAL_INSTA_ACCOUNT_SYNC',
+          handle: connectedHandle,
+          url: window.location.href,
+          timestamp: new Date().toISOString()
+        });
+        setTimeout(() => bc.close(), 1000);
+      } catch (e) {}
+
+      if (chrome.runtime && chrome.runtime.sendMessage) {
+        chrome.runtime.sendMessage(payload);
+        chrome.runtime.sendMessage({
+          action: 'AUTOVIRAL_INSTA_ACCOUNT_SYNC',
+          handle: connectedHandle
+        });
+      }
+      setInstaWidgetStatus(`✅ ${list.length} contas enviadas para AutoViral!`, '#34d399');
+    }
+
+    // Inject Floating Instagram Defense & Unlimited Mapper Widget
     const badge = document.createElement('div');
     badge.id = 'autoviral-insta-defense-badge';
     badge.innerHTML = `
-      <div style="position: fixed; bottom: 20px; left: 20px; z-index: 999999; background: #090d16; color: #fff; padding: 12px 18px; border-radius: 16px; font-family: system-ui, -apple-system, sans-serif; font-size: 11px; font-weight: 700; border: 1px solid #a855f7; box-shadow: 0 10px 25px rgba(0,0,0,0.7), 0 0 15px rgba(168, 85, 247, 0.3); display: flex; flex-direction: column; gap: 8px; min-width: 250px;">
+      <div style="position: fixed; bottom: 20px; left: 20px; z-index: 999999; background: #090d16; color: #fff; padding: 12px 16px; border-radius: 16px; font-family: system-ui, -apple-system, sans-serif; font-size: 11px; font-weight: 700; border: 1px solid #a855f7; box-shadow: 0 10px 25px rgba(0,0,0,0.7), 0 0 15px rgba(168, 85, 247, 0.3); display: flex; flex-direction: column; gap: 7px; width: 280px;">
         <div style="display: flex; align-items: center; justify-content: space-between;">
           <div style="display: flex; align-items: center; gap: 6px;">
             <span style="display: inline-block; width: 8px; height: 8px; background: #10b981; border-radius: 50%; box-shadow: 0 0 8px #10b981;"></span>
             <span style="color: #c084fc; font-weight: 900;">AutoViral AI • Instagram</span>
           </div>
           <span style="font-size: 9px; background: rgba(16, 185, 129, 0.15); color: #34d399; padding: 2px 6px; border-radius: 6px; border: 1px solid rgba(16, 185, 129, 0.4);">
-            DEFESA ATIVA
+            ILIMITADO
           </span>
         </div>
-        <div style="font-size: 10px; color: #94a3b8;">
-          Conta Conectada: <strong style="color: #f1f5f9;">${connectedHandle}</strong>
+        <div style="font-size: 10px; color: #94a3b8; display: flex; justify-content: space-between;">
+          <span>Conta Stories: <strong id="autoviral-insta-connected-handle" style="color: #f1f5f9;">${connectedHandle}</strong></span>
         </div>
-        <div style="font-size: 9px; color: #cbd5e1; line-height: 1.3;">
-          🛡️ Dispositivo de Defesa: Disparos humanizados pelo navegador com proteção contra bloqueios temporários da Meta.
+        <div style="font-size: 11px; color: #e9d5ff; background: rgba(147,51,234,0.18); border: 1px solid rgba(168,85,247,0.35); border-radius: 8px; padding: 5px 8px;">
+          📡 <strong id="autoviral-insta-mapped-count">0 contas mapeadas (Ilimitado)</strong>
         </div>
-        <button id="btn-sync-insta-to-platform" style="background: linear-gradient(135deg, #9333ea, #c026d3); color: #fff; border: none; padding: 6px 12px; border-radius: 8px; font-size: 10px; font-weight: 800; cursor: pointer; transition: transform 0.1s;">
-          🚀 Sincronizar Conta com Painel AutoViral
+        <div style="display: flex; gap: 6px;">
+          <button id="btn-scan-insta-accounts" style="flex: 1; background: #1e293b; color: #e2e8f0; border: 1px solid #475569; padding: 6px 8px; border-radius: 8px; font-size: 10px; font-weight: 800; cursor: pointer;">
+            🔍 Mapear Visíveis
+          </button>
+          <button id="btn-sync-insta-to-platform" style="flex: 1; background: linear-gradient(135deg, #10b981, #059669); color: #022c22; border: none; padding: 6px 8px; border-radius: 8px; font-size: 10px; font-weight: 900; cursor: pointer;">
+            📡 Enviar p/ Grupo
+          </button>
+        </div>
+        <button id="btn-sync-only-handle" style="background: linear-gradient(135deg, #9333ea, #c026d3); color: #fff; border: none; padding: 6px 10px; border-radius: 8px; font-size: 10px; font-weight: 800; cursor: pointer;">
+          🛡️ Confirmar Conta Conectada para Stories
         </button>
+        <div id="autoviral-insta-widget-status" style="font-size: 9px; color: #94a3b8; line-height: 1.3;">
+          Role a busca, seguidores ou comentários para capturar contas sem limite.
+        </div>
       </div>
     `;
     if (document.body) {
@@ -631,9 +803,28 @@
     }
 
     setTimeout(() => {
-      const btnSync = document.getElementById('btn-sync-insta-to-platform');
-      if (btnSync) {
-        btnSync.onclick = () => {
+      scanVisibleInstagramAccounts();
+
+      const btnScanInsta = document.getElementById('btn-scan-insta-accounts');
+      if (btnScanInsta) {
+        btnScanInsta.onclick = () => {
+          const { list, newFound } = scanVisibleInstagramAccounts();
+          setInstaWidgetStatus(`🔍 Capturadas +${newFound} novas (${list.length} total no grupo)!`, '#38bdf8');
+        };
+      }
+
+      const btnSendGroup = document.getElementById('btn-sync-insta-to-platform');
+      if (btnSendGroup) {
+        btnSendGroup.onclick = () => {
+          sendInstagramAccountsToAutoViral();
+        };
+      }
+
+      const btnSyncHandle = document.getElementById('btn-sync-only-handle');
+      if (btnSyncHandle) {
+        btnSyncHandle.onclick = () => {
+          detectConnectedInstagramHandle();
+          updateInstaBadgeCounts();
           try {
             const bc = new BroadcastChannel('autoviral_bridge_channel');
             bc.postMessage({
@@ -644,17 +835,37 @@
             });
             setTimeout(() => bc.close(), 1000);
           } catch (e) {}
-
           if (chrome.runtime && chrome.runtime.sendMessage) {
             chrome.runtime.sendMessage({
               action: 'AUTOVIRAL_INSTA_ACCOUNT_SYNC',
               handle: connectedHandle
             });
           }
-          alert(`✅ Conta ${connectedHandle} do Instagram sincronizada com o Painel AutoViral! As postagens usarão esta sessão do navegador com dispositivo de defesa ativo.`);
+          setInstaWidgetStatus(`✅ Conta ${connectedHandle} confirmada nos Stories & Direct!`, '#34d399');
         };
       }
     }, 1000);
+
+    // Auto-capture on scroll (throttled)
+    let scrollInstaTimeout = null;
+    window.addEventListener('scroll', () => {
+      clearTimeout(scrollInstaTimeout);
+      scrollInstaTimeout = setTimeout(() => {
+        scanVisibleInstagramAccounts();
+      }, 900);
+    }, true);
+
+    // Observe modal dialogs (followers / search dropdown)
+    try {
+      let mutTimeout = null;
+      const instaObserver = new MutationObserver(() => {
+        clearTimeout(mutTimeout);
+        mutTimeout = setTimeout(() => scanVisibleInstagramAccounts(), 1500);
+      });
+      if (document.body) {
+        instaObserver.observe(document.body, { childList: true, subtree: true });
+      }
+    } catch (e) {}
 
     // Defense Monitor: check for Meta restrictions or popups
     setInterval(() => {
@@ -681,7 +892,23 @@
 
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (request.action === 'AUTOVIRAL_INSTA_PING') {
-        sendResponse({ status: 'active', handle: connectedHandle, url: window.location.href, title: document.title });
+        detectConnectedInstagramHandle();
+        sendResponse({
+          status: 'active',
+          handle: connectedHandle,
+          mappedCount: mappedInstaMap.size,
+          url: window.location.href,
+          title: document.title
+        });
+      } else if (request.action === 'AUTOVIRAL_MAP_INSTAGRAM_ACCOUNTS') {
+        const { list, newFound } = scanVisibleInstagramAccounts();
+        sendResponse({
+          success: true,
+          accounts: list,
+          newFound,
+          connectedHandle,
+          url: window.location.href
+        });
       }
       return true;
     });
@@ -695,40 +922,67 @@
     window.__AUTOVIRAL_CHROME_EXTENSION_INSTALLED__ = true;
     document.documentElement.setAttribute('data-autoviral-extension-installed', 'true');
 
+    const forwardExtensionEvent = (data) => {
+      if (!data || !data.action) return;
+      if (data.action === 'AUTOVIRAL_IMPORT_GROUPS_FROM_EXTENSION') {
+        window.dispatchEvent(new CustomEvent('autoviral_extension_groups_received', {
+          detail: {
+            groups: data.groups,
+            ytVideos: data.ytVideos,
+            pinBoards: data.pinBoards,
+            instaStories: data.instaStories,
+            instaAccounts: data.instaAccounts,
+            targetChannels: data.targetChannels,
+            interval: data.interval,
+            timestamp: data.timestamp
+          }
+        }));
+        if (Array.isArray(data.instaAccounts) && data.instaAccounts.length > 0) {
+          window.dispatchEvent(new CustomEvent('autoviral_extension_instagram_accounts_received', {
+            detail: {
+              accounts: data.instaAccounts,
+              connectedHandle: data.connectedHandle,
+              sourceUrl: data.sourceUrl,
+              timestamp: data.timestamp
+            }
+          }));
+        }
+      } else if (data.action === 'AUTOVIRAL_IMPORT_INSTAGRAM_ACCOUNTS') {
+        window.dispatchEvent(new CustomEvent('autoviral_extension_instagram_accounts_received', {
+          detail: {
+            accounts: data.accounts || [],
+            connectedHandle: data.connectedHandle,
+            sourceUrl: data.sourceUrl,
+            timestamp: data.timestamp
+          }
+        }));
+      } else if (data.action === 'AUTOVIRAL_INSTA_ACCOUNT_SYNC') {
+        window.dispatchEvent(new CustomEvent('autoviral_extension_insta_account_synced', {
+          detail: {
+            handle: data.handle,
+            url: data.url,
+            timestamp: data.timestamp
+          }
+        }));
+      }
+    };
+
     // Listen via BroadcastChannel for real-time inter-tab sync
     try {
       const bc = new BroadcastChannel('autoviral_bridge_channel');
       bc.onmessage = (ev) => {
-        if (ev.data && ev.data.action === 'AUTOVIRAL_IMPORT_GROUPS_FROM_EXTENSION') {
-          window.dispatchEvent(new CustomEvent('autoviral_extension_groups_received', {
-            detail: {
-              groups: ev.data.groups,
-              ytVideos: ev.data.ytVideos,
-              pinBoards: ev.data.pinBoards,
-              instaStories: ev.data.instaStories,
-              targetChannels: ev.data.targetChannels,
-              interval: ev.data.interval,
-              timestamp: ev.data.timestamp
-            }
-          }));
-        }
+        forwardExtensionEvent(ev.data);
       };
     } catch (e) {}
 
     // Forward messages from extension background
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      if (message.action === 'AUTOVIRAL_IMPORT_GROUPS_FROM_EXTENSION') {
-        window.dispatchEvent(new CustomEvent('autoviral_extension_groups_received', {
-          detail: {
-            groups: message.groups,
-            ytVideos: message.ytVideos,
-            pinBoards: message.pinBoards,
-            instaStories: message.instaStories,
-            targetChannels: message.targetChannels,
-            interval: message.interval,
-            timestamp: message.timestamp
-          }
-        }));
+      if (
+        message.action === 'AUTOVIRAL_IMPORT_GROUPS_FROM_EXTENSION' ||
+        message.action === 'AUTOVIRAL_IMPORT_INSTAGRAM_ACCOUNTS' ||
+        message.action === 'AUTOVIRAL_INSTA_ACCOUNT_SYNC'
+      ) {
+        forwardExtensionEvent(message);
         sendResponse({ received: true });
       } else if (message.action === 'AUTOVIRAL_RESET_MAPPED_GROUPS') {
         window.dispatchEvent(new CustomEvent('autoviral_extension_groups_reset'));

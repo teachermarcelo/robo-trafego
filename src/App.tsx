@@ -205,7 +205,7 @@ export default function App() {
     return () => unsubCampaigns();
   }, [deletedCampaignIds]);
 
-  // 3. Real-time Firebase Firestore tracking events listener
+  // 3. Real-time Firebase Firestore tracking events listener + Server /api/tracking/events sync
   useEffect(() => {
     const unsubTracking = subscribeTrackingEvents((cloudEvents) => {
       if (cloudEvents && cloudEvents.length > 0) {
@@ -215,7 +215,35 @@ export default function App() {
         } catch {}
       }
     });
-    return () => unsubTracking();
+
+    const syncServerTrackingEvents = async () => {
+      try {
+        const res = await fetch('/api/tracking/events');
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.events) && data.events.length > 0) {
+            setTrackingEvents((prev) => {
+              const existingIds = new Set(prev.map((e) => e.id));
+              const fresh = data.events.filter((e: TrackingEvent) => !existingIds.has(e.id));
+              if (fresh.length === 0) return prev;
+              const merged = [...fresh, ...prev].slice(0, 500);
+              try {
+                localStorage.setItem('autoviral_tracking_events', JSON.stringify(merged));
+              } catch {}
+              return merged;
+            });
+          }
+        }
+      } catch {}
+    };
+
+    syncServerTrackingEvents();
+    const serverPoll = setInterval(syncServerTrackingEvents, 12000);
+
+    return () => {
+      unsubTracking();
+      clearInterval(serverPoll);
+    };
   }, []);
 
   // 4. Real-time Firebase Firestore customer leads & WhatsApp buyers listener
@@ -836,6 +864,22 @@ export default function App() {
     // 5. Fallback to first campaign if none matched
     featuredCampaign = featuredCampaign || campaigns[0];
 
+    const srcParam = (params.get('src') || params.get('utm_source') || 'instagram').toLowerCase();
+    const mappedSource: TrackingEvent['source'] =
+      srcParam.includes('fb') || srcParam.includes('facebook')
+        ? 'facebook_groups'
+        : srcParam.includes('insta') || srcParam.includes('story')
+        ? 'instagram'
+        : srcParam.includes('whats')
+        ? 'whatsapp'
+        : srcParam.includes('pin')
+        ? 'pinterest'
+        : srcParam.includes('tik')
+        ? 'tiktok'
+        : 'instagram';
+    const cityParam = params.get('city') || 'Curitiba';
+    const stateParam = params.get('state') || 'PR';
+
     return (
       <PublicLeadLanding
         campaign={featuredCampaign}
@@ -845,6 +889,9 @@ export default function App() {
             campaignTitle: featuredCampaign.title,
             niche: featuredCampaign.niche,
             type,
+            source: mappedSource,
+            geo: { city: cityParam, state: stateParam, country: 'Brasil' },
+            isSimulation: false,
             amount: amount || (type === 'conversion' ? featuredCampaign.price : undefined),
           });
         }}
@@ -960,7 +1007,11 @@ export default function App() {
         )}
 
         {activeTab === 'lead_finder' && (
-          <LeadFinderTab campaigns={campaigns} />
+          <LeadFinderTab
+            campaigns={campaigns}
+            onAddTrackingEvent={handleAddTrackingEvent}
+            onNavigateTab={(tab) => setActiveTab(tab)}
+          />
         )}
 
         {activeTab === 'pain_finder' && (
@@ -992,6 +1043,10 @@ export default function App() {
             onAddTrackingEvent={handleAddTrackingEvent}
             onOpenCustomerModal={() => setIsCustomerModalOpen(true)}
             onSimulateSale={handleSimulateQuickConversion}
+            onSelectPainForCreative={(pain, niche) => {
+              handleSelectPainForCreative(pain, niche || 'renda_extra');
+            }}
+            onNavigateTab={(tab) => setActiveTab(tab)}
           />
         )}
 

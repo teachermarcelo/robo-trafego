@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Sparkles,
   Video,
@@ -7,13 +7,13 @@ import {
   Copy,
   CheckCircle,
   RefreshCw,
-  Share2,
   Flame,
   Zap,
-  Play,
-  Volume2,
   ExternalLink,
   Smartphone,
+  MapPin,
+  ShieldCheck,
+  Target,
 } from 'lucide-react';
 import { Campaign, CreativePackage, PainPointData } from '../types';
 
@@ -22,31 +22,61 @@ interface CreativeStudioTabProps {
   initialNiche?: string;
   campaigns?: Campaign[];
   onAddCampaign?: (newCamp: Campaign) => void;
-  onSendToCampaign?: (creative: CreativePackage, productTitle: string) => void;
   onNavigateTab?: (tab: string) => void;
 }
+
+const CITY_OPTIONS = [
+  'Curitiba - PR',
+  'São Paulo - SP',
+  'Rio de Janeiro - RJ',
+  'Belo Horizonte - MG',
+  'Porto Alegre - RS',
+  'Salvador - BA',
+  'Fortaleza - CE',
+  'Brasília - DF',
+  'Goiânia - GO',
+  'Brasil (Nacional) - BR',
+];
 
 export const CreativeStudioTab: React.FC<CreativeStudioTabProps> = ({
   initialPain,
   initialNiche = 'marketing',
   campaigns = [],
   onAddCampaign,
-  onSendToCampaign,
   onNavigateTab,
 }) => {
   // If user has registered campaigns, default to the latest one, else fallback to practical niche
   const defaultProduct = campaigns[0]?.title || 'Renda extra para mães solo';
-  const defaultPain = campaigns[0]?.painPointTargeted || initialPain?.pain || 'Falta de dinheiro no fim do mês e sem tempo livre cuidando dos filhos';
+  const defaultPain = initialPain?.pain || campaigns[0]?.painPointTargeted || 'Falta de dinheiro no fim do mês e sem tempo livre cuidando dos filhos';
 
   const [productTitle, setProductTitle] = useState(defaultProduct);
-  const [niche, setNiche] = useState(campaigns[0]?.niche || initialNiche || 'marketing');
+  const [niche, setNiche] = useState(initialNiche || campaigns[0]?.niche || 'marketing');
   const [painPoint, setPainPoint] = useState(defaultPain);
+  const [targetCity, setTargetCity] = useState('Curitiba - PR');
   const [targetPlatform, setTargetPlatform] = useState('all');
   const [isLoading, setIsLoading] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
   const [generationSource, setGenerationSource] = useState<string | null>(null);
   const [savedAsCampaign, setSavedAsCampaign] = useState(false);
+
+  useEffect(() => {
+    if (initialPain?.pain) {
+      setPainPoint(initialPain.pain);
+      const cityMatch = initialPain.pain.match(/Cidade foco:\s*([^/)]+)\s*\/\s*([A-Z]{2})/i);
+      if (cityMatch) {
+        const matchedCity = `${cityMatch[1].trim()} - ${cityMatch[2].trim()}`;
+        setTargetCity(matchedCity);
+      }
+    }
+    if (initialNiche) {
+      setNiche(initialNiche);
+      const matchingCamp = campaigns.find((c) => c.niche === initialNiche);
+      if (matchingCamp) {
+        setProductTitle(matchingCamp.title);
+      }
+    }
+  }, [initialPain, initialNiche, campaigns]);
 
   const [creatives, setCreatives] = useState<CreativePackage>(() => {
     const isTarefinhas =
@@ -135,73 +165,90 @@ export const CreativeStudioTab: React.FC<CreativeStudioTabProps> = ({
     };
   });
 
-  const getClientFallback = (title: string, pNiche: string, pain: string): CreativePackage => {
+  const getClientFallback = (title: string, pNiche: string, pain: string, cityLabel: string): CreativePackage => {
     const lowerTitle = title.toLowerCase();
     const lowerPain = pain.toLowerCase();
-    const isMotherOrSolo = lowerTitle.includes('mãe') || lowerPain.includes('mãe') || lowerTitle.includes('mae') || lowerTitle.includes('solo') || lowerPain.includes('solo') || lowerTitle.includes('filh');
+    const cityShort = cityLabel.split(' - ')[0].trim() || 'sua cidade';
+    const isPsico = pNiche.includes('psico') || lowerTitle.includes('tarefinha') || lowerTitle.includes('autis') || lowerTitle.includes('psicopedag') || lowerPain.includes('tdah') || lowerPain.includes('tea');
+    const isMotherOrSolo = lowerTitle.includes('mãe') || lowerPain.includes('mãe') || lowerTitle.includes('mae') || lowerTitle.includes('solo') || lowerPain.includes('solo') || lowerPain.includes('filh');
     const isMiles = lowerTitle.includes('milha') || lowerTitle.includes('cartão') || lowerTitle.includes('cartao') || lowerPain.includes('milha') || lowerTitle.includes('pontos');
     const isEnglish = lowerTitle.includes('ingl') || lowerPain.includes('ingl');
     const isDiet = lowerTitle.includes('seca') || lowerTitle.includes('emagrec') || lowerPain.includes('peso') || lowerPain.includes('dieta');
 
-    let hook = `"Se você está cansada de ver o dinheiro sumir antes do dia 15 e quer uma fonte de renda honesta, pare o que está fazendo por 30 segundos!"`;
-    let retention = `A maioria das pessoas comete o erro fatal de achar que precisa de fortunas para começar ou arriscar o pouco que tem. Mas a verdade é outra: você só precisa de 20 minutos por dia no seu celular atacando a dor exata de: "${pain || 'falta de tempo e dinheiro'}".`;
-    let pitch = `É exatamente por isso que o "${title}" foi criado. Um passo a passo prático, validado para o mercado brasileiro, que qualquer pessoa comum consegue aplicar sem precisar aparecer ou ser especialista.`;
-    let cta = `Clique no link da minha bio agora ou me mande mensagem no WhatsApp para liberar seu acesso promocional com valor especial para famílias!`;
+    let hook = `"Atenção ${cityShort}: se você quer resolver '${pain || 'falta de renda'}' sem gastar com anúncios, pare 30 segundos!"`;
+    let retention = `Muita gente em ${cityShort} sofre calada com essa dor todos os dias tentando soluções complicadas. A verdade é que você resolve isso focando diretamente em: "${pain || 'falta de tempo e dinheiro'}".`;
+    let pitch = `É exatamente essa dor que o "${title}" sana na prática: um método direto ao ponto, pronto para aplicar hoje mesmo pelo celular ou imprimir em casa.`;
+    let cta = `Toque no link rastreado abaixo (ou no Stories/Direct) e garanta seu acesso com condição especial agora!`;
 
-    if (isMiles) {
-      hook = `"Se você paga contas no débito ou boleto e ainda não transforma seus gastos do mês em renda extra com milhas, pare de jogar dinheiro fora!"`;
-      retention = `A maioria dos bancos não quer que você descubra isso: qualquer pessoa comum, com os mesmos gastos de supermercado, farmácia e luz, consegue gerar de R$ 400 a R$ 2.500 extras todo mês no Pix aproveitando pontos e milhas bonificadas.`;
-      pitch = `Com o "${title}", você tem o passo a passo mastigado, do básico ao avançado, com alertas diários das melhores oportunidades para você nunca perder uma promoção lucrativa.`;
-      cta = `Clique no link da bio ou me chame no WhatsApp agora para garantir sua vaga na comunidade com valor promocional de entrada!`;
+    if (isPsico) {
+      hook = `"Mãe ou professora de ${cityShort}: você ainda perde horas do fim de semana tentando montar atividades para crianças com TEA ou TDAH?"`;
+      retention = `Crianças com autismo e TDAH precisam de atividades lúdicas visuais, sem poluição sensorial, para desenvolver foco e coordenação sem crises de frustração na rotina.`;
+      pitch = `O "${title}" entrega mais de 100 tarefinhas estruturadas em PDF pronto para imprimir e aplicar em 10 minutos, resolvendo exatamente a dor: ${pain}.`;
+      cta = `Toque no link oficial abaixo ou responda "EU QUERO" para receber as atividades imediatas no WhatsApp!`;
+    } else if (isMiles) {
+      hook = `"Moradores de ${cityShort}: se você paga supermercado e contas no débito sem transformar em Pix com milhas, está perdendo dinheiro todo mês!"`;
+      retention = `Qualquer pessoa comum consegue transformar os mesmos gastos da casa em renda extra recorrente acumulando pontos bonificados sem viajar.`;
+      pitch = `Com o "${title}", você recebe alertas diários mastigados para sanar a falta de renda e faturar direto no Pix.`;
+      cta = `Clique no link abaixo ou chame no WhatsApp para garantir sua vaga com valor promocional!`;
     } else if (isMotherOrSolo) {
-      hook = `"Se você é mãe solo ou cuida dos seus filhos sozinha e não aguenta mais o aperto no fim do mês, assista isso antes de dormir."`;
-      retention = `Eu sei exatamente o que é não ter com quem deixar as crianças e mesmo assim precisar colocar comida na mesa e pagar os boletos. Você não precisa sair de casa nem de computador caro: com 30 minutos no seu celular e o foco certo em "${pain || 'renda extra de casa'}", você consegue virar essa chave.`;
-      pitch = `Com o "${title}", você tem um roteiro blindado, desenhado de mãe para mãe, para gerar renda sem custos de anúncio e com apoio da nossa comunidade.`;
-      cta = `Toque no link da minha bio agora ou comente "EU QUERO" que eu mesma te mando o passo a passo completo no direct!`;
+      hook = `"Mãe solo em ${cityShort}: sei o peso de querer renda extra sem deixar seus filhos — assista isso em 30 segundos."`;
+      retention = `Você não precisa sair de casa nem de computador caro: com 30 minutos no celular atacando a dor "${pain || 'renda extra de casa'}", você constrói seu ganho diário.`;
+      pitch = `O "${title}" foi criado exatamente para mães que precisam de resultado prático sem investir em anúncios pagos.`;
+      cta = `Toque no link abaixo ou comente "EU QUERO" para receber o passo a passo completo!`;
     } else if (isEnglish) {
-      hook = `"Se você trava e sente vergonha de falar inglês em reuniões de trabalho, faça este teste prático de 3 minutos hoje!"`;
-      retention = `O método tradicional das escolas faz você perder 5 anos decorando regras gramaticais chatas em vez de focar nas frases que realmente destravam o seu salário.`;
-      pitch = `O "${title}" vai direto ao ponto: áudios de imersão rápida para você soar confiável e seguro em qualquer call internacional.`;
-      cta = `Garanta o valor especial de lançamento tocando no botão da bio ou chamando no WhatsApp!`;
+      hook = `"Trabalha em ${cityShort} e sente frio na barriga quando precisa falar inglês na reunião? Faça esse teste prático de 3 minutos!"`;
+      retention = `Escolas tradicionais prendem você em 5 anos de gramática chata em vez de treinar as frases reais que destravam promoções e vagas remotas.`;
+      pitch = `O "${title}" sana essa trava com áudios curtos e imersão direta para você falar com segurança.`;
+      cta = `Toque no link abaixo para garantir o valor especial de lançamento agora!`;
     } else if (isDiet) {
-      hook = `"Pare de passar fome e de fazer dietas malucas que só te deixam frustrada: esse segredo natural vai secar sua barriga em 21 dias."`;
-      retention = `Não é sobre parar de comer, é sobre destravar o seu metabolismo com ingredientes simples que você já tem na cozinha.`;
-      pitch = `O protocolo "${title}" foi desenvolvido para desinchar o corpo sem remédios caros e sem academias pesadas.`;
-      cta = `Clique no link da bio e receba o guia completo com receitas e lista de compras agora mesmo!`;
+      hook = `"Correndo o dia todo em ${cityShort}? Pare de passar fome em dietas impossíveis e veja como desinchar em 21 dias!"`;
+      retention = `Não é sobre cortar tudo, é sobre ajustar combinações simples que você já tem na cozinha para destravar seu metabolismo.`;
+      pitch = `O "${title}" traz cardápio prático e lista de compras barata para sanar inchaço e falta de energia.`;
+      cta = `Clique no link abaixo e receba o protocolo completo hoje mesmo!`;
     }
 
     return {
       platform: targetPlatform || 'all',
       videoScript: {
-        title: `Roteiro Viral: ${title}`,
+        title: `Roteiro Local (${cityShort}): ${title}`,
         hook,
         retention,
         pitch,
         cta,
       },
       pinterestPin: {
-        headline: `${title}: O Passo a Passo Definitivo para Resolver "${pain || 'a falta de renda'}"`,
-        overlayText: `Guia Prático em PDF + Acesso Imediato no Celular`,
-        callToAction: `Salvar Este Pin & Acessar Passo a Passo Grátis`,
+        headline: `${title} (${cityShort}): Solução Prática para "${pain || 'sua dor urgente'}"`,
+        overlayText: `Material Prático + Acesso Imediato no Celular`,
+        callToAction: `Toque para Acessar e Resolver Hoje`,
       },
       instagramCarousel: [
-        { slide: 1, text: `Por que tantas pessoas travam tentando resolver: "${pain || 'falta de renda'}"? (O segredo que ninguém revela)` },
-        { slide: 2, text: `Erro número 1: Achar que precisa ter milhares de seguidores ou investir rios de dinheiro em anúncios pagos.` },
-        { slide: 3, text: `O algoritmo entrega de graça quando você ataca uma dor real que milhares de pessoas sentem todos os dias.` },
-        { slide: 4, text: `Com o "${title}", você tem o método validado para aplicar direto do seu celular em minutos.` },
-        { slide: 5, text: `Salve este post e comente "EU QUERO" ou clique no link da bio para garantir sua vaga com 7 dias de garantia!` },
+        { slide: 1, text: `Atenção ${cityShort}: por que tanta gente sofre com "${pain || 'esse problema'}"?` },
+        { slide: 2, text: `Erro nº 1: Tentar improvisar sozinho sem um método testado que poupe seu tempo e dinheiro.` },
+        { slide: 3, text: `Quando você ataca a causa raiz dessa dor, o alívio e os primeiros resultados aparecem já na primeira semana.` },
+        { slide: 4, text: `Com o "${title}", você aplica a solução passo a passo em poucos minutos direto pelo celular ou PDF.` },
+        { slide: 5, text: `Toque no link do Stories ou da Bio (ou chame no Direct) e garanta acesso imediato hoje!` },
       ],
       hashtags: [
-        `#${title.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 15) || 'rendaextra'}`,
-        '#rendaextra',
-        '#rendafamiliar',
+        `#${cityShort.toLowerCase().replace(/[^a-z0-9]/g, '') || 'brasil'}`,
+        `#${title.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 15) || 'solucao'}`,
+        isPsico ? '#psicopedagogia' : '#rendaextra',
+        isPsico ? '#autismobrasil' : '#rendafamiliar',
         isMiles ? '#milhas' : isMotherOrSolo ? '#maesolo' : '#empreendedorismo',
-        isMiles ? '#milhasaereas' : isMotherOrSolo ? '#maternidadereal' : '#marketingdigital',
-        '#trabalharemcasa',
-        '#rendaonline',
+        '#ofertabrasil',
       ].filter(Boolean),
-      imagePrompt: `Clean, modern, high-contrast lifestyle photograph representing ${title}, emotional storytelling, realistic warm lighting, inspiring composition, 8k professional stock photography.`,
+      imagePrompt: `Warm realistic lifestyle scene in ${cityShort}, Brazil representing solution for ${title}, clear positive emotion, high contrast, 8k photography.`,
     };
+  };
+
+  const buildCreativeTrackedUrl = (src: 'facebook_groups' | 'instagram_story') => {
+    const matchedCamp =
+      campaigns.find((c) => c.title.toLowerCase() === productTitle.toLowerCase()) || campaigns[0];
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const dest =
+      matchedCamp?.checkoutUrl ||
+      (matchedCamp ? `${origin}/?lead=1&camp=${encodeURIComponent(matchedCamp.id)}` : `${origin}/?lead=1`);
+    const [cityPart, statePart] = targetCity.split(' - ');
+    return `${origin}/api/r?to=${encodeURIComponent(dest)}&src=${src}&city=${encodeURIComponent((cityPart || 'Curitiba').trim())}&state=${encodeURIComponent((statePart || 'PR').trim())}&camp=${encodeURIComponent(matchedCamp?.id || 'camp-ativa')}&title=${encodeURIComponent(productTitle)}&niche=${encodeURIComponent(niche)}&pain=${encodeURIComponent(painPoint.slice(0, 90))}`;
   };
 
   const handleGenerate = async () => {
@@ -214,7 +261,7 @@ export const CreativeStudioTab: React.FC<CreativeStudioTabProps> = ({
         body: JSON.stringify({
           niche,
           productTitle,
-          painPoint,
+          painPoint: `${painPoint} — Cidade foco: ${targetCity}`,
           targetPlatform,
         }),
       });
@@ -224,21 +271,21 @@ export const CreativeStudioTab: React.FC<CreativeStudioTabProps> = ({
         if (json.data) {
           setCreatives(json.data);
           setGenerationSource(json.source || 'gemini_ai');
-          setSuccessBanner(productTitle);
+          setSuccessBanner(`${productTitle} • ${targetCity}`);
           return;
         }
       }
       // If server returned an issue, use immediate client-side smart fallback
-      const fallback = getClientFallback(productTitle, niche, painPoint);
+      const fallback = getClientFallback(productTitle, niche, painPoint, targetCity);
       setCreatives(fallback);
       setGenerationSource('smart_local_engine');
-      setSuccessBanner(productTitle);
+      setSuccessBanner(`${productTitle} • ${targetCity}`);
     } catch (err) {
       console.warn('Network or server error, using client fallback:', err);
-      const fallback = getClientFallback(productTitle, niche, painPoint);
+      const fallback = getClientFallback(productTitle, niche, painPoint, targetCity);
       setCreatives(fallback);
       setGenerationSource('smart_local_engine');
-      setSuccessBanner(productTitle);
+      setSuccessBanner(`${productTitle} • ${targetCity}`);
     } finally {
       setIsLoading(false);
     }
@@ -335,7 +382,7 @@ export const CreativeStudioTab: React.FC<CreativeStudioTabProps> = ({
 
         {/* Form Inputs */}
         <div className="mt-5 grid grid-cols-1 md:grid-cols-12 gap-3">
-          <div className="md:col-span-4">
+          <div className="md:col-span-3">
             <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 block mb-1">
               Nome do Produto ou Oferta
             </label>
@@ -343,40 +390,141 @@ export const CreativeStudioTab: React.FC<CreativeStudioTabProps> = ({
               type="text"
               value={productTitle}
               onChange={(e) => setProductTitle(e.target.value)}
-              placeholder="Ex: Curso de Inglês para Viagem, Chá Detox Seca 21..."
+              placeholder="Ex: Curso de Inglês para Viagem..."
               className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500"
             />
           </div>
 
-          <div className="md:col-span-3">
+          <div className="md:col-span-2">
             <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 block mb-1">
               Nicho
             </label>
             <select
               value={niche}
               onChange={(e) => setNiche(e.target.value as any)}
-              className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+              className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500"
             >
-              <option value="psicopedagogia">Psicopedagogia & TDAH</option>
-              <option value="ingles">Inglês & Idiomas</option>
-              <option value="emagrecedor">Emagrecimento & Detox</option>
+              <option value="psicopedagogia">Psicopedagogia &amp; TDAH</option>
+              <option value="ingles">Inglês &amp; Idiomas</option>
+              <option value="emagrecedor">Emagrecimento &amp; Detox</option>
               <option value="renda_extra">Renda Extra Familiar</option>
-              <option value="artesanato">Artesanato & Confeitaria</option>
-              <option value="marketing">Marketing & Afiliados</option>
+              <option value="artesanato">Artesanato &amp; Confeitaria</option>
+              <option value="marketing">Marketing &amp; Afiliados</option>
             </select>
           </div>
 
-          <div className="md:col-span-5">
+          <div className="md:col-span-3">
+            <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1 mb-1">
+              <MapPin className="w-3 h-3 text-emerald-400" />
+              Cidade Foco (Para o Anúncio &amp; Radar)
+            </label>
+            <select
+              value={CITY_OPTIONS.includes(targetCity) ? targetCity : 'custom'}
+              onChange={(e) => {
+                if (e.target.value !== 'custom') setTargetCity(e.target.value);
+              }}
+              className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500"
+            >
+              {CITY_OPTIONS.map((city) => (
+                <option key={city} value={city}>
+                  📍 {city}
+                </option>
+              ))}
+              {!CITY_OPTIONS.includes(targetCity) && (
+                <option value="custom">📍 {targetCity}</option>
+              )}
+            </select>
+          </div>
+
+          <div className="md:col-span-4">
             <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 block mb-1">
-              Dor que o Criativo Deve Atacar
+              Dor Real que o Criativo Vai Sanar
             </label>
             <input
               type="text"
               value={painPoint}
               onChange={(e) => setPainPoint(e.target.value)}
-              placeholder="Ex: Vergonha de falar em reuniões, cansaço de dietas malucas..."
+              placeholder="Ex: Cansaço criando tarefas para TEA, contas atrasadas..."
               className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500"
             />
+          </div>
+        </div>
+
+        {/* Real Tracked Links Card for Guaranteed Real Clicks */}
+        <div className="mt-4 p-4 rounded-xl bg-emerald-950/25 border border-emerald-700/50 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+              <span className="text-xs font-black text-emerald-300">
+                Links Rastreados Reais (/api/r) — Garanta Cliques no Facebook &amp; Instagram
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-300">
+              Cole estes links nos seus posts de Grupos do Facebook ou no Sticker de Link do Instagram Stories. Cada clique de uma pessoa real registra na hora no <strong>Radar de Pessoas</strong> com a cidade <strong>{targetCity}</strong> e a dor atacada!
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() =>
+                copyToClipboard(
+                  `${creatives.videoScript.hook}\n\n${creatives.videoScript.retention}\n\n${creatives.videoScript.pitch}\n\n👉 Acesse aqui: ${buildCreativeTrackedUrl('facebook_groups')}`,
+                  'copy_fb_real'
+                )
+              }
+              className="px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs transition flex items-center gap-1.5 cursor-pointer"
+            >
+              {copiedKey === 'copy_fb_real' ? (
+                <>
+                  <CheckCircle className="w-3.5 h-3.5 text-emerald-200" />
+                  <span>Roteiro + Link FB Copiados!</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>Copiar Roteiro + Link Real FB</span>
+                </>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => copyToClipboard(buildCreativeTrackedUrl('instagram_story'), 'copy_ig_real')}
+              className="px-3 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs transition flex items-center gap-1.5 cursor-pointer"
+            >
+              {copiedKey === 'copy_ig_real' ? (
+                <>
+                  <CheckCircle className="w-3.5 h-3.5 text-emerald-200" />
+                  <span>Link Insta Copiado!</span>
+                </>
+              ) : (
+                <>
+                  <Target className="w-3.5 h-3.5" />
+                  <span>Copiar Link Real Instagram</span>
+                </>
+              )}
+            </button>
+
+            <a
+              href={buildCreativeTrackedUrl('facebook_groups')}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-black text-xs transition flex items-center gap-1.5"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span>Testar Clique Real</span>
+            </a>
+
+            {onNavigateTab && (
+              <button
+                type="button"
+                onClick={() => onNavigateTab('tracking')}
+                className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs transition cursor-pointer"
+              >
+                Ver Cliques no Radar →
+              </button>
+            )}
           </div>
         </div>
 

@@ -367,13 +367,19 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
     return 'groups';
   });
 
-  // Search folder filter: 'psicopedagogia' | 'renda_extra' | 'curitiba' | 'autismo' | 'all' | string
-  const [activeSearchFolder, setActiveSearchFolder] = useState<string>('psicopedagogia');
+  // Search folder filter: persisted in localStorage so page refresh keeps exact folder
+  const [activeSearchFolder, setActiveSearchFolder] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('autoviral_active_search_folder');
+      if (saved) return saved;
+    } catch {}
+    return 'psicopedagogia';
+  });
 
   // All Mapped Groups State (Unlimited, persists in localStorage, auto-merges with real search data)
   const [mappedGroups, setMappedGroups] = useState<FacebookGroup[]>(() => {
     try {
-      const saved = localStorage.getItem('autoviral_fb_mapped_groups_v5_real') || localStorage.getItem('autoviral_fb_mapped_groups_v4');
+      const saved = localStorage.getItem('autoviral_fb_mapped_groups_v5_real') || localStorage.getItem('autoviral_fb_mapped_groups_v4') || localStorage.getItem('autoviral_fb_mapped_groups_v3');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
@@ -395,14 +401,27 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
     return ALL_INITIAL_FACEBOOK_GROUPS;
   });
 
-  // Selected Group IDs for audience / campaign (Defaulting to psicopedagogia groups)
+  // Selected Group IDs for audience / campaign (Persisted in localStorage so refresh does NOT change the groups!)
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('autoviral_selected_group_ids');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
     return PEDAGOGIA_GROUPS.slice(0, 50).map(g => g.id);
   });
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // Target Quantity to Dispatch (Requested by user: "selecionar quantos grupos quer divulgar")
-  const [targetQuantityToDispatch, setTargetQuantityToDispatch] = useState<number>(30);
+  // Target Quantity to Dispatch (Persisted in localStorage)
+  const [targetQuantityToDispatch, setTargetQuantityToDispatch] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('autoviral_target_quantity');
+      if (saved) return parseInt(saved, 10) || 30;
+    } catch {}
+    return 30;
+  });
 
   // Group Editing Modal State (Requested by user: "exluir editar e selecionar quantos grupos quer divulgar")
   const [editingGroup, setEditingGroup] = useState<FacebookGroup | null>(null);
@@ -433,7 +452,13 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
     } catch {}
     return INITIAL_SAVED_AUDIENCES;
   });
-  const [selectedAudienceId, setSelectedAudienceId] = useState<string>('aud-renda-extra-73');
+  const [selectedAudienceId, setSelectedAudienceId] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('autoviral_selected_audience_id');
+      if (saved) return saved;
+    } catch {}
+    return 'aud-renda-extra-73';
+  });
 
   // Create Audience Modal
   const [isAudienceModalOpen, setIsAudienceModalOpen] = useState(false);
@@ -460,7 +485,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
   });
   const [isRandomJitterActive, setIsRandomJitterActive] = useState<boolean>(true);
 
-  // Campaign & Bot Execution State
+  // Campaign & Bot Execution State (Persisted across page reloads)
   const [selectedProductId, setSelectedProductId] = useState<string>(() => {
     if (initialCampaignId) return initialCampaignId;
     try {
@@ -469,14 +494,61 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
     } catch {}
     return defaultProduct.id;
   });
-  const [selectedCheckoutUrl, setSelectedCheckoutUrl] = useState<string>(defaultProduct.checkoutUrl || 'https://pay.kiwify.com.br/HE5xbnp');
-  const [selectedPrice, setSelectedPrice] = useState<number>(defaultProduct.price || 9.90);
-  const [activeCopyTemplateIndex, setActiveCopyTemplateIndex] = useState<number>(0);
+
+  const initialMatchedCamp = availableCampaigns.find(c => c.id === selectedProductId) || availableCampaigns[0] || defaultProduct;
+  const [selectedCheckoutUrl, setSelectedCheckoutUrl] = useState<string>(initialMatchedCamp.checkoutUrl || 'https://pay.kiwify.com.br/HE5xbnp');
+  const [selectedPrice, setSelectedPrice] = useState<number>(initialMatchedCamp.price || 9.90);
+  const [activeCopyTemplateIndex, setActiveCopyTemplateIndex] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('autoviral_active_copy_tpl_idx');
+      if (saved !== null) return parseInt(saved, 10) || 0;
+    } catch {}
+    return 0;
+  });
+
+  // Per-campaign saved copies & custom user copy presets (survives page refresh!)
+  const [savedCopiesMap, setSavedCopiesMap] = useState<Record<string, { headline: string; copy: string; savedAt: string }>>(() => {
+    try {
+      const saved = localStorage.getItem('autoviral_saved_copies_v1');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return {};
+  });
+  const [customCopyPresets, setCustomCopyPresets] = useState<Array<{ id: string; campaignId: string; name: string; headline: string; copy: string; savedAt: string }>>(() => {
+    try {
+      const saved = localStorage.getItem('autoviral_custom_copy_presets_v1');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return [];
+  });
+  const [copySaveNotice, setCopySaveNotice] = useState<string | null>(null);
+  const [newPresetNameInput, setNewPresetNameInput] = useState<string>('');
+  const [isSavingPresetPromptOpen, setIsSavingPresetPromptOpen] = useState<boolean>(false);
 
   const activeCampaign = availableCampaigns.find(c => c.id === selectedProductId) || availableCampaigns[0] || defaultProduct;
   const currentTemplates = getCampaignCopyTemplates(activeCampaign);
 
-  // React immediately to initialCampaignId or stored selection changes
+  const [postHeadline, setPostHeadline] = useState<string>(() => {
+    try {
+      const savedMap = JSON.parse(localStorage.getItem('autoviral_saved_copies_v1') || '{}');
+      const prodId = initialCampaignId || localStorage.getItem('autoviral_selected_product_id') || defaultProduct.id;
+      if (savedMap[prodId]?.headline) return savedMap[prodId].headline;
+    } catch {}
+    const tpls = getCampaignCopyTemplates(initialMatchedCamp);
+    return tpls[0]?.headline || '🌸 Meninas e colegas de Curitiba, achei esse material de coordenação motora que facilitou demais minha rotina!';
+  });
+
+  const [postCopy, setPostCopy] = useState<string>(() => {
+    try {
+      const savedMap = JSON.parse(localStorage.getItem('autoviral_saved_copies_v1') || '{}');
+      const prodId = initialCampaignId || localStorage.getItem('autoviral_selected_product_id') || defaultProduct.id;
+      if (savedMap[prodId]?.copy) return savedMap[prodId].copy;
+    } catch {}
+    const tpls = getCampaignCopyTemplates(initialMatchedCamp);
+    return tpls[0]?.copy || `Oi pessoal de Curitiba e região! Passando pra compartilhar uma dica que me ajudou muito.\n\nQuem trabalha com educação infantil ou tem filho com resistência a tarefas sabe o tempo que a gente gasta bolando atividades sem poluição visual.\n\nAchei um caderno digital com mais de 100 atividades lúdicas de coordenação motora fina e alfabetização que funcionam perfeitamente para crianças típicas, com TDAH e autistas.\n\nDá pra imprimir em casa e o acesso sai por apenas R$ 9,90 no Pix pelo link oficial: https://pay.kiwify.com.br/HE5xbnp\n\nEspero que ajude outras pessoas como me ajudou! ❤️`;
+  });
+
+  // React to explicit initialCampaignId navigation ONLY without overwriting user's saved copy!
   useEffect(() => {
     const targetId = initialCampaignId || localStorage.getItem('autoviral_selected_product_id');
     if (targetId) {
@@ -485,38 +557,161 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
         setSelectedProductId(targetId);
         setSelectedCheckoutUrl(found.checkoutUrl || 'https://pay.kiwify.com.br/HE5xbnp');
         setSelectedPrice(found.price || 9.90);
-        const templates = getCampaignCopyTemplates(found);
-        if (templates[0]) {
-          setPostHeadline(templates[0].headline);
-          setPostCopy(templates[0].copy);
+        // Only apply default template if NO saved copy exists for this campaign!
+        let hasSaved = false;
+        try {
+          const savedMap = JSON.parse(localStorage.getItem('autoviral_saved_copies_v1') || '{}');
+          if (savedMap[targetId] && (savedMap[targetId].copy || savedMap[targetId].headline)) {
+            setPostHeadline(savedMap[targetId].headline);
+            setPostCopy(savedMap[targetId].copy);
+            hasSaved = true;
+          }
+        } catch {}
+        if (!hasSaved) {
+          const templates = getCampaignCopyTemplates(found);
+          if (templates[0]) {
+            setPostHeadline(templates[0].headline);
+            setPostCopy(templates[0].copy);
+          }
         }
         if (initialCampaignId) {
           setActiveSubTab('campaign');
         }
       }
     }
-  }, [initialCampaignId, availableCampaigns]);
+  }, [initialCampaignId]);
 
-  const [postHeadline, setPostHeadline] = useState(
-    '🌸 Meninas e colegas de Curitiba, achei esse material de coordenação motora que facilitou demais minha rotina!'
-  );
-  const [postCopy, setPostCopy] = useState(
-    `Oi pessoal de Curitiba e região! Passando pra compartilhar uma dica que me ajudou muito.
+  // Auto-persist active campaign, copy, folder, groups, and audience on every change
+  useEffect(() => {
+    try {
+      localStorage.setItem('autoviral_selected_product_id', selectedProductId);
+    } catch {}
+  }, [selectedProductId]);
 
-Quem trabalha com educação infantil ou tem filho com resistência a tarefas sabe o tempo que a gente gasta bolando atividades sem poluição visual.
+  useEffect(() => {
+    try {
+      localStorage.setItem('autoviral_active_subtab_groups', activeSubTab);
+    } catch {}
+  }, [activeSubTab]);
 
-Achei um caderno digital com mais de 100 atividades lúdicas de coordenação motora fina e alfabetização que funcionam perfeitamente para crianças típicas, com TDAH e autistas.
+  useEffect(() => {
+    try {
+      localStorage.setItem('autoviral_active_search_folder', activeSearchFolder);
+    } catch {}
+  }, [activeSearchFolder]);
 
-Dá pra imprimir em casa e o acesso sai por apenas R$ 9,90 no Pix pelo link oficial: https://pay.kiwify.com.br/HE5xbnp
+  useEffect(() => {
+    try {
+      localStorage.setItem('autoviral_selected_group_ids', JSON.stringify(selectedGroupIds));
+    } catch {}
+  }, [selectedGroupIds]);
 
-Espero que ajude outras pessoas como me ajudou! ❤️`
-  );
+  useEffect(() => {
+    try {
+      localStorage.setItem('autoviral_target_quantity', String(targetQuantityToDispatch));
+    } catch {}
+  }, [targetQuantityToDispatch]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('autoviral_selected_audience_id', selectedAudienceId);
+    } catch {}
+  }, [selectedAudienceId]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('autoviral_active_copy_tpl_idx', String(activeCopyTemplateIndex));
+    } catch {}
+  }, [activeCopyTemplateIndex]);
+
+  // Auto-save current copy draft per campaign so refreshing NEVER loses edits
+  useEffect(() => {
+    if (!selectedProductId) return;
+    setSavedCopiesMap(prev => {
+      const existing = prev[selectedProductId];
+      if (existing && existing.headline === postHeadline && existing.copy === postCopy) {
+        return prev;
+      }
+      const next = {
+        ...prev,
+        [selectedProductId]: {
+          headline: postHeadline,
+          copy: postCopy,
+          savedAt: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+        }
+      };
+      try {
+        localStorage.setItem('autoviral_saved_copies_v1', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  }, [selectedProductId, postHeadline, postCopy]);
+
+  const handleSaveFixedCopyForCampaign = () => {
+    const next = {
+      ...savedCopiesMap,
+      [selectedProductId]: {
+        headline: postHeadline,
+        copy: postCopy,
+        savedAt: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+      }
+    };
+    setSavedCopiesMap(next);
+    try {
+      localStorage.setItem('autoviral_saved_copies_v1', JSON.stringify(next));
+      localStorage.setItem('autoviral_selected_product_id', selectedProductId);
+      localStorage.setItem('autoviral_selected_group_ids', JSON.stringify(selectedGroupIds));
+      localStorage.setItem('autoviral_active_search_folder', activeSearchFolder);
+    } catch {}
+    setCopySaveNotice(`✅ Copy, Campanha "${activeCampaign.title.slice(0, 28)}..." e ${selectedGroupIds.length} Grupos salvos! Mesmo atualizando a página (F5), tudo permanece igual.`);
+    setTimeout(() => setCopySaveNotice(null), 5000);
+  };
+
+  const handleSaveNewCustomPreset = () => {
+    const label = newPresetNameInput.trim() || `Modelo Salvo (${new Date().toLocaleDateString('pt-BR')})`;
+    const newPreset = {
+      id: `preset-${Date.now()}`,
+      campaignId: selectedProductId,
+      name: label,
+      headline: postHeadline,
+      copy: postCopy,
+      savedAt: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+    };
+    const updated = [newPreset, ...customCopyPresets];
+    setCustomCopyPresets(updated);
+    try {
+      localStorage.setItem('autoviral_custom_copy_presets_v1', JSON.stringify(updated));
+    } catch {}
+    setNewPresetNameInput('');
+    setIsSavingPresetPromptOpen(false);
+    setCopySaveNotice(`⭐ Modelo "${label}" salvo com sucesso! Reutilize com 1 clique abaixo.`);
+    setTimeout(() => setCopySaveNotice(null), 4000);
+  };
+
+  const handleDeleteCustomPreset = (presetId: string) => {
+    const updated = customCopyPresets.filter(p => p.id !== presetId);
+    setCustomCopyPresets(updated);
+    try {
+      localStorage.setItem('autoviral_custom_copy_presets_v1', JSON.stringify(updated));
+    } catch {}
+  };
 
   const handleSelectCampaign = (camp: Campaign, templateIndex: number = 0) => {
     setSelectedProductId(camp.id);
     setSelectedCheckoutUrl(camp.checkoutUrl || '');
     setSelectedPrice(camp.price || 0);
     setActiveCopyTemplateIndex(templateIndex);
+    try {
+      localStorage.setItem('autoviral_selected_product_id', camp.id);
+    } catch {}
+
+    // Prefer user's saved copy for this campaign if available
+    const savedForCamp = savedCopiesMap[camp.id];
+    if (savedForCamp && (savedForCamp.copy || savedForCamp.headline)) {
+      setPostHeadline(savedForCamp.headline);
+      setPostCopy(savedForCamp.copy);
+      return;
+    }
 
     const templates = getCampaignCopyTemplates(camp);
     const chosen = templates[templateIndex] || templates[0];
@@ -570,6 +765,9 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
     setSelectedProductId(camp.id);
     setSelectedCheckoutUrl(camp.checkoutUrl || '');
     setSelectedPrice(camp.price || 0);
+    try {
+      localStorage.setItem('autoviral_selected_product_id', camp.id);
+    } catch {}
 
     // Ensure status is active
     setManagedCampaigns(prev => {
@@ -579,6 +777,13 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
       } catch {}
       return updated;
     });
+
+    const savedForCamp = savedCopiesMap[camp.id];
+    if (savedForCamp && (savedForCamp.copy || savedForCamp.headline)) {
+      setPostHeadline(savedForCamp.headline);
+      setPostCopy(savedForCamp.copy);
+      return;
+    }
 
     const templates = getCampaignCopyTemplates(camp);
     const chosen = templates[0];
@@ -791,23 +996,44 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
     ];
   });
 
-  // Channel Target Selection for Dispatches (Requested by user: "criar função tambem divulgar stories facebook", "selecionar onde disparar")
+  // Channel Target Selection for Dispatches (Persisted across refresh)
   const [targetChannels, setTargetChannels] = useState<{
     facebook: boolean;
     facebookStories: boolean;
     youtube: boolean;
     pinterest: boolean;
     instagram: boolean;
-  }>({ facebook: true, facebookStories: true, youtube: true, pinterest: true, instagram: true });
+  }>(() => {
+    try {
+      const saved = localStorage.getItem('autoviral_target_channels_v1');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return { facebook: true, facebookStories: true, youtube: true, pinterest: true, instagram: true };
+  });
 
-  const [dispatchMode, setDispatchMode] = useState<'all' | 'facebook' | 'facebookStories' | 'youtube' | 'pinterest' | 'instagram'>('all');
+  const [dispatchMode, setDispatchMode] = useState<'all' | 'facebook' | 'facebookStories' | 'youtube' | 'pinterest' | 'instagram'>(() => {
+    try {
+      const saved = localStorage.getItem('autoviral_dispatch_mode_v1');
+      if (saved) return saved as any;
+    } catch {}
+    return 'all';
+  });
 
   // Instagram Story Queue (receives stories from VisualLayoutStudio and runs them)
-  const [instagramStoryQueue, setInstagramStoryQueue] = useState<InstagramStoryItem[]>([]);
+  const [instagramStoryQueue, setInstagramStoryQueue] = useState<InstagramStoryItem[]>(() => {
+    try {
+      const saved = localStorage.getItem('autoviral_insta_story_queue');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return [];
+  });
 
   const handleToggleTargetChannel = (channel: 'facebook' | 'facebookStories' | 'youtube' | 'pinterest' | 'instagram') => {
     setTargetChannels(prev => {
       const updated = { ...prev, [channel]: !prev[channel] };
+      try {
+        localStorage.setItem('autoviral_target_channels_v1', JSON.stringify(updated));
+      } catch {}
       return updated;
     });
   };
@@ -821,6 +1047,10 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
     if (channel === 'pinterest') updated = { facebook: false, facebookStories: false, youtube: false, pinterest: true, instagram: false };
     if (channel === 'instagram') updated = { facebook: false, facebookStories: false, youtube: false, pinterest: false, instagram: true };
     setTargetChannels(updated);
+    try {
+      localStorage.setItem('autoviral_dispatch_mode_v1', channel);
+      localStorage.setItem('autoviral_target_channels_v1', JSON.stringify(updated));
+    } catch {}
   };
 
   const handleResetMapping = (scope: 'all' | 'facebook' | 'youtube' | 'pinterest' | 'instagram') => {
@@ -1360,7 +1590,7 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
       )
     );
 
-    // Tracking event
+    // Tracking event (marked as simulation/bot dispatch log)
     if (onAddTrackingEvent) {
       onAddTrackingEvent({
         id: `fb-evt-${Date.now()}`,
@@ -1373,21 +1603,10 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
         device: 'mobile',
         ageBracket: '25-34',
         source: 'facebook_groups',
+        isSimulation: true,
         adCreativeName: `Post no Grupo: ${currentGroup.name}`,
         utmContent: `interval_${waited}s`
       });
-    }
-
-    // Occasional simulated conversion
-    if (Math.random() < 0.28 && onSimulateSale) {
-      const names = [
-        'Claudia Silveira (Pedagoga - Curitiba)',
-        'Mãe do Bento (Curitiba CWB)',
-        'Prof. Elaine Santos (Educação Infantil)',
-        'Renata Oliveira (TEA Apoio)'
-      ];
-      const chosenName = names[Math.floor(Math.random() * names.length)];
-      onSimulateSale(chosenName, currentGroup.city || 'Curitiba / PR', selectedPrice);
     }
 
     setCurrentPostingIndex(prev => (prev + 1) % targetGroups.length);
@@ -2968,9 +3187,11 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
 
                 {/* Quick Selection Cards Grid with Status Badges and Controls */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {managedCampaigns.map(camp => {
-                    const isSelected = camp.id === selectedProductId;
-                    const isPaused = camp.status === 'paused';
+                  {[...managedCampaigns]
+                    .sort((a, b) => (a.id === selectedProductId ? -1 : b.id === selectedProductId ? 1 : 0))
+                    .map(camp => {
+                      const isSelected = camp.id === selectedProductId;
+                      const isPaused = camp.status === 'paused';
 
                     return (
                       <div
@@ -3302,6 +3523,37 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
                     🟣 Apenas Instagram
                   </button>
                 </div>
+
+                {/* Explicação Honesta: Como Funciona Multi-Canais vs Canal Único & Eficiência */}
+                <div className="bg-slate-900/95 border border-indigo-500/30 rounded-xl p-3.5 space-y-2 text-[11px]">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <span className="font-extrabold text-indigo-300 flex items-center gap-1.5">
+                      <span>💡 Como funciona o Multi-Canais &amp; Qual dá mais eficiência?</span>
+                    </span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                      dispatchMode === 'all'
+                        ? 'bg-amber-950 text-amber-300 border border-amber-700/60'
+                        : 'bg-emerald-950 text-emerald-300 border border-emerald-700/60'
+                    }`}>
+                      {dispatchMode === 'all' ? '⚡ Modo Multi-Canais (Revezamento)' : `🎯 Foco Máximo: ${dispatchMode.toUpperCase()}`}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 text-slate-300 leading-relaxed">
+                    <div className="p-2.5 rounded-lg bg-slate-950/90 border border-slate-800">
+                      <strong className="text-emerald-400 block mb-0.5">🥇 Para Máxima Eficiência Hoje = Selecione 1 Canal (Ex: Apenas Facebook):</strong>
+                      Quando você seleciona <strong>Apenas Facebook</strong>, 100% dos ciclos do robô focam na sua fila de {totalTargetGroups} grupos com a copy feita sob medida para grupos, gerando cliques mais rápido sem dividir o tempo de espera.
+                    </div>
+                    <div className="p-2.5 rounded-lg bg-slate-950/90 border border-slate-800">
+                      <strong className="text-cyan-400 block mb-0.5">⚡ Como funciona o Multi-Canais (Todos):</strong>
+                      O robô reveza os envios entre os canais que têm fila ativa (Facebook, YouTube, Pinterest e Instagram). Canais com <strong>0 itens na fila</strong> (ex: Instagram com {instagramStoryQueue.length} stories) são pulados automaticamente até você adicionar conteúdo neles.
+                    </div>
+                  </div>
+                  {dispatchMode === 'all' && instagramStoryQueue.length === 0 && (
+                    <div className="text-[10px] text-amber-300 bg-amber-950/40 border border-amber-800/50 rounded-lg px-2.5 py-1.5">
+                      ⚠️ <strong>Dica de Eficiência:</strong> O Instagram está com <strong>0 stories na fila</strong>. Para divulgar só nos grupos agora com 100% de força, clique em <strong>"🔵 Apenas Facebook"</strong> — ou adicione um Story na aba <em>Instagram Stories</em> para rodar os dois!
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* 3. Target Audience Selector */}
@@ -3447,17 +3699,32 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
                 </div>
               </div>
 
-              {/* 5. Copy Templates & Headline/Post Controls */}
+              {/* 5. Copy Templates & Headline/Post Controls (Com Persistência Total & Salvar Copy) */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5 uppercase tracking-wide">
                     <Sparkles className="w-4 h-4 text-amber-400" />
                     5. Modelos de Copy Prontos para Grupos:
                   </label>
-                  <span className="text-[11px] text-slate-400">
-                    Adaptado para "{activeCampaign.title.slice(0, 26)}..."
-                  </span>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950/90 text-emerald-300 border border-emerald-700/60 font-bold flex items-center gap-1">
+                      <span>🔒 Auto-Salvo (F5 Seguro)</span>
+                      {savedCopiesMap[selectedProductId]?.savedAt && (
+                        <span className="text-emerald-400">• {savedCopiesMap[selectedProductId].savedAt}</span>
+                      )}
+                    </span>
+                    <span className="text-[11px] text-slate-400">
+                      Campanha: "{activeCampaign.title.slice(0, 22)}..."
+                    </span>
+                  </div>
                 </div>
+
+                {copySaveNotice && (
+                  <div className="p-2.5 rounded-xl bg-emerald-950/90 border border-emerald-500 text-emerald-200 text-xs font-bold flex items-center justify-between gap-2">
+                    <span>{copySaveNotice}</span>
+                    <button type="button" onClick={() => setCopySaveNotice(null)} className="text-slate-400 hover:text-white px-1 cursor-pointer">✕</button>
+                  </div>
+                )}
 
                 {/* 3 Copy Template Buttons */}
                 <div className="grid grid-cols-3 gap-2">
@@ -3478,6 +3745,42 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
                   ))}
                 </div>
 
+                {/* User's Saved Custom Copy Presets */}
+                {customCopyPresets.length > 0 && (
+                  <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-2.5 space-y-1.5">
+                    <span className="text-[10px] font-bold text-amber-300 uppercase tracking-wider block">
+                      ⭐ Suas Copys Salvas ({customCopyPresets.length}):
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {customCopyPresets.map((preset) => (
+                        <div key={preset.id} className="inline-flex items-center gap-1 bg-slate-900 border border-amber-500/40 rounded-lg px-2 py-1 text-[11px]">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPostHeadline(preset.headline);
+                              setPostCopy(preset.copy);
+                              setCopySaveNotice(`✅ Copy "${preset.name}" carregada e fixada na campanha atual!`);
+                              setTimeout(() => setCopySaveNotice(null), 3000);
+                            }}
+                            className="text-amber-200 hover:text-white font-bold cursor-pointer"
+                            title="Clique para usar esta copy salva"
+                          >
+                            {preset.name}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteCustomPreset(preset.id)}
+                            className="text-slate-500 hover:text-rose-400 text-[10px] ml-1 cursor-pointer"
+                            title="Excluir modelo salvo"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* Headline input */}
                 <div>
                   <div className="flex items-center justify-between text-[11px] text-slate-400 mb-1">
@@ -3495,18 +3798,35 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
 
                 {/* Post body */}
                 <div>
-                  <div className="flex items-center justify-between text-[11px] text-slate-400 mb-1">
+                  <div className="flex items-center justify-between text-[11px] text-slate-400 mb-1 flex-wrap gap-2">
                     <span>Corpo do Post (Com link oficial do produto):</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        navigator.clipboard.writeText(`${postHeadline}\n\n${postCopy}`);
-                        alert('Copiado para a área de transferência!');
-                      }}
-                      className="text-emerald-400 hover:text-emerald-300 flex items-center gap-1 text-[10px] cursor-pointer"
-                    >
-                      <Copy className="w-3 h-3" /> Copiar Texto
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const origin = typeof window !== 'undefined' ? window.location.origin : '';
+                          const trackedUrl = `${origin}/api/r?to=${encodeURIComponent(selectedCheckoutUrl || 'https://pay.kiwify.com.br/HE5xbnp')}&src=facebook_groups&camp=${encodeURIComponent(selectedProductId)}&title=${encodeURIComponent(activeCampaign.title)}&city=Curitiba`;
+                          setPostCopy(prev => `${prev}\n\n🔗 Acesse com segurança aqui: ${trackedUrl}`);
+                          setCopySaveNotice('🔗 Link com rastreio real de cliques adicionado na copy!');
+                          setTimeout(() => setCopySaveNotice(null), 3500);
+                        }}
+                        className="text-cyan-400 hover:text-cyan-300 flex items-center gap-1 text-[10px] font-bold cursor-pointer"
+                        title="Insere um link que registra cliques reais no Radar de Rastreio antes de abrir o checkout"
+                      >
+                        <Link2 className="w-3 h-3" /> + Link Rastreado (Cliques Reais)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(`${postHeadline}\n\n${postCopy}`);
+                          setCopySaveNotice('📋 Texto completo copiado para a área de transferência!');
+                          setTimeout(() => setCopySaveNotice(null), 2500);
+                        }}
+                        className="text-emerald-400 hover:text-emerald-300 flex items-center gap-1 text-[10px] cursor-pointer"
+                      >
+                        <Copy className="w-3 h-3" /> Copiar Texto
+                      </button>
+                    </div>
                   </div>
                   <textarea
                     rows={6}
@@ -3515,6 +3835,46 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 focus:outline-none focus:border-emerald-500 leading-relaxed font-sans"
                   />
                 </div>
+
+                {/* Action Bar: Save Copy & Save as Preset */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSaveFixedCopyForCampaign}
+                    className="flex-1 min-w-[190px] py-2.5 px-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-lg cursor-pointer transition"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>💾 Salvar Copy &amp; Fixar Campanha/Grupos</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsSavingPresetPromptOpen(!isSavingPresetPromptOpen)}
+                    className="py-2.5 px-3 bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/40 font-bold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer transition"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>⭐ Salvar nos Modelos</span>
+                  </button>
+                </div>
+
+                {isSavingPresetPromptOpen && (
+                  <div className="p-3 bg-slate-950 border border-amber-500/50 rounded-xl flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={newPresetNameInput}
+                      onChange={(e) => setNewPresetNameInput(e.target.value)}
+                      placeholder="Nome do modelo (ex: Copy Curitiba Psicopedagogia)..."
+                      className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-amber-400"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleSaveNewCustomPreset}
+                      className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-lg cursor-pointer"
+                    >
+                      Salvar
+                    </button>
+                  </div>
+                )}
 
                 {/* 📸 FOTO / IMAGEM DO PRODUTO ANEXADA (User requested: "preciso que a imagem do produto vá junto aqui", image_d046d610.png) */}
                 <div className="bg-slate-900/95 border border-emerald-500/40 rounded-xl p-3.5 space-y-3 shadow-md">

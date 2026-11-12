@@ -306,24 +306,13 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
 
   const [isHackerModeActive, setIsHackerModeActive] = useState<boolean>(true);
   const [botSpeed, setBotSpeed] = useState<'safe' | 'balanced' | 'turbo'>('safe');
-
-  const [walletBalance, setWalletBalance] = useState<number>(() => {
+  const [activeInstaHandle, setActiveInstaHandle] = useState<string>(() => {
     try {
-      const saved = localStorage.getItem('autoviral_wallet_balance');
-      return saved ? parseFloat(saved) : 35.00;
+      return localStorage.getItem('autoviral_insta_handle') || '@fluentimmersion';
     } catch {
-      return 35.00;
+      return '@fluentimmersion';
     }
   });
-
-  const [isTopUpModalOpen, setIsTopUpModalOpen] = useState(false);
-  const [selectedTopUpPackage, setSelectedTopUpPackage] = useState<{ amount: number; dispatches: number; label: string }>({
-    amount: 19.90,
-    dispatches: 250,
-    label: 'Pacote Destravar 1ª Venda',
-  });
-  const [pixCopied, setPixCopied] = useState(false);
-  const [pixConfirmedSuccess, setPixConfirmedSuccess] = useState(false);
 
   // Webhook Test State
   const [isTestingWebhook, setIsTestingWebhook] = useState(false);
@@ -410,16 +399,29 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
   const [newCityAudience, setNewCityAudience] = useState('Mães com filhos de 2 a 8 anos');
   const [isAddingCity, setIsAddingCity] = useState(false);
 
-  // Persist State
   useEffect(() => {
     try {
       localStorage.setItem('autoviral_bot_running', String(isBotRunning));
-      localStorage.setItem('autoviral_wallet_balance', String(walletBalance));
       localStorage.setItem('autoviral_target_cities', JSON.stringify(cities));
       localStorage.setItem('autoviral_dispatch_logs', JSON.stringify(logs.slice(0, 100)));
       localStorage.setItem('autoviral_custom_real_profiles', JSON.stringify(customProfilesList));
     } catch {}
-  }, [isBotRunning, walletBalance, cities, logs, customProfilesList]);
+  }, [isBotRunning, cities, logs, customProfilesList]);
+
+  useEffect(() => {
+    const syncHandle = () => {
+      try {
+        const h = localStorage.getItem('autoviral_insta_handle');
+        if (h) setActiveInstaHandle(h);
+      } catch {}
+    };
+    window.addEventListener('storage', syncHandle);
+    window.addEventListener('autoviral_extension_insta_account_synced', syncHandle as EventListener);
+    return () => {
+      window.removeEventListener('storage', syncHandle);
+      window.removeEventListener('autoviral_extension_insta_account_synced', syncHandle as EventListener);
+    };
+  }, []);
 
   // Bot Auto Dispatch Interval
   const intervalRef = useRef<any>(null);
@@ -439,20 +441,20 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [isBotRunning, botSpeed, cities, walletBalance, activeCampaign]);
+  }, [isBotRunning, botSpeed, cities, activeCampaign]);
 
-  // Auto Dispatch Core Logic
+  const buildTrackedUrl = (city: string, state: string, src: string) => {
+    const baseTarget = activeCampaign.checkoutUrl || 'https://pay.kiwify.com.br/HE5xbnp';
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    return `${origin}/api/r?to=${encodeURIComponent(baseTarget)}&src=${encodeURIComponent(src)}&city=${encodeURIComponent(city)}&state=${encodeURIComponent(state)}&camp=${encodeURIComponent(activeCampaign.id)}&title=${encodeURIComponent(activeCampaign.title)}`;
+  };
+
+  // Auto Dispatch Core Logic (100% Orgânico Sem Custo)
   const handlePerformAutoDispatch = () => {
-    if (walletBalance < 0.08) {
-      setIsBotRunning(false);
-      alert('⚠️ Seu saldo para divulgações acabou. Recarregue no botão "Recarregar Saldo" para continuar os envios automáticos por cidade!');
-      return;
-    }
-
     const activeCities = cities.filter((c) => c.active);
     if (activeCities.length === 0) {
       setIsBotRunning(false);
-      alert('Selecione pelo menos uma cidade com a caixinha marcada para o robô atuar.');
+      setActionNotice('⚠️ Marque pelo menos uma cidade para o robô orgânico atuar.');
       return;
     }
 
@@ -462,7 +464,7 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
     const now = new Date();
     const timeStr = now.toLocaleTimeString('pt-BR');
 
-    const preview = `🥷 [HACKER DO BEM] @${community.handle} (${targetCity.name}) ➔ Varredura de mães com dor: "${community.samplePainComment.slice(0, 60)}..." Script R$ 9,90 pronto!`;
+    const preview = `🆓 [ORGÂNICO R$ 0,00] @${community.handle} (${targetCity.name}) ➔ Roteiro pronto c/ link rastreado para "${activeCampaign.title}"!`;
 
     const newLog: DispatchLog = {
       id: `log-${Date.now()}`,
@@ -476,15 +478,13 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
       isReal: true,
     };
 
-    setWalletBalance((prev) => Math.max(0, parseFloat((prev - 0.08).toFixed(2))));
-
     setCities((prev) =>
       prev.map((c) => {
         if (c.id === targetCity.id) {
           return {
             ...c,
             dispatchesSent: c.dispatchesSent + 1,
-            clicksGenerated: c.clicksGenerated + 1,
+            clicksGenerated: c.clicksGenerated,
           };
         }
         return c;
@@ -507,27 +507,53 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
     }
   };
 
-  // Real Outreach Action 1: Open Real Instagram Profile / Community
+  // Real Outreach Action 1: Open Real Instagram Profile / Community with tracked link
   const handleOpenRealInstagram = (profile: RealTargetProfile) => {
-    navigator.clipboard.writeText(profile.recommendedScript);
+    const firstActiveCity = cities.find((c) => c.active) || cities[0];
+    const trackedLink = buildTrackedUrl(firstActiveCity?.name || 'Brasil', firstActiveCity?.state || 'BR', 'instagram');
+    const scriptWithTracking = `${profile.recommendedScript}\n\n🔗 Link com Rastreio Real de Cliques (${firstActiveCity?.name || 'Brasil'}): ${trackedLink}`;
+    navigator.clipboard.writeText(scriptWithTracking);
     setCopiedLeadId(profile.id);
     setActionNotice(
-      `✅ Script copiado para sua área de transferência! Abrindo @${profile.handle} no Instagram. Abra os comentários do post recente e cole no Direct da mãe interessada!`
+      `✅ Script com link rastreado copiado! Abrindo @${profile.handle} no Instagram. Cole no comentário ou Direct da pessoa interessada (sem nenhum custo de anúncio)!`
     );
     setTimeout(() => {
       setCopiedLeadId(null);
       setActionNotice(null);
     }, 6000);
-
-    window.open(profile.url, '_blank', 'noopener,noreferrer');
   };
 
-  // Real Outreach Action 2: Open Real WhatsApp with pre-filled closing message
-  const handleOpenRealWhatsApp = (profile: RealTargetProfile, customPhone?: string) => {
-    const phoneToUse = (customPhone || '5541998778348').replace(/\D/g, '');
-    const textEncoded = encodeURIComponent(profile.recommendedScript);
-    const waUrl = `https://wa.me/${phoneToUse}?text=${textEncoded}`;
-    window.open(waUrl, '_blank', 'noopener,noreferrer');
+  // Real Outreach Action 2: Send to Own Instagram Stories Próprio
+  const handleSendToOwnStories = (cityName?: string, stateCode?: string) => {
+    const targetCity = cityName || cities.find((c) => c.active)?.name || 'Brasil';
+    const targetState = stateCode || cities.find((c) => c.active)?.state || 'BR';
+    const trackedLink = buildTrackedUrl(targetCity, targetState, 'instagram');
+    const storyItem = {
+      id: `story-city-${Date.now()}`,
+      title: `[${activeInstaHandle}] ${activeCampaign.title} — Público ${targetCity}`,
+      mediaUrl: activeCampaign.imageUrl || '/assets/aistudio/image_e9e67204.png',
+      mediaType: 'story_9_16',
+      stickerText: `👉 TOQUE AQUI (${targetCity})`,
+      stickerUrl: trackedLink,
+      caption: `Story Próprio na conta ${activeInstaHandle} focado em ${targetCity} (${targetState}) — Clique real rastreado via /api/r`,
+      status: 'ready',
+      viewsEstimated: 0,
+      linkClicksEstimated: 0,
+      salesEstimated: 0,
+      targetCampaignId: activeCampaign.id,
+    };
+
+    try {
+      const existingRaw = localStorage.getItem('autoviral_insta_story_queue');
+      const existing = existingRaw ? JSON.parse(existingRaw) : [];
+      localStorage.setItem('autoviral_insta_story_queue', JSON.stringify([storyItem, ...existing]));
+      navigator.clipboard.writeText(trackedLink);
+    } catch {}
+
+    setActionNotice(
+      `📲 Story Próprio agendado na conta ${activeInstaHandle} para ${targetCity} (${targetState}) com link rastreado copiado! Redirecionando ou abra "Robô Instagram" para publicar.`
+    );
+    setTimeout(() => setActionNotice(null), 6000);
   };
 
   // Add custom real lead / follower
@@ -536,6 +562,9 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
     const cleanHandle = customHandleInput.replace(/^@/, '').trim();
     if (!cleanHandle) return;
 
+    const firstActiveCity = cities.find((c) => c.active) || cities[0];
+    const trackedLink = buildTrackedUrl(firstActiveCity?.name || 'Curitiba', firstActiveCity?.state || 'PR', 'instagram');
+
     const newProfile: RealTargetProfile = {
       id: `custom-lead-${Date.now()}`,
       name: customNameInput.trim() || `@${cleanHandle}`,
@@ -543,29 +572,31 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
       url: `https://www.instagram.com/${cleanHandle}/`,
       followersCount: 'Lead Específico',
       category: 'Maternidade Real',
-      cityLocation: 'Curitiba - PR',
+      cityLocation: `${firstActiveCity?.name || 'Curitiba'} - ${firstActiveCity?.state || 'PR'}`,
       description: 'Perfil real cadastrado por você para abordagem direta.',
-      samplePainComment: 'Lead de alta prioridade para fechamento do Caderno de Atividades R$ 9,90.',
-      recommendedScript: `Olá ${customNameInput.trim() || 'mamãe'}! Liberamos a apostila oficial "+100 Tarefinhas Educação Infantil e Autismo" por apenas R$ 9,90 no Pix para baixar em PDF na hora: https://pay.kiwify.com.br/HE5xbnp (Qualquer dúvida me chama no WhatsApp: 41 99877-8348)`,
+      samplePainComment: `Lead de alta prioridade para "${activeCampaign.title}".`,
+      recommendedScript: `Olá ${customNameInput.trim() || 'tudo bem'}! Preparamos o "${activeCampaign.title}" por apenas R$ ${(activeCampaign.price || 9.90).toFixed(2).replace('.', ',')} para baixar na hora: ${trackedLink} (Dúvidas WhatsApp: 41 99877-8348)`,
       isCustom: true,
     };
 
     setCustomProfilesList((prev) => [newProfile, ...prev]);
     setCustomHandleInput('');
     setCustomNameInput('');
-    setActionNotice(`✅ Perfil @${cleanHandle} adicionado com sucesso! Clique em "Disparar Direct Real" para abrir.`);
-    setTimeout(() => setActionNotice(null), 4000);
+    setActionNotice(`✅ Perfil @${cleanHandle} salvo com sucesso! Use os botões abaixo para abrir no Instagram ou Direct.`);
+    setTimeout(() => setActionNotice(null), 5000);
   };
 
   const handleDeleteCustomProfile = (id: string) => {
     setCustomProfilesList((prev) => prev.filter((p) => p.id !== id));
   };
 
-  // Copy Kiwify Checkout link
+  // Copy tracked checkout link
   const handleCopyKiwifyLink = () => {
-    const link = 'https://pay.kiwify.com.br/HE5xbnp?src=hacker_bot_cidades';
+    const firstActiveCity = cities.find((c) => c.active) || cities[0];
+    const link = buildTrackedUrl(firstActiveCity?.name || 'Curitiba', firstActiveCity?.state || 'PR', 'instagram');
     navigator.clipboard.writeText(link);
-    alert('✅ Link do checkout da Kiwify (R$ 9,90) copiado com rastreamento UTM!');
+    setActionNotice(`✅ Link rastreado copiado (${firstActiveCity?.name || 'Brasil'})! Todo clique nele aparecerá como CLIQUE REAL no Radar de Pessoas!`);
+    setTimeout(() => setActionNotice(null), 5000);
   };
 
   // Resilient Webhook Test Handler (Handles JSON, text, Vercel & Express)
@@ -660,20 +691,9 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
     );
   };
 
-  const handleConfirmPixPayment = () => {
-    setPixConfirmedSuccess(true);
-    setTimeout(() => {
-      setWalletBalance((prev) => parseFloat((prev + selectedTopUpPackage.amount).toFixed(2)));
-      setPixConfirmedSuccess(false);
-      setIsTopUpModalOpen(false);
-      setIsBotRunning(true);
-    }, 1200);
-  };
-
   const totalSent = cities.reduce((acc, c) => acc + c.dispatchesSent, 0);
   const totalClicks = cities.reduce((acc, c) => acc + c.clicksGenerated, 0);
   const totalSales = cities.reduce((acc, c) => acc + c.salesCount, 0);
-  const estimatedReachWithBalance = Math.floor(walletBalance / 0.08);
 
   // Dynamic public webhook URL based on current host (supports Vercel and Cloud Run)
   const currentHost = typeof window !== 'undefined' ? window.location.origin : 'https://robo-trafego.vercel.app';
@@ -701,47 +721,57 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
               </span>
 
               <span className="text-xs text-slate-300">
-                Instagram Oficial: <strong className="text-emerald-400">@fluentimmersion</strong> • WhatsApp: <strong className="text-white">(41) 99877-8348</strong>
+                Instagram Ativo (Stories & Direct): <strong className="text-emerald-400">{activeInstaHandle}</strong> • WhatsApp: <strong className="text-white">(41) 99877-8348</strong>
               </span>
             </div>
 
             <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
-              Robô Divulgador: Disparos Reais no Instagram & Captura de Vendas Kiwify
+              Robô Divulgador por Cidades: 100% Orgânico, Gratuito & Rastreio Real
             </h1>
 
             <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-              Aqui você acessa <strong>comunidades e perfis reais que existem de verdade no Instagram</strong> (#autismoinfantil, @autismoerealidade, @revistaautismo), onde centenas de mães atípicas e pedagogas pedem atividades todos os dias. Você clica, o script oficial com link da <strong>Kiwify de R$ 9,90</strong> é copiado e o perfil abre na hora para você fechar a venda!
+              Divulgue nas cidades selecionadas com <strong>R$ 0,00 de tráfego pago</strong>. Cada botão abaixo gera seu link rastreado real (<code className="text-emerald-300">/api/r</code>), copia o script pronto para o Instagram Direct/Comentários e prepara seu <strong>Stories Próprio na conta {activeInstaHandle}</strong> para gerar cliques reais mensuráveis no Radar!
             </p>
           </div>
 
-          {/* Quick Wallet Card */}
-          <div className="bg-slate-950/90 border border-emerald-500/50 rounded-2xl p-4 min-w-[280px] shadow-xl flex flex-col gap-3">
+          {/* 100% Free Organic Mode & Own Instagram Card */}
+          <div className="bg-slate-950/90 border border-emerald-500/50 rounded-2xl p-4 min-w-[290px] shadow-xl flex flex-col gap-3">
             <div className="flex items-center justify-between text-xs text-slate-400">
               <span className="flex items-center gap-1 font-semibold text-slate-300">
-                <CreditCard className="w-4 h-4 text-emerald-400" />
-                Saldo para Divulgações:
+                <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                Modo de Divulgação:
               </span>
-              <span className="text-[10px] bg-emerald-950 text-emerald-300 px-2 py-0.5 rounded border border-emerald-800 font-mono">
-                R$ 0,08 / disparo
+              <span className="text-[10px] bg-emerald-950 text-emerald-300 px-2 py-0.5 rounded border border-emerald-800 font-mono font-bold">
+                100% GRATUITO
               </span>
             </div>
 
             <div className="flex items-baseline justify-between">
-              <div className="text-3xl font-black text-emerald-400">
-                {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(walletBalance)}
+              <div className="text-2xl font-black text-emerald-400">
+                R$ 0,00 / anúncio
               </div>
-              <span className="text-xs text-slate-400 font-mono">
-                ~ <strong>{estimatedReachWithBalance}</strong> envios
+              <span className="text-xs text-slate-300 font-mono">
+                Conta: <strong className="text-pink-400">{activeInstaHandle}</strong>
               </span>
             </div>
 
-            <button
-              onClick={() => setIsTopUpModalOpen(true)}
-              className="w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-md transition transform active:scale-95 cursor-pointer"
-            >
-              <Zap className="w-3.5 h-3.5" />
-              Recarregar Saldo / Pagar Aqui (PIX)
-            </button>
+            <div className="grid grid-cols-1 gap-2">
+              <button
+                type="button"
+                onClick={() => handleSendToOwnStories()}
+                className="w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs font-bold bg-gradient-to-r from-pink-600 via-purple-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 text-white shadow-md transition cursor-pointer"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                Preparar Stories Próprio ({activeInstaHandle})
+              </button>
+              <button
+                type="button"
+                onClick={() => onNavigateTab('instagram')}
+                className="w-full flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-xl text-[11px] font-bold bg-slate-900 hover:bg-slate-800 text-purple-300 border border-purple-700/60 transition cursor-pointer"
+              >
+                <span>Abrir Robô de Stories Próprio →</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -833,13 +863,23 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
         </form>
       </div>
 
-      {/* SECTION 2: EXPLORADOR DE HASHTAGS REAIS DO INSTAGRAM */}
+      {/* SECTION 2: EXPLORADOR DE HASHTAGS POR CIDADE & NICHO NO INSTAGRAM */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-xl space-y-3">
-        <div className="flex items-center gap-2">
-          <Hash className="w-4 h-4 text-pink-400" />
-          <h4 className="text-xs font-bold text-white uppercase tracking-wider">
-            Feeds e Hashtags Reais de Mães Atípicas no Instagram (Clique para Abrir):
-          </h4>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Hash className="w-4 h-4 text-pink-400" />
+            <h4 className="text-xs font-bold text-white uppercase tracking-wider">
+              Explorar Hashtags & Locais Reais no Instagram (Cidades Ativas + Nicho):
+            </h4>
+          </div>
+          <button
+            type="button"
+            onClick={handleCopyKiwifyLink}
+            className="text-[11px] font-bold text-emerald-300 bg-emerald-950/70 hover:bg-emerald-900 px-3 py-1 rounded-lg border border-emerald-700/60 cursor-pointer flex items-center gap-1"
+          >
+            <Copy className="w-3 h-3" />
+            <span>Copiar Link Rastreado Real p/ Colar na Bio/Direct</span>
+          </button>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {REAL_HASHTAGS.map((h) => (
@@ -854,6 +894,22 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
               <span>{h.label}</span>
             </a>
           ))}
+          {cities.filter((c) => c.active).map((city) => {
+            const slug = city.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+            return (
+              <a
+                key={`hash-${city.id}`}
+                href={`https://www.instagram.com/explore/tags/maes${slug}/`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-1.5 rounded-xl bg-purple-950/50 border border-purple-700/60 hover:border-pink-400 text-purple-200 hover:text-white text-xs font-bold flex items-center gap-1.5 transition"
+                title={`Buscar mães e público de ${city.name} no Instagram`}
+              >
+                <MapPin className="w-3 h-3 text-rose-400" />
+                <span>#maes{slug} ({city.state})</span>
+              </a>
+            );
+          })}
         </div>
       </div>
 
@@ -925,25 +981,48 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
                 </div>
               </div>
 
-              {/* Action Buttons */}
+              {/* Action Buttons (Instagram, Direct DM, Stories Próprio & WhatsApp) */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-slate-900">
-                <button
-                  type="button"
+                <a
+                  href={profile.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
                   onClick={() => handleOpenRealInstagram(profile)}
                   className="px-3 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 text-white shadow flex items-center justify-center gap-1.5 transition cursor-pointer"
                 >
                   <Send className="w-3.5 h-3.5" />
-                  <span>{copiedLeadId === profile.id ? 'Script Copiado! Abrindo...' : 'Abrir Instagram Real'}</span>
-                </button>
+                  <span>{copiedLeadId === profile.id ? 'Script+Link Copiado!' : 'Abrir Perfil + Copiar Script'}</span>
+                </a>
+
+                <a
+                  href="https://www.instagram.com/direct/inbox/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => handleOpenRealInstagram(profile)}
+                  className="px-3 py-2.5 rounded-xl text-xs font-bold bg-purple-700 hover:bg-purple-600 text-white shadow flex items-center justify-center gap-1.5 transition cursor-pointer"
+                >
+                  <MessageCircle className="w-3.5 h-3.5" />
+                  <span>Abrir Direct (DM) c/ Link</span>
+                </a>
 
                 <button
                   type="button"
-                  onClick={() => handleOpenRealWhatsApp(profile)}
-                  className="px-3 py-2.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow flex items-center justify-center gap-1.5 transition cursor-pointer"
+                  onClick={() => handleSendToOwnStories(profile.cityLocation)}
+                  className="px-3 py-2 rounded-xl text-[11px] font-bold bg-indigo-950 hover:bg-indigo-900 text-indigo-200 border border-indigo-700/60 flex items-center justify-center gap-1.5 transition cursor-pointer"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                  <span>Stories Próprio ({activeInstaHandle})</span>
+                </button>
+
+                <a
+                  href={`https://wa.me/${customPhoneInput.replace(/\D/g, '') || '5541998778348'}?text=${encodeURIComponent(profile.recommendedScript)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-2 rounded-xl text-[11px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow flex items-center justify-center gap-1.5 transition cursor-pointer"
                 >
                   <MessageCircle className="w-3.5 h-3.5" />
                   <span>Chamar no WhatsApp</span>
-                </button>
+                </a>
               </div>
             </div>
           ))}
@@ -1474,122 +1553,15 @@ export const RoboDivulgadorCidades: React.FC<RoboDivulgadorCidadesProps> = ({
             <div className="flex flex-wrap items-center justify-between gap-3 text-[11px] text-slate-400 pt-2 border-t border-slate-900">
               <span className="flex items-center gap-1.5 text-emerald-400">
                 <CheckCircle2 className="w-3.5 h-3.5" />
-                Anti-Bloqueio: Intervalos variáveis com fingerprint orgânico ativo
+                Anti-Bloqueio: Intervalos variáveis 100% orgânicos (R$ 0,00 de custo pago)
               </span>
               <span>
-                Custo de R$ 0,08 debitado automaticamente apenas quando o envio for bem-sucedido.
+                Todos os links copiados passam por <code className="text-cyan-400">/api/r</code> para registrar cliques reais por cidade.
               </span>
             </div>
           </div>
         </div>
       </div>
-
-      {/* Top-Up PIX Modal ("Pago aqui mesmo") */}
-      {isTopUpModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fadeIn">
-          <div className="bg-slate-900 border border-emerald-500/60 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-5 relative">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                  <CreditCard className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-white text-base">Recarregar Saldo de Divulgação</h3>
-                  <p className="text-xs text-slate-400">Pague direto aqui via PIX Instantâneo sem intermediários</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setIsTopUpModalOpen(false)}
-                className="text-slate-400 hover:text-white text-xl font-bold p-1 cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Packages Selector */}
-            <div className="space-y-2">
-              <label className="text-xs font-semibold text-slate-300">Escolha o Pacote de Disparos por Cidades:</label>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                {[
-                  { amount: 19.90, dispatches: 250, label: 'Destravar 1ª Venda' },
-                  { amount: 39.90, dispatches: 650, label: 'Semanal Turbo' },
-                  { amount: 79.90, dispatches: 1600, label: 'Escala Máxima' },
-                ].map((pkg) => (
-                  <button
-                    key={pkg.amount}
-                    type="button"
-                    onClick={() => setSelectedTopUpPackage(pkg)}
-                    className={`p-3 rounded-xl border text-left transition cursor-pointer ${
-                      selectedTopUpPackage.amount === pkg.amount
-                        ? 'bg-emerald-950/80 border-emerald-500 text-white shadow-md'
-                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
-                    }`}
-                  >
-                    <div className="text-xs font-bold text-emerald-400">{pkg.label}</div>
-                    <div className="text-lg font-black text-white mt-1">R$ {pkg.amount.toFixed(2).replace('.', ',')}</div>
-                    <div className="text-[10px] text-slate-400 mt-0.5">{pkg.dispatches} envios qualificados</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* PIX QR Code & Copia e Cola */}
-            <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 flex flex-col items-center text-center space-y-3">
-              <div className="bg-white p-3 rounded-xl shadow-lg inline-block">
-                <svg className="w-32 h-32" viewBox="0 0 100 100" fill="currentColor">
-                  <path d="M0 0h30v30H0zM5 5h20v20H5zM10 10h10v10H10zM70 0h30v30H70zM75 5h20v20H75zM80 10h10v10H80zM0 70h30v30H0zM5 75h20v20H5zM10 80h10v10H10zM40 10h20v10H40zM40 30h10v20H40zM60 40h20v10H60zM40 60h10v30H40zM60 70h20v10H60zM80 80h15v15H80zM20 40h10v20H20zM50 80h10v15H50z" />
-                </svg>
-              </div>
-
-              <div className="w-full space-y-1">
-                <span className="text-[11px] text-slate-400">Código PIX Copia e Cola:</span>
-                <div className="flex items-center gap-2 bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs font-mono text-slate-300">
-                  <span className="truncate flex-1">
-                    00020126580014br.gov.bcb.pix0136marcellospropaganda@gmail.com520400005303986540{selectedTopUpPackage.amount.toFixed(2).replace('.', '')}5802BR5920FluentImmersion6008Curitiba
-                  </span>
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(
-                        `00020126580014br.gov.bcb.pix0136marcellospropaganda@gmail.com520400005303986540${selectedTopUpPackage.amount.toFixed(2).replace('.', '')}5802BR5920FluentImmersion6008Curitiba`
-                      );
-                      setPixCopied(true);
-                      setTimeout(() => setPixCopied(false), 2000);
-                    }}
-                    className="p-1.5 rounded bg-slate-800 hover:bg-slate-700 text-emerald-400 transition cursor-pointer"
-                    title="Copiar código"
-                  >
-                    {pixCopied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="space-y-2">
-              <button
-                type="button"
-                onClick={handleConfirmPixPayment}
-                className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-sm font-bold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-lg transition cursor-pointer"
-              >
-                {pixConfirmedSuccess ? (
-                  <>
-                    <CheckCircle2 className="w-4 h-4 text-white animate-bounce" />
-                    Pagamento PIX Confirmado! Creditando...
-                  </>
-                ) : (
-                  <>
-                    <Zap className="w-4 h-4" />
-                    Já Fiz o Pix / Confirmar Crédito de R$ {selectedTopUpPackage.amount.toFixed(2).replace('.', ',')}
-                  </>
-                )}
-              </button>
-              <p className="text-[11px] text-center text-slate-400">
-                O saldo é liberado na hora e seu robô iniciará os envios imediatamente nas cidades ativas.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

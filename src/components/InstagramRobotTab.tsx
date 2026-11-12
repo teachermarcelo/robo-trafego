@@ -98,9 +98,19 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
 
   // Connected Instagram Account state (Real session detection & override)
   const [accountHandle, setAccountHandle] = useState<string>(() => {
-    return localStorage.getItem('autoviral_insta_handle') || '@divulga_renda_digital';
+    const savedHandle = localStorage.getItem('autoviral_insta_handle');
+    if (savedHandle) return savedHandle;
+    try {
+      const originRaw = localStorage.getItem('autoviral_instagram_origin_accounts');
+      if (originRaw) {
+        const parsed = JSON.parse(originRaw);
+        if (Array.isArray(parsed) && parsed[0]?.handle) return parsed[0].handle;
+      }
+    } catch {}
+    return '@divulga_renda_digital';
   });
   const [isEditingHandle, setIsEditingHandle] = useState<boolean>(false);
+  const [instaSyncNotice, setInstaSyncNotice] = useState<string | null>(null);
 
   // Bot running state
   const [isInstagramBotRunning, setIsInstagramBotRunning] = useState<boolean>(false);
@@ -316,6 +326,94 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
     }
   }, [externalStoryQueue]);
 
+  // Sync confirmed handle & unlimited mapped accounts from Extension or LeadFinderTab
+  useEffect(() => {
+    const syncHandle = (rawHandle?: string) => {
+      if (!rawHandle || rawHandle === '@conectado') return;
+      const clean = '@' + String(rawHandle).trim().replace(/^@+/, '').toLowerCase();
+      setAccountHandle(clean);
+      try {
+        localStorage.setItem('autoviral_insta_handle', clean);
+      } catch {}
+      setInstaSyncNotice(`✅ Conta ${clean} confirmada para Stories Próprio!`);
+      setTimeout(() => setInstaSyncNotice(null), 4000);
+    };
+
+    const appendMappedAccounts = (accounts: Array<{ handle?: string; username?: string; name?: string }>) => {
+      if (!Array.isArray(accounts) || accounts.length === 0) return;
+      const mappedItems: InstagramMappedTarget[] = accounts
+        .filter((a) => a && (a.handle || a.username))
+        .map((a, idx) => {
+          const h = '@' + String(a.handle || a.username).replace(/^@+/, '').toLowerCase();
+          return {
+            id: `tgt-ext-${Date.now()}-${idx}-${h.slice(1, 8)}`,
+            handle: h,
+            name: a.name || h,
+            followers: 'Mapeado Chrome',
+            bio: 'Perfil real capturado via rolagem da Extensão Chrome AutoViral AI (ilimitado).',
+            category: 'profile_follower',
+            sourceQuery: 'chrome_extension_instagram',
+            score: 95,
+            selected: true,
+            status: 'pending',
+          };
+        });
+
+      setMappedTargets((prev) => {
+        const existing = new Set(prev.map((t) => t.handle.toLowerCase()));
+        const uniqueNew = mappedItems.filter((m) => !existing.has(m.handle.toLowerCase()));
+        return [...uniqueNew, ...prev];
+      });
+    };
+
+    const onHandleSyncEvent = (ev: Event) => {
+      const detail = (ev as CustomEvent).detail;
+      if (detail?.handle) syncHandle(detail.handle);
+    };
+    const onAccountsEvent = (ev: Event) => {
+      const detail = (ev as CustomEvent).detail;
+      if (detail?.connectedHandle) syncHandle(detail.connectedHandle);
+      if (Array.isArray(detail?.accounts)) appendMappedAccounts(detail.accounts);
+    };
+    const onStorageEvent = (ev: StorageEvent) => {
+      if (ev.key === 'autoviral_insta_handle' && ev.newValue) {
+        setAccountHandle(ev.newValue);
+      }
+      if (ev.key === 'autoviral_insta_story_queue' && ev.newValue) {
+        try {
+          const parsed = JSON.parse(ev.newValue);
+          if (Array.isArray(parsed)) setStoryQueue(parsed);
+        } catch {}
+      }
+    };
+
+    window.addEventListener('autoviral_extension_insta_account_synced', onHandleSyncEvent);
+    window.addEventListener('autoviral_extension_instagram_accounts_received', onAccountsEvent);
+    window.addEventListener('storage', onStorageEvent);
+
+    let bc: BroadcastChannel | null = null;
+    try {
+      bc = new BroadcastChannel('autoviral_bridge_channel');
+      bc.onmessage = (msg) => {
+        const data = msg.data;
+        if (!data) return;
+        if (data.action === 'AUTOVIRAL_INSTA_ACCOUNT_SYNC' && data.handle) {
+          syncHandle(data.handle);
+        } else if (data.action === 'AUTOVIRAL_IMPORT_INSTAGRAM_ACCOUNTS') {
+          if (data.connectedHandle) syncHandle(data.connectedHandle);
+          if (Array.isArray(data.accounts)) appendMappedAccounts(data.accounts);
+        }
+      };
+    } catch {}
+
+    return () => {
+      window.removeEventListener('autoviral_extension_insta_account_synced', onHandleSyncEvent);
+      window.removeEventListener('autoviral_extension_instagram_accounts_received', onAccountsEvent);
+      window.removeEventListener('storage', onStorageEvent);
+      if (bc) bc.close();
+    };
+  }, []);
+
   // Persist to localStorage
   useEffect(() => {
     try {
@@ -520,16 +618,23 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
 
   const selectedTargetCount = mappedTargets.filter(t => t.selected).length;
 
+  // Build real tracked link (/api/r) for Stories Próprio
+  const wrapWithRealTrackedUrl = (rawUrl: string, camp: Campaign) => {
+    if (!rawUrl || rawUrl.includes('/api/r?')) return rawUrl;
+    return `${window.location.origin}/api/r?to=${encodeURIComponent(rawUrl)}&src=instagram_story&city=Brasil&state=BR&camp=${encodeURIComponent(camp.id)}&title=${encodeURIComponent(camp.title)}&ig=${encodeURIComponent(accountHandle)}`;
+  };
+
   // Add new story
   const handleAddNewStory = () => {
     const camp = campaigns.find(c => c.id === newStoryCampaignId) || defaultCampaign;
+    const trackedStickerUrl = wrapWithRealTrackedUrl(newStoryStickerUrl, camp);
     const newItem: InstagramStoryItem = {
       id: `story-${Date.now()}`,
       title: newStoryTitle,
       mediaUrl: camp.imageUrl || '/assets/aistudio/image_5456885b.png',
       mediaType: newStoryMediaType,
       stickerText: newStoryStickerText,
-      stickerUrl: newStoryStickerUrl,
+      stickerUrl: trackedStickerUrl,
       caption: newStoryCaption,
       status: 'ready',
       viewsEstimated: 0,
@@ -595,10 +700,19 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
                   />
                   <button
                     onClick={() => {
-                      localStorage.setItem('autoviral_insta_handle', accountHandle);
+                      const clean = '@' + accountHandle.trim().replace(/^@+/, '').toLowerCase();
+                      setAccountHandle(clean);
+                      localStorage.setItem('autoviral_insta_handle', clean);
+                      window.dispatchEvent(
+                        new CustomEvent('autoviral_extension_insta_account_synced', {
+                          detail: { handle: clean },
+                        })
+                      );
                       setIsEditingHandle(false);
+                      setInstaSyncNotice(`✅ Conta ${clean} confirmada para Stories Próprio!`);
+                      setTimeout(() => setInstaSyncNotice(null), 4000);
                     }}
-                    className="text-[10px] bg-purple-600 px-2 py-0.5 rounded font-bold text-white"
+                    className="text-[10px] bg-purple-600 px-2 py-0.5 rounded font-bold text-white cursor-pointer"
                   >
                     OK
                   </button>
@@ -608,7 +722,7 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
                   <span className="font-extrabold text-white text-xs">{accountHandle}</span>
                   <button
                     onClick={() => setIsEditingHandle(true)}
-                    className="text-[10px] text-purple-400 hover:text-purple-300 underline"
+                    className="text-[10px] text-purple-400 hover:text-purple-300 underline cursor-pointer"
                   >
                     (Alterar)
                   </button>
@@ -617,6 +731,12 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
             </div>
           </div>
         </div>
+
+        {instaSyncNotice && (
+          <div className="mt-3 p-2.5 bg-emerald-950/80 border border-emerald-500/60 rounded-xl text-xs font-bold text-emerald-300">
+            {instaSyncNotice}
+          </div>
+        )}
 
         {/* Subtabs Controller */}
         <div className="mt-5 pt-4 border-t border-purple-900/30 flex flex-wrap items-center justify-between gap-3 text-xs">
@@ -782,10 +902,14 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
             <div>
               <h3 className="text-base font-bold text-white flex items-center gap-2">
                 <Flame className="w-5 h-5 text-rose-500" />
-                Fila de Stories &amp; Publicações do Instagram ({storyQueue.length})
+                Fila de Stories Próprio • Publicando na Conta{' '}
+                <span className="text-purple-300 font-mono bg-purple-950/80 px-2 py-0.5 rounded-lg border border-purple-500/50 text-xs">
+                  {accountHandle}
+                </span>
+                <span>({storyQueue.length})</span>
               </h3>
               <p className="text-xs text-slate-400 mt-0.5">
-                Cada Story postado inclui a figurinha clicável que leva direto para a Kiwify / checkout do produto.
+                Certeza da conta ativa: os Stories com figurinha rastreada de cliques reais serão publicados em <strong>{accountHandle}</strong>.
               </p>
             </div>
 
@@ -1261,8 +1385,6 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
                       onClick={() => {
                         if (growthRotatingComments.length > 1) {
                           setGrowthRotatingComments(prev => prev.filter((_, i) => i !== index));
-                        } else {
-                          alert('Mantenha ao menos 1 comentário no banco rotativo.');
                         }
                       }}
                       className="text-slate-500 hover:text-red-400 transition cursor-pointer p-1"
@@ -1276,25 +1398,25 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
             </div>
           </div>
 
-          {/* Target Profiles Queue */}
+          {/* Target Profiles Queue (Unlimited, Scrollable) */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
             <div className="flex items-center justify-between">
               <div>
                 <h4 className="text-sm font-bold text-white flex items-center gap-2">
                   <Users className="w-4 h-4 text-emerald-400" />
-                  Fila de Perfis Segmentados Prontos para Interação
+                  Fila de Perfis Segmentados Prontos para Interação (Ilimitado)
                 </h4>
                 <p className="text-[11px] text-slate-400 mt-0.5">
-                  Perfis de mães atípicas, pedagogia e educação infantil selecionados pelo robô
+                  Todos os perfis mapeados via extensão Chrome ou nicho exibidos sem limite
                 </p>
               </div>
               <span className="text-xs text-emerald-400 font-bold bg-emerald-950/80 border border-emerald-800/60 px-3 py-1 rounded-xl">
-                {mappedTargets.filter(t => t.selected).length} perfis ativos na fila
+                {mappedTargets.filter(t => t.selected).length} / {mappedTargets.length} perfis ativos
               </span>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {mappedTargets.slice(0, 6).map((target) => (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 max-h-96 overflow-y-auto pr-1">
+              {mappedTargets.map((target) => (
                 <div
                   key={target.id}
                   className="bg-slate-950 p-4 rounded-xl border border-slate-800/80 space-y-2 hover:border-slate-700 transition"

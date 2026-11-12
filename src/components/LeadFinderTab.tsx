@@ -50,8 +50,11 @@ import {
   ShoppingBag,
   Smile,
   Eye,
+  FolderPlus,
+  BookmarkCheck,
+  Radio,
 } from 'lucide-react';
-import { Campaign } from '../types';
+import { Campaign, TrackingEvent, InstagramStoryItem } from '../types';
 import {
   subscribeCustomProfiles,
   saveCustomProfileToFirebase,
@@ -67,6 +70,24 @@ import { getCampaignSlug } from '../utils/campaignSlug';
 
 interface LeadFinderTabProps {
   campaigns: Campaign[];
+  onAddTrackingEvent?: (event: Partial<TrackingEvent>) => void;
+  onNavigateTab?: (tab: string) => void;
+}
+
+interface MappedInstagramGroup {
+  id: string;
+  name: string;
+  accounts: TargetProfile[];
+  sourceQuery?: string;
+  createdAt: string;
+}
+
+interface SavedInstagramAudience {
+  id: string;
+  name: string;
+  handles: string[];
+  campaignId?: string;
+  createdAt: string;
 }
 
 export interface TargetProfile {
@@ -147,7 +168,11 @@ export const parseBulkInstagramHandles = (text: string): string[] => {
   return Array.from(new Set(list));
 };
 
-export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
+export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({
+  campaigns,
+  onAddTrackingEvent,
+  onNavigateTab,
+}) => {
   const [selectedPlatform, setSelectedPlatform] = useState<'instagram' | 'pinterest' | 'tiktok'>('instagram');
   const [selectedSegmentId, setSelectedSegmentId] = useState<string>('pedagogia');
   const [searchQuery, setSearchQuery] = useState('');
@@ -156,7 +181,7 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
   const [selectedProfileIndex, setSelectedProfileIndex] = useState(0);
   const [successAddedHandle, setSuccessAddedHandle] = useState<string | null>(null);
 
-  // In-list search filter for the profiles sidebar (Image 2)
+  // In-list search filter for the profiles sidebar
   const [profilesFilterQuery, setProfilesFilterQuery] = useState('');
 
   // Manual Instagram accounts insertion state
@@ -169,6 +194,33 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
   const [manualNotesInput, setManualNotesInput] = useState('');
   const [bulkAccountsText, setBulkAccountsText] = useState('');
   const [manualSuccessMessage, setManualSuccessMessage] = useState<string | null>(null);
+
+  // Unlimited Mapped Groups & Saved Audiences (Chrome Extension + Own Stories Integration)
+  const [mappedGroups, setMappedGroups] = useState<MappedInstagramGroup[]>(() => {
+    try {
+      const saved = localStorage.getItem('autoviral_insta_mapped_groups_v1');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return [];
+  });
+  const [selectedMappedGroupId, setSelectedMappedGroupId] = useState<string>('');
+  const [editingGroupName, setEditingGroupName] = useState<string>('');
+  const [isRenamingGroup, setIsRenamingGroup] = useState<boolean>(false);
+  const [newAccountForGroupInput, setNewAccountForGroupInput] = useState<string>('');
+  const [savedAudiences, setSavedAudiences] = useState<SavedInstagramAudience[]>(() => {
+    try {
+      const saved = localStorage.getItem('autoviral_insta_audiences_v1');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return [];
+  });
+  const [storiesActionBanner, setStoriesActionBanner] = useState<string | null>(null);
 
   // Search dropdown / focus state
   const [isHandleSearchFocused, setIsHandleSearchFocused] = useState(false);
@@ -211,10 +263,11 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       }
     } catch {}
+    const storyHandle = localStorage.getItem('autoviral_insta_handle');
     return [
       {
-        handle: '@marcellospropaganda',
-        name: 'Perfil Principal (Oficial)',
+        handle: storyHandle || '@marcellospropaganda',
+        name: 'Perfil Principal (Oficial & Stories)',
         status: 'active',
         dailyLimit: 20,
         sentToday: 0,
@@ -247,13 +300,26 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
     return () => unsub();
   }, []);
 
-  const handleSaveOriginAccounts = (updatedAccounts: InstagramOriginAccount[]) => {
+  const syncConfirmedInstagramHandle = (handleValue: string) => {
+    const clean = '@' + handleValue.trim().replace(/^@+/, '').toLowerCase();
+    try {
+      localStorage.setItem('autoviral_insta_handle', clean);
+      window.dispatchEvent(
+        new CustomEvent('autoviral_extension_insta_account_synced', {
+          detail: { handle: clean, timestamp: new Date().toISOString() },
+        })
+      );
+    } catch {}
+  };
+
+  const handleSaveOriginAccounts = (updatedAccounts: InstagramOriginAccount[], selectedIdx = activeOriginIndex) => {
     setOriginAccounts(updatedAccounts);
     try {
       localStorage.setItem('autoviral_instagram_origin_accounts', JSON.stringify(updatedAccounts));
     } catch {}
-    const active = updatedAccounts[activeOriginIndex] || updatedAccounts[0];
+    const active = updatedAccounts[selectedIdx] || updatedAccounts[0];
     if (active) {
+      syncConfirmedInstagramHandle(active.handle);
       saveInstagramOriginAccountToFirebase({
         ...active,
         accountsList: updatedAccounts,
@@ -279,10 +345,11 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
       ? originAccounts.map((a) => (a.handle.toLowerCase() === formatted.toLowerCase() ? newAcc : a))
       : [...originAccounts, newAcc];
 
-    handleSaveOriginAccounts(updated);
-    if (!exists) {
-      setActiveOriginIndex(updated.length - 1);
-    }
+    const nextIdx = exists
+      ? updated.findIndex((a) => a.handle.toLowerCase() === formatted.toLowerCase())
+      : updated.length - 1;
+    handleSaveOriginAccounts(updated, nextIdx);
+    setActiveOriginIndex(nextIdx >= 0 ? nextIdx : 0);
     setNewOriginInput('');
     setNewOriginNameInput('');
     setIsEditingOrigin(false);
@@ -291,7 +358,7 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
   const handleRemoveOriginAccount = (indexToRemove: number) => {
     if (originAccounts.length <= 1) return;
     const updated = originAccounts.filter((_, i) => i !== indexToRemove);
-    handleSaveOriginAccounts(updated);
+    handleSaveOriginAccounts(updated, 0);
     setActiveOriginIndex(0);
   };
 
@@ -307,6 +374,28 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
     dailyLimit: 20,
     sentToday: 0,
   };
+
+  // Persist mappedGroups and savedAudiences
+  useEffect(() => {
+    try {
+      localStorage.setItem('autoviral_insta_mapped_groups_v1', JSON.stringify(mappedGroups));
+    } catch {}
+  }, [mappedGroups]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('autoviral_insta_audiences_v1', JSON.stringify(savedAudiences));
+    } catch {}
+  }, [savedAudiences]);
+
+  // Keep autoviral_insta_handle synchronized with active origin account
+  useEffect(() => {
+    if (currentOriginAccount?.handle) {
+      try {
+        localStorage.setItem('autoviral_insta_handle', currentOriginAccount.handle);
+      } catch {}
+    }
+  }, [currentOriginAccount?.handle]);
 
   // Anti-Ban Automated Dispatch Queue States
   const [selectedHandles, setSelectedHandles] = useState<string[]>([
@@ -982,14 +1071,23 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
     } catch {}
   };
 
+  const buildTrackedInstagramLink = (srcTag: string = 'instagram_direct') => {
+    const slug = getCampaignSlug(activeCampaign);
+    const baseDest =
+      activeCampaign.checkoutUrl ||
+      `${window.location.origin}/?p=${slug}&src=${srcTag}`;
+    return `${window.location.origin}/api/r?to=${encodeURIComponent(baseDest)}&src=${encodeURIComponent(srcTag)}&city=${encodeURIComponent('Brasil')}&state=${encodeURIComponent('BR')}&camp=${encodeURIComponent(activeCampaign.id)}&title=${encodeURIComponent(activeCampaign.title)}&niche=${encodeURIComponent(activeCampaign.niche || 'geral')}&ig=${encodeURIComponent(currentOriginAccount.handle)}`;
+  };
+
   const handleApplyCampaignLink = (campId: string) => {
     setSelectedCampaignForDispatch(campId);
     const targetCamp = campaigns.find((c) => c.id === campId);
     if (!targetCamp) return;
     const slug = getCampaignSlug(targetCamp);
-    const newUrl = `${window.location.origin}/?p=${slug}&src=replyrush`;
+    const dest = targetCamp.checkoutUrl || `${window.location.origin}/?p=${slug}&src=instagram`;
+    const newUrl = `${window.location.origin}/api/r?to=${encodeURIComponent(dest)}&src=instagram_direct&city=Brasil&camp=${encodeURIComponent(targetCamp.id)}&title=${encodeURIComponent(targetCamp.title)}`;
 
-    const urlRegex = /(https?:\/\/[^\s]+(?:\?p=[a-z0-9_-]+[^\s]*|src=replyrush[^\s]*))/i;
+    const urlRegex = /(https?:\/\/[^\s]+(?:\?p=[a-z0-9_-]+[^\s]*|src=replyrush[^\s]*|\/api\/r\?[^\s]*))/i;
     if (urlRegex.test(editingMessage)) {
       setEditingMessage((prev) => prev.replace(urlRegex, newUrl));
     } else {
@@ -997,15 +1095,294 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
     }
   };
 
-  const handleTestOnWhatsApp = () => {
-    const encoded = encodeURIComponent(editingMessage);
-    const target = campaigns.find((c) => c.id === selectedCampaignForDispatch) || campaigns[0];
-    const phone = target?.whatsappNumber || '5541998778348';
-    window.open(`https://wa.me/${phone.replace(/[^0-9]/g, '')}?text=${encoded}`, '_blank');
-  };
-
   const handleInsertTag = (tag: string) => {
     setEditingMessage((prev) => `${prev} ${tag}`);
+  };
+
+  // Import Unlimited Instagram Accounts from Chrome Extension
+  const importInstagramAccountsFromExtension = (
+    rawAccounts: Array<{ handle?: string; username?: string; name?: string; url?: string; sourceUrl?: string }>,
+    connectedHandleFromExt?: string,
+    sourceUrl?: string
+  ) => {
+    if (connectedHandleFromExt && connectedHandleFromExt !== '@conectado') {
+      const cleanOrig = '@' + connectedHandleFromExt.replace(/^@+/, '').toLowerCase();
+      setOriginAccounts((prev) => {
+        const existsIdx = prev.findIndex((a) => a.handle.toLowerCase() === cleanOrig.toLowerCase());
+        let updated: InstagramOriginAccount[];
+        if (existsIdx >= 0) {
+          updated = prev;
+          setActiveOriginIndex(existsIdx);
+        } else {
+          updated = [
+            {
+              handle: cleanOrig,
+              name: 'Instagram Conectado no Chrome',
+              status: 'active',
+              dailyLimit: 20,
+              sentToday: 0,
+            },
+            ...prev,
+          ];
+          setActiveOriginIndex(0);
+        }
+        try {
+          localStorage.setItem('autoviral_instagram_origin_accounts', JSON.stringify(updated));
+          localStorage.setItem('autoviral_insta_handle', cleanOrig);
+        } catch {}
+        return updated;
+      });
+    }
+
+    if (!Array.isArray(rawAccounts) || rawAccounts.length === 0) return;
+
+    const trackedLink = buildTrackedInstagramLink('instagram_direct');
+    const campTitle = activeCampaign.title || 'Material Digital';
+    const campPrice = `R$ ${(activeCampaign.price || 9.99).toFixed(2).replace('.', ',')}`;
+
+    const importedProfiles: TargetProfile[] = [];
+    const seenUsernames = new Set<string>();
+
+    rawAccounts.forEach((acc) => {
+      const rawCandidate = acc.handle || acc.username || '';
+      if (!rawCandidate) return;
+      const { handle, username } = sanitizeInstagramHandle(rawCandidate);
+      if (!username || username.length < 2 || seenUsernames.has(username)) return;
+      seenUsernames.add(username);
+      const displayName = formatInstagramDisplayName(username, acc.name);
+      importedProfiles.push({
+        handle,
+        name: displayName,
+        url: acc.url || `https://www.instagram.com/${username}/`,
+        audience: 'Mapeado Chrome (Ilimitado)',
+        focus: activeCampaign.targetAudience || activeCampaign.nicheLabel || 'Instagram Orgânico',
+        whatToLook: 'Conta capturada diretamente da rolagem no Instagram via Extensão Chrome AutoViral.',
+        script: `Olá ${displayName}! Vi seu perfil no Instagram e achei incrível. Temos o "${campTitle}" por apenas ${campPrice} com entrega imediata. Link oficial: ${trackedLink}`,
+        isCustom: true,
+      });
+    });
+
+    if (importedProfiles.length === 0) return;
+
+    // 1. Save ALL imported profiles into customProfiles without any cap
+    setCustomProfiles((prev) => {
+      const existingHandles = new Set(importedProfiles.map((p) => p.handle.toLowerCase()));
+      const remaining = prev.filter((p) => !existingHandles.has(p.handle.toLowerCase()));
+      const updated = [...importedProfiles, ...remaining];
+      try {
+        localStorage.setItem('autoviral_custom_instagram_profiles', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    // 2. Create a Mapped Group containing ALL mapped accounts
+    const newGroupId = `ig-grp-${Date.now()}`;
+    const newGroup: MappedInstagramGroup = {
+      id: newGroupId,
+      name: `Grupo Instagram (${importedProfiles.length} contas) • ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`,
+      accounts: importedProfiles,
+      sourceQuery: sourceUrl || 'Extensão Chrome Instagram',
+      createdAt: new Date().toISOString(),
+    };
+    setMappedGroups((prev) => [newGroup, ...prev]);
+    setSelectedMappedGroupId(newGroupId);
+    setSelectedHandles((prev) => Array.from(new Set([...importedProfiles.map((p) => p.handle), ...prev])));
+    setManualSuccessMessage(`📡 ${importedProfiles.length} contas do Instagram mapeadas e salvas no Grupo Editável (Ilimitado)!`);
+    setTimeout(() => setManualSuccessMessage(null), 6000);
+  };
+
+  useEffect(() => {
+    const onAccountsReceived = (ev: Event) => {
+      const detail = (ev as CustomEvent).detail;
+      if (detail) {
+        importInstagramAccountsFromExtension(detail.accounts || [], detail.connectedHandle, detail.sourceUrl);
+      }
+    };
+    const onHandleSynced = (ev: Event) => {
+      const detail = (ev as CustomEvent).detail;
+      if (detail && detail.handle && detail.handle !== '@conectado') {
+        const cleanOrig = '@' + String(detail.handle).replace(/^@+/, '').toLowerCase();
+        setOriginAccounts((prev) => {
+          const idx = prev.findIndex((a) => a.handle.toLowerCase() === cleanOrig.toLowerCase());
+          if (idx >= 0) {
+            setActiveOriginIndex(idx);
+            return prev;
+          }
+          const updated: InstagramOriginAccount[] = [
+            {
+              handle: cleanOrig,
+              name: 'Instagram Confirmado (Navegador)',
+              status: 'active',
+              dailyLimit: 20,
+              sentToday: 0,
+            },
+            ...prev,
+          ];
+          setActiveOriginIndex(0);
+          try {
+            localStorage.setItem('autoviral_instagram_origin_accounts', JSON.stringify(updated));
+            localStorage.setItem('autoviral_insta_handle', cleanOrig);
+          } catch {}
+          return updated;
+        });
+      }
+    };
+
+    window.addEventListener('autoviral_extension_instagram_accounts_received', onAccountsReceived);
+    window.addEventListener('autoviral_extension_insta_account_synced', onHandleSynced);
+
+    let bc: BroadcastChannel | null = null;
+    try {
+      bc = new BroadcastChannel('autoviral_bridge_channel');
+      bc.onmessage = (msg) => {
+        const data = msg.data;
+        if (!data) return;
+        if (data.action === 'AUTOVIRAL_IMPORT_INSTAGRAM_ACCOUNTS') {
+          importInstagramAccountsFromExtension(data.accounts || [], data.connectedHandle, data.sourceUrl);
+        } else if (data.action === 'AUTOVIRAL_INSTA_ACCOUNT_SYNC' && data.handle) {
+          onHandleSynced(new CustomEvent('sync', { detail: { handle: data.handle } }));
+        } else if (data.action === 'AUTOVIRAL_IMPORT_GROUPS_FROM_EXTENSION' && Array.isArray(data.instaAccounts) && data.instaAccounts.length > 0) {
+          importInstagramAccountsFromExtension(data.instaAccounts, data.connectedHandle, data.sourceUrl);
+        }
+      };
+    } catch {}
+
+    return () => {
+      window.removeEventListener('autoviral_extension_instagram_accounts_received', onAccountsReceived);
+      window.removeEventListener('autoviral_extension_insta_account_synced', onHandleSynced);
+      if (bc) bc.close();
+    };
+  }, [activeCampaign.id]);
+
+  // Mapped Group Actions: Create from Selection, Rename, Add Account, Remove Account, Save Audience, Send to Own Stories
+  const handleCreateGroupFromCurrentProfiles = () => {
+    const selectedList = displayedProfiles.filter((p) => selectedHandles.includes(p.handle));
+    const listToUse = selectedList.length > 0 ? selectedList : displayedProfiles;
+    const newId = `ig-grp-${Date.now()}`;
+    const newGroup: MappedInstagramGroup = {
+      id: newId,
+      name: `Grupo ${activeCampaign.title.slice(0, 22)} (${listToUse.length} contas)`,
+      accounts: listToUse,
+      createdAt: new Date().toISOString(),
+    };
+    setMappedGroups((prev) => [newGroup, ...prev]);
+    setSelectedMappedGroupId(newId);
+    setStoriesActionBanner(`✅ Grupo "${newGroup.name}" criado com ${listToUse.length} contas!`);
+  };
+
+  const handleRenameMappedGroup = (groupId: string) => {
+    if (!editingGroupName.trim()) return;
+    setMappedGroups((prev) =>
+      prev.map((g) => (g.id === groupId ? { ...g, name: editingGroupName.trim() } : g))
+    );
+    setIsRenamingGroup(false);
+    setEditingGroupName('');
+  };
+
+  const handleAddAccountToGroup = (groupId: string) => {
+    const raw = newAccountForGroupInput.trim();
+    if (!raw) return;
+    const { handle, username } = sanitizeInstagramHandle(raw);
+    const displayName = formatInstagramDisplayName(username);
+    const trackedLink = buildTrackedInstagramLink('instagram_direct');
+    const newProfile: TargetProfile = {
+      handle,
+      name: displayName,
+      url: `https://www.instagram.com/${username}/`,
+      audience: 'Adicionado ao Grupo',
+      focus: activeCampaign.nicheLabel || 'Instagram Orgânico',
+      whatToLook: 'Perfil adicionado manualmente ao grupo mapeado.',
+      script: `Olá ${displayName}! Temos o "${activeCampaign.title}" por apenas R$ ${(activeCampaign.price || 9.99).toFixed(2).replace('.', ',')}. Confira: ${trackedLink}`,
+      isCustom: true,
+    };
+
+    setMappedGroups((prev) =>
+      prev.map((g) => {
+        if (g.id !== groupId) return g;
+        if (g.accounts.some((a) => a.handle.toLowerCase() === handle.toLowerCase())) return g;
+        return { ...g, accounts: [newProfile, ...g.accounts] };
+      })
+    );
+    setCustomProfiles((prev) => {
+      if (prev.some((p) => p.handle.toLowerCase() === handle.toLowerCase())) return prev;
+      const updated = [newProfile, ...prev];
+      try {
+        localStorage.setItem('autoviral_custom_instagram_profiles', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+    setSelectedHandles((prev) => (prev.includes(handle) ? prev : [handle, ...prev]));
+    setNewAccountForGroupInput('');
+  };
+
+  const handleRemoveAccountFromGroup = (groupId: string, handleToRemove: string) => {
+    setMappedGroups((prev) =>
+      prev.map((g) =>
+        g.id === groupId
+          ? { ...g, accounts: g.accounts.filter((a) => a.handle.toLowerCase() !== handleToRemove.toLowerCase()) }
+          : g
+      )
+    );
+  };
+
+  const handleSaveGroupAsAudience = (group: MappedInstagramGroup) => {
+    const audience: SavedInstagramAudience = {
+      id: `aud-${Date.now()}`,
+      name: `Público: ${group.name}`,
+      handles: group.accounts.map((a) => a.handle),
+      campaignId: activeCampaign.id,
+      createdAt: new Date().toISOString(),
+    };
+    setSavedAudiences((prev) => [audience, ...prev]);
+    setStoriesActionBanner(`⭐ Grupo salvo como Público "${audience.name}" (${audience.handles.length} contas) para reuso nas campanhas!`);
+  };
+
+  const handleSendToOwnStories = (sourceLabel: string, handles: string[]) => {
+    const confirmedHandle = currentOriginAccount.handle;
+    syncConfirmedInstagramHandle(confirmedHandle);
+    const trackedStoryUrl = buildTrackedInstagramLink('instagram_story');
+    const newStoryItem: InstagramStoryItem = {
+      id: `story-leadfinder-${Date.now()}`,
+      title: `${activeCampaign.title} • Stories Próprio (${confirmedHandle})`,
+      mediaUrl: activeCampaign.imageUrl || '/assets/aistudio/image_5456885b.png',
+      mediaType: 'story_9_16',
+      stickerText: `👉 TOQUE AQUI • R$ ${(activeCampaign.price || 9.99).toFixed(2).replace('.', ',')}`,
+      stickerUrl: trackedStoryUrl,
+      caption: `Story próprio publicado na conta ${confirmedHandle} direcionado ao público "${sourceLabel}" (${handles.length} contas mapeadas: ${handles.slice(0, 5).join(', ')}). Link com rastreio real de cliques!`,
+      status: 'ready',
+      viewsEstimated: 0,
+      linkClicksEstimated: 0,
+      salesEstimated: 0,
+      targetCampaignId: activeCampaign.id,
+    };
+
+    try {
+      const existingRaw = localStorage.getItem('autoviral_insta_story_queue');
+      const existing: InstagramStoryItem[] = existingRaw ? JSON.parse(existingRaw) : [];
+      const updated = [newStoryItem, ...(Array.isArray(existing) ? existing : [])];
+      localStorage.setItem('autoviral_insta_story_queue', JSON.stringify(updated));
+    } catch {}
+
+    if (onAddTrackingEvent) {
+      onAddTrackingEvent({
+        campaignId: activeCampaign.id,
+        campaignTitle: activeCampaign.title,
+        niche: activeCampaign.niche || 'psicopedagogia',
+        type: 'impression',
+        source: 'instagram',
+        geo: { city: 'Brasil', state: 'BR', country: 'Brasil' },
+        device: 'mobile',
+        ageBracket: '25-34',
+        leadScore: 90,
+        durationSeconds: 30,
+        isSimulation: false,
+        adCreativeName: `Stories Próprio (${confirmedHandle})`,
+      });
+    }
+
+    setStoriesActionBanner(
+      `📲 Enviado para o Stories Próprio da conta ${confirmedHandle} com link rastreado real! Clique em "Abrir Meu Stories Próprio" para postar.`
+    );
   };
 
   // Merge custom searched & manually added profiles with current niche profiles with clean handle sanitization
@@ -1702,6 +2079,367 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
             </span>
           </div>
         )}
+      </div>
+
+      {/* SECTION 0.5: MAPEAMENTO ILIMITADO CHROME + GRUPOS EDITÁVEIS + PÚBLICO + STORIES PRÓPRIO */}
+      <div className="bg-gradient-to-br from-purple-950/70 via-slate-900 to-rose-950/50 border-2 border-purple-500/60 rounded-3xl p-6 space-y-5 shadow-2xl">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-purple-900/50 pb-4">
+          <div className="space-y-1">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-purple-900/70 border border-purple-500/50 text-purple-200 text-xs font-black">
+              <Radio className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+              <span>MAPEAMENTO REAL ILIMITADO VIA CHROME • GRUPOS, PÚBLICOS &amp; STORIES PRÓPRIO</span>
+            </div>
+            <h2 className="text-lg sm:text-xl font-black text-white">
+              Capture Contas do Instagram Sem Limite, Salve como Público e Envie p/ Seu Stories Próprio
+            </h2>
+            <p className="text-xs text-slate-300 max-w-3xl">
+              Abra o Instagram, busque ou role seguidores com a extensão Chrome AutoViral ativa para mapear quantas contas quiser (ilimitado). Importe como grupo editável, salve como público e dispare no Direct ou no <strong>seu Stories Próprio com link rastreado de cliques reais</strong>.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <a
+              href="https://www.instagram.com/explore/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-4 py-2.5 bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white text-xs font-black rounded-xl flex items-center gap-1.5 shadow-lg transition"
+            >
+              <Instagram className="w-4 h-4" />
+              <span>Abrir Instagram p/ Mapear (Chrome)</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+
+            <button
+              type="button"
+              onClick={handleCreateGroupFromCurrentProfiles}
+              className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black rounded-xl flex items-center gap-1.5 transition cursor-pointer shadow"
+            >
+              <FolderPlus className="w-4 h-4" />
+              <span>Criar Grupo c/ Contas Selecionadas</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Certeza da Conta Instagram Usada nos Stories Próprio & Direct */}
+        <div className="p-4 bg-slate-950/90 border-2 border-emerald-500/50 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <span className="text-[11px] font-black uppercase tracking-wider text-emerald-300 flex items-center gap-1.5">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+              <span>Certeza Absoluta da Conta Instagram Para Stories Próprio &amp; Direct:</span>
+            </span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-mono font-black text-white bg-purple-950 px-3 py-1 rounded-lg border border-purple-500/60">
+                {currentOriginAccount.handle}
+              </span>
+              <span className="text-xs text-slate-300">
+                ({currentOriginAccount.name}) • Esta conta é usada tanto nos disparos de Direct quanto no Robô de Stories Próprio.
+              </span>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {originAccounts.length > 1 && (
+              <select
+                value={activeOriginIndex}
+                onChange={(e) => {
+                  const idx = parseInt(e.target.value, 10);
+                  setActiveOriginIndex(idx);
+                  handleSaveOriginAccounts(originAccounts, idx);
+                }}
+                className="bg-slate-900 border border-purple-500/50 text-xs font-mono font-bold text-white rounded-xl px-3 py-2 focus:outline-none"
+              >
+                {originAccounts.map((acc, idx) => (
+                  <option key={acc.handle} value={idx}>
+                    {acc.handle} ({acc.name})
+                  </option>
+                ))}
+              </select>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                syncConfirmedInstagramHandle(currentOriginAccount.handle);
+                setStoriesActionBanner(`✅ Conta ${currentOriginAccount.handle} confirmada com certeza para Stories Próprio e Direct!`);
+              }}
+              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black rounded-xl transition cursor-pointer flex items-center gap-1.5"
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>Confirmar Conta nos Stories</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsEditingOrigin(true)}
+              className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 cursor-pointer"
+            >
+              Trocar / Adicionar @
+            </button>
+          </div>
+        </div>
+
+        {/* Link Rastreado Real p/ Instagram Direct & Stories */}
+        <div className="p-3.5 bg-slate-950/80 border border-indigo-700/40 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+          <div className="space-y-0.5 min-w-0">
+            <span className="font-bold text-indigo-300 block">
+              🔗 Link com Rastreio Real de Cliques para Colar nos Stories &amp; Direct ({activeCampaign.title}):
+            </span>
+            <code className="text-[11px] text-emerald-300 font-mono block truncate">
+              {buildTrackedInstagramLink('instagram_story')}
+            </code>
+          </div>
+          <button
+            type="button"
+            onClick={() => copyToClipboard(buildTrackedInstagramLink('instagram_story'), 'copy-ig-tracked-link')}
+            className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shrink-0 cursor-pointer flex items-center gap-1.5"
+          >
+            {copiedId === 'copy-ig-tracked-link' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+            <span>{copiedId === 'copy-ig-tracked-link' ? 'Link Copiado!' : 'Copiar Link Rastreado'}</span>
+          </button>
+        </div>
+
+        {/* Stories Action Banner */}
+        {storiesActionBanner && (
+          <div className="p-3.5 bg-emerald-950/90 border border-emerald-500 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs font-bold text-emerald-200">
+            <span>{storiesActionBanner}</span>
+            {onNavigateTab && (
+              <button
+                type="button"
+                onClick={() => onNavigateTab('instagram')}
+                className="px-3.5 py-1.5 bg-gradient-to-r from-purple-600 to-rose-600 hover:from-purple-500 hover:to-rose-500 text-white rounded-lg text-xs font-black cursor-pointer shrink-0"
+              >
+                Abrir Meu Stories Próprio ({currentOriginAccount.handle}) →
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Grupos Mapeados Editáveis + Públicos Salvos */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+          {/* Lista e Editor do Grupo Mapeado */}
+          <div className="lg:col-span-7 bg-slate-950/80 border border-slate-800 rounded-2xl p-4 space-y-3">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <span className="text-xs font-black text-purple-300 uppercase tracking-wider">
+                📂 Grupos do Mapeamento ({mappedGroups.length})
+              </span>
+              {mappedGroups.length > 0 && (
+                <select
+                  value={selectedMappedGroupId || mappedGroups[0]?.id}
+                  onChange={(e) => setSelectedMappedGroupId(e.target.value)}
+                  className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-white font-semibold max-w-[260px]"
+                >
+                  {mappedGroups.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name} ({g.accounts.length})
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            {(() => {
+              const activeGroup = mappedGroups.find((g) => g.id === selectedMappedGroupId) || mappedGroups[0];
+              if (!activeGroup) {
+                return (
+                  <div className="p-4 bg-slate-900/60 border border-dashed border-slate-700 rounded-xl text-xs text-slate-400 text-center space-y-2">
+                    <p>
+                      Nenhum grupo do mapeamento criado ainda. Use a extensão Chrome no Instagram (clique em <strong>"📡 Enviar p/ Grupo"</strong>) ou clique em <strong>"Criar Grupo c/ Contas Selecionadas"</strong> acima.
+                    </p>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="space-y-3">
+                  {/* Group Header & Rename */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-900 p-3 rounded-xl border border-slate-800">
+                    {isRenamingGroup ? (
+                      <div className="flex items-center gap-1.5 flex-1">
+                        <input
+                          type="text"
+                          value={editingGroupName}
+                          onChange={(e) => setEditingGroupName(e.target.value)}
+                          placeholder="Novo nome do grupo..."
+                          className="flex-1 bg-slate-950 border border-purple-500 rounded-lg px-2.5 py-1 text-xs text-white"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleRenameMappedGroup(activeGroup.id)}
+                          className="px-2.5 py-1 bg-emerald-600 text-white rounded-lg text-xs font-bold cursor-pointer"
+                        >
+                          Salvar
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-white">{activeGroup.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingGroupName(activeGroup.name);
+                            setIsRenamingGroup(true);
+                          }}
+                          className="text-[11px] text-indigo-400 hover:text-indigo-300 underline cursor-pointer"
+                        >
+                          Editar Nome
+                        </button>
+                      </div>
+                    )}
+                    <span className="text-[11px] font-bold text-emerald-400">
+                      {activeGroup.accounts.length} contas (Ilimitado)
+                    </span>
+                  </div>
+
+                  {/* Add @ manually into this group */}
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newAccountForGroupInput}
+                      onChange={(e) => setNewAccountForGroupInput(e.target.value)}
+                      placeholder="Adicionar @ no grupo (ex: @pedagogia_criativa)"
+                      className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-purple-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleAddAccountToGroup(activeGroup.id)}
+                      className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded-xl cursor-pointer"
+                    >
+                      + Incluir no Grupo
+                    </button>
+                  </div>
+
+                  {/* Editable list of accounts in group (scrollable, unlimited) */}
+                  <div className="max-h-44 overflow-y-auto space-y-1.5 pr-1">
+                    {activeGroup.accounts.map((acc) => (
+                      <div
+                        key={acc.handle}
+                        className="flex items-center justify-between gap-2 px-3 py-1.5 bg-slate-900/90 border border-slate-800 rounded-lg text-xs"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Instagram className="w-3.5 h-3.5 text-pink-400 shrink-0" />
+                          <span className="font-mono font-bold text-white truncate">{acc.handle}</span>
+                          <span className="text-[11px] text-slate-400 truncate">({acc.name})</span>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <a
+                            href={acc.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[10px] text-indigo-300 hover:underline"
+                          >
+                            Ver ↗
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveAccountFromGroup(activeGroup.id, acc.handle)}
+                            className="text-slate-500 hover:text-rose-400 cursor-pointer"
+                            title="Remover do grupo"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Action buttons for this group: Salvar como Público + Enviar p/ Instagram + Colocar no Stories Próprio */}
+                  <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => handleSaveGroupAsAudience(activeGroup)}
+                      className="px-3 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/50 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <BookmarkCheck className="w-3.5 h-3.5" />
+                      <span>Salvar Grupo como Público</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedHandles(activeGroup.accounts.map((a) => a.handle));
+                        setIsQueueActive(true);
+                        setStoriesActionBanner(`🚀 Fila de Direct Anti-Bloqueio iniciada para ${activeGroup.accounts.length} contas pela conta ${currentOriginAccount.handle}!`);
+                      }}
+                      className="px-3 py-2 bg-pink-600 hover:bg-pink-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      <span>Enviar Grupo p/ Direct Instagram</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleSendToOwnStories(activeGroup.name, activeGroup.accounts.map((a) => a.handle))}
+                      className="px-3 py-2 bg-gradient-to-r from-purple-600 to-rose-600 hover:from-purple-500 hover:to-rose-500 text-white rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shadow"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Colocar no Stories Próprio ({currentOriginAccount.handle})</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+
+          {/* Públicos Salvos */}
+          <div className="lg:col-span-5 bg-slate-950/80 border border-slate-800 rounded-2xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-black text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
+                <BookmarkCheck className="w-4 h-4 text-amber-400" />
+                <span>Públicos Salvos ({savedAudiences.length})</span>
+              </span>
+              <span className="text-[10px] text-slate-400">Persistente no navegador</span>
+            </div>
+
+            {savedAudiences.length === 0 ? (
+              <p className="text-xs text-slate-400 bg-slate-900/60 p-4 rounded-xl border border-dashed border-slate-700 text-center">
+                Salve qualquer grupo mapeado clicando em <strong>"Salvar Grupo como Público"</strong> para reutilizar no Stories Próprio e campanhas.
+              </p>
+            ) : (
+              <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                {savedAudiences.map((aud) => (
+                  <div
+                    key={aud.id}
+                    className="p-3 bg-slate-900 border border-slate-800 rounded-xl space-y-2"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <span className="text-xs font-bold text-white block">{aud.name}</span>
+                        <span className="text-[10px] text-emerald-400 font-semibold">
+                          {aud.handles.length} contas @ prontas para distribuição
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setSavedAudiences((prev) => prev.filter((x) => x.id !== aud.id))}
+                        className="text-slate-500 hover:text-rose-400 cursor-pointer"
+                        title="Excluir público"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedHandles(aud.handles);
+                          setStoriesActionBanner(`✅ Público "${aud.name}" carregado na fila (${aud.handles.length} contas)!`);
+                        }}
+                        className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-emerald-300 rounded-lg text-[10px] font-bold cursor-pointer"
+                      >
+                        Carregar na Fila
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSendToOwnStories(aud.name, aud.handles)}
+                        className="px-2.5 py-1 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-[10px] font-bold cursor-pointer"
+                      >
+                        Enviar p/ Stories Próprio ({currentOriginAccount.handle})
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* QUICK SELECTION BAR */}
@@ -2905,19 +3643,16 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
                             </button>
 
                             {/* Testar no WhatsApp */}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const phone = activeCampaign.whatsappNumber || '5541998778348';
-                                const clean = phone.replace(/[^0-9]/g, '');
-                                window.open(`https://wa.me/${clean}?text=${encodeURIComponent(effectiveScript)}`, '_blank');
-                              }}
+                            <a
+                              href={`https://wa.me/${(activeCampaign.whatsappNumber || '5541998778348').replace(/[^0-9]/g, '')}?text=${encodeURIComponent(effectiveScript)}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
                               className="px-3 py-2 bg-green-700/80 hover:bg-green-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer border border-green-600/40"
                               title="Testa o envio deste script no seu próprio WhatsApp"
                             >
                               <Smartphone className="w-3.5 h-3.5 text-green-300" />
                               <span>Testar no WhatsApp</span>
-                            </button>
+                            </a>
 
                             {/* Abrir Conversa no Instagram */}
                             <a
@@ -3565,15 +4300,16 @@ export const LeadFinderTab: React.FC<LeadFinderTabProps> = ({ campaigns }) => {
                 )}
               </button>
 
-              <button
-                type="button"
-                onClick={handleTestOnWhatsApp}
+              <a
+                href={`https://wa.me/${((campaigns.find((c) => c.id === selectedCampaignForDispatch) || campaigns[0])?.whatsappNumber || '5541998778348').replace(/[^0-9]/g, '')}?text=${encodeURIComponent(editingMessage)}`}
+                target="_blank"
+                rel="noopener noreferrer"
                 className="px-4 py-2.5 bg-green-700/80 hover:bg-green-600 text-white font-bold text-xs rounded-xl flex items-center gap-2 transition cursor-pointer border border-green-600/40"
                 title="Abre o WhatsApp com a mensagem preenchida para testar no celular"
               >
                 <Smartphone className="w-4 h-4 text-green-300" />
                 <span>Testar no WhatsApp</span>
-              </button>
+              </a>
 
               <button
                 type="button"

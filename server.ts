@@ -50,13 +50,16 @@ interface TrackingEvent {
   };
   device: 'mobile' | 'desktop' | 'tablet';
   ageBracket: '18-24' | '25-34' | '35-44' | '45-54' | '55+';
-  source: 'tiktok' | 'pinterest' | 'instagram' | 'whatsapp' | 'google_organic' | 'meta_ads' | 'brevo_email';
+  source: 'tiktok' | 'pinterest' | 'instagram' | 'whatsapp' | 'google_organic' | 'meta_ads' | 'brevo_email' | 'facebook_groups' | 'youtube_comments';
   amount?: number;
   leadScore?: number;
   durationSeconds?: number;
+  isSimulation?: boolean;
   customerName?: string;
   customerPhone?: string;
   customerEmail?: string;
+  adCreativeName?: string;
+  utmContent?: string;
 }
 
 let trackingEvents: TrackingEvent[] = [];
@@ -764,9 +767,82 @@ app.post('/api/tracking/reset', (req, res) => {
   return res.json({ success: true, count: 0 });
 });
 
+// API: Real Click Redirect Tracker (Facebook, Instagram Stories, WhatsApp, Pinterest)
+// Ex: /api/r?to=https://pay.kiwify.com.br/HE5xbnp&src=instagram_story&city=Curitiba&state=PR&camp=camp-tarefinhas-autismo
+app.get('/api/r', (req, res) => {
+  try {
+    const rawTo = typeof req.query.to === 'string' ? req.query.to.trim() : '';
+    const targetUrl = /^https?:\/\//i.test(rawTo) ? rawTo : 'https://pay.kiwify.com.br/HE5xbnp';
+    const srcRaw = String(req.query.src || req.query.utm_source || 'instagram').toLowerCase();
+    const mappedSource: TrackingEvent['source'] =
+      srcRaw.includes('fb') || srcRaw.includes('facebook')
+        ? 'facebook_groups'
+        : srcRaw.includes('insta') || srcRaw.includes('story')
+        ? 'instagram'
+        : srcRaw.includes('whats')
+        ? 'whatsapp'
+        : srcRaw.includes('pin')
+        ? 'pinterest'
+        : srcRaw.includes('yt') || srcRaw.includes('youtube')
+        ? 'youtube_comments'
+        : 'instagram';
+
+    const ua = String(req.headers['user-agent'] || '');
+    const isMobile = /iPhone|iPad|iPod|Android|Mobile/i.test(ua);
+    const city = String(req.query.city || 'Curitiba');
+    const state = String(req.query.state || 'PR');
+    const campId = String(req.query.camp || 'camp-tarefinhas-autismo');
+    const title = String(req.query.title || 'Caderno +100 Tarefinhas TEA & Coordenação');
+    const niche = String(req.query.niche || 'psicopedagogia');
+    const painOrContent = String(req.query.pain || req.query.ig || srcRaw);
+
+    const newEvent: TrackingEvent = {
+      id: `real-click-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      campaignId: campId,
+      campaignTitle: title,
+      niche,
+      type: 'checkout_click',
+      timestamp: new Date().toISOString(),
+      geo: { state, city, country: 'Brasil' },
+      device: isMobile ? 'mobile' : 'desktop',
+      ageBracket: '25-34',
+      source: mappedSource,
+      leadScore: 95,
+      durationSeconds: 1,
+      isSimulation: false,
+      adCreativeName: painOrContent,
+      utmContent: `${srcRaw}_${city.toLowerCase().replace(/\s+/g, '_')}`,
+    };
+
+    trackingEvents.unshift(newEvent);
+    if (trackingEvents.length > 500) {
+      trackingEvents = trackingEvents.slice(0, 500);
+    }
+
+    return res.redirect(302, targetUrl);
+  } catch (err) {
+    return res.redirect(302, 'https://pay.kiwify.com.br/HE5xbnp');
+  }
+});
+
 app.post('/api/tracking/event', (req, res) => {
   try {
-    const { campaignId, campaignTitle, niche, type, geo, device, ageBracket, source, amount, leadScore, durationSeconds } = req.body;
+    const {
+      campaignId,
+      campaignTitle,
+      niche,
+      type,
+      geo,
+      device,
+      ageBracket,
+      source,
+      amount,
+      leadScore,
+      durationSeconds,
+      isSimulation,
+      adCreativeName,
+      utmContent,
+    } = req.body;
     const newEvent: TrackingEvent = {
       id: `evt-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
       campaignId: campaignId || 'camp-general',
@@ -774,13 +850,16 @@ app.post('/api/tracking/event', (req, res) => {
       niche: niche || 'geral',
       type: type || 'impression',
       timestamp: new Date().toISOString(),
-      geo: geo || { state: 'SP', city: 'São Paulo', country: 'Brasil' },
+      geo: geo || { state: 'PR', city: 'Curitiba', country: 'Brasil' },
       device: device || 'mobile',
       ageBracket: ageBracket || '25-34',
-      source: source || 'tiktok',
-      amount: amount || (type === 'conversion' ? 97 : 0),
-      leadScore: leadScore || Math.floor(Math.random() * 40 + 60),
-      durationSeconds: durationSeconds || Math.floor(Math.random() * 180 + 20),
+      source: source || 'instagram',
+      amount: amount || (type === 'conversion' ? 9.9 : 0),
+      leadScore: leadScore || Math.floor(Math.random() * 25 + 70),
+      durationSeconds: durationSeconds || 30,
+      isSimulation: isSimulation === true,
+      adCreativeName,
+      utmContent,
     };
 
     trackingEvents.unshift(newEvent);

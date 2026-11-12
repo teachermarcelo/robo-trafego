@@ -31,6 +31,7 @@ import {
   CheckSquare,
   Globe,
   Share2,
+  Plus,
 } from 'lucide-react';
 import { Campaign, TrackingEvent, CustomerLead } from '../types';
 import { getCampaignSlug } from '../utils/campaignSlug';
@@ -103,12 +104,15 @@ export const MetaAdsBoosterTab: React.FC<MetaAdsBoosterTabProps> = ({
     'creatives' | 'posts_automation' | 'auto_responder' | 'multi_product_router' | 'meta_api_connect' | 'audiences' | 'order_bump'
   >('posts_automation');
 
-  // Instagram Media & Post-Level Automation Flows
-  const [instagramPosts, setInstagramPosts] = useState<any[]>([
+  // Instagram Media & Post-Level Automation Flows (persisted in localStorage)
+  const DEFAULT_EXAMPLE_POSTS = [
     {
       id: 'ig-post-tarefinhas-01',
-      permalink: 'https://instagram.com/p/tarefinhas_tea_sample',
-      caption: 'Caderno com +100 Atividades Adaptadas em PDF para Educação Infantil e Autismo (TEA). Comente "EU QUERO" que te envio o material completo no Direct por apenas R$ 9,99! 🌸🧩',
+      permalink: 'https://www.instagram.com/fluentimmersion/',
+      accountHandle: '@fluentimmersion',
+      placementLabel: 'Feed do Instagram (Modelo de Demonstração)',
+      isRealPost: false,
+      caption: '[MODELO EXEMPLO] Caderno com +100 Atividades Adaptadas em PDF para Educação Infantil e Autismo (TEA). Comente "EU QUERO" para receber no Direct! 🌸🧩',
       mediaType: 'IMAGE',
       mediaUrl: '/assets/aistudio/image_e9e67204.png',
       timestamp: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(),
@@ -123,8 +127,11 @@ export const MetaAdsBoosterTab: React.FC<MetaAdsBoosterTabProps> = ({
     },
     {
       id: 'ig-post-fluent-02',
-      permalink: 'https://instagram.com/p/fluent_immersion_sample',
-      caption: 'Como destravar a fala no inglês em 90 dias sem estudar gramática chata! Comente "INGLES" para receber uma aula prática gratuita no seu Direct agora mesmo! 🇺🇸✈️',
+      permalink: 'https://www.instagram.com/fluentimmersion/',
+      accountHandle: '@fluentimmersion',
+      placementLabel: 'Reels do Instagram (Modelo de Demonstração)',
+      isRealPost: false,
+      caption: '[MODELO EXEMPLO] Como destravar a fala no inglês em 90 dias sem estudar gramática chata! Comente "INGLES" para receber uma aula prática no Direct! 🇺🇸✈️',
       mediaType: 'VIDEO',
       mediaUrl: '/assets/aistudio/image_4e2c42a1.png',
       timestamp: new Date(Date.now() - 1000 * 60 * 60 * 48).toISOString(),
@@ -139,8 +146,11 @@ export const MetaAdsBoosterTab: React.FC<MetaAdsBoosterTabProps> = ({
     },
     {
       id: 'ig-post-dpam-03',
-      permalink: 'https://instagram.com/p/dpam_atelie_sample',
-      caption: 'Trabalhe da cozinha da sua casa com doces gourmet que vendem todos os dias! Comente "DOCES" para baixar a apostila com as 5 receitas mais lucrativas. 🧁👩‍🍳',
+      permalink: 'https://www.instagram.com/marcellospropaganda/',
+      accountHandle: '@marcellospropaganda',
+      placementLabel: 'Feed do Instagram (Modelo de Demonstração)',
+      isRealPost: false,
+      caption: '[MODELO EXEMPLO] Trabalhe da cozinha da sua casa com doces gourmet que vendem todos os dias! Comente "DOCES" para baixar a apostila. 🧁👩‍🍳',
       mediaType: 'IMAGE',
       mediaUrl: '/assets/aistudio/image_c0ede54b.png',
       timestamp: new Date(Date.now() - 1000 * 60 * 60 * 72).toISOString(),
@@ -153,7 +163,37 @@ export const MetaAdsBoosterTab: React.FC<MetaAdsBoosterTabProps> = ({
       publicReply: 'Oie! Acabei de mandar a apostila das receitas mais vendidas no seu Direct! 🧁👩‍🍳',
       dmMessage: 'Olá! Confeitaria é uma das poucas áreas que você começa na cozinha de casa com lucro de 200%. Baixe as receitas aqui:\n👉 https://pay.kiwify.com.br/confeitaria-express',
     },
-  ]);
+  ];
+
+  const [instagramPosts, setInstagramPosts] = useState<any[]>(() => {
+    try {
+      const saved = localStorage.getItem('autoviral_meta_ig_posts_v1');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return DEFAULT_EXAMPLE_POSTS;
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('autoviral_meta_ig_posts_v1', JSON.stringify(instagramPosts));
+    } catch {}
+  }, [instagramPosts]);
+
+  const [isAddRealPostOpen, setIsAddRealPostOpen] = useState(false);
+  const [newPostPermalink, setNewPostPermalink] = useState('');
+  const [newPostAccount, setNewPostAccount] = useState(() => {
+    try {
+      return localStorage.getItem('autoviral_insta_handle') || '@fluentimmersion';
+    } catch {
+      return '@fluentimmersion';
+    }
+  });
+  const [newPostPlacement, setNewPostPlacement] = useState<'Feed' | 'Reels' | 'Stories'>('Feed');
+  const [newPostCaption, setNewPostCaption] = useState('');
+  const [newPostProductId, setNewPostProductId] = useState<string>('prod-tarefinhas');
   const [selectedPostForFlow, setSelectedPostForFlow] = useState<any | null>(null);
   const [isEditingFlowModalOpen, setIsEditingFlowModalOpen] = useState(false);
   const [postFlowSuccessMsg, setPostFlowSuccessMsg] = useState<string | null>(null);
@@ -882,6 +922,53 @@ export const MetaAdsBoosterTab: React.FC<MetaAdsBoosterTabProps> = ({
     setTimeout(() => setPostFlowSuccessMsg(null), 4000);
   };
 
+  const handleAddRealInstagramPost = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanUrl = newPostPermalink.trim();
+    if (!cleanUrl || !cleanUrl.includes('instagram.com')) {
+      setPostFlowSuccessMsg('⚠️ Cole um link válido do Instagram (ex: https://www.instagram.com/p/... ou /reel/...).');
+      return;
+    }
+
+    const foundProd = catalog.find((p) => p.id === newPostProductId) || catalog[0];
+    const cleanAccount = newPostAccount.startsWith('@') ? newPostAccount.trim() : `@${newPostAccount.trim()}`;
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const trackedCheckout = `${origin}/api/r?to=${encodeURIComponent(foundProd.checkoutUrl)}&src=instagram&city=Brasil&state=BR&camp=${encodeURIComponent(foundProd.id)}&title=${encodeURIComponent(foundProd.productName)}`;
+
+    const newPost = {
+      id: `ig-real-${Date.now()}`,
+      permalink: cleanUrl,
+      accountHandle: cleanAccount,
+      placementLabel: `${newPostPlacement} do Instagram (Post Real Vinculado)`,
+      isRealPost: true,
+      caption: newPostCaption.trim() || `Postagem real vinculada em ${cleanAccount} (${newPostPlacement}) ofertando ${foundProd.productName}.`,
+      mediaType: newPostPlacement === 'Reels' ? 'VIDEO' : 'IMAGE',
+      mediaUrl: activeCampaign.imageUrl || '/assets/aistudio/image_e9e67204.png',
+      timestamp: new Date().toISOString(),
+      commentsCount: 0,
+      likeCount: 0,
+      automationActive: true,
+      triggerKeyword: foundProd.keywords.slice(0, 4).join(', ').toUpperCase(),
+      productLinked: `${foundProd.productName} (R$ ${foundProd.price.toFixed(2)})`,
+      productId: foundProd.id,
+      publicReply: foundProd.publicReply,
+      dmMessage: `${foundProd.dmCopy}\n👉 ${trackedCheckout}`,
+    };
+
+    setInstagramPosts((prev) => [newPost, ...prev]);
+    setNewPostPermalink('');
+    setNewPostCaption('');
+    setIsAddRealPostOpen(false);
+    setPostFlowSuccessMsg(`✅ Postagem REAL de ${cleanAccount} (${newPostPlacement}) vinculada e salva!`);
+    setTimeout(() => setPostFlowSuccessMsg(null), 5000);
+  };
+
+  const handleDeletePost = (postId: string) => {
+    setInstagramPosts((prev) => prev.filter((p) => p.id !== postId));
+    setPostFlowSuccessMsg('🗑️ Postagem removida da lista.');
+    setTimeout(() => setPostFlowSuccessMsg(null), 3000);
+  };
+
   // Generate AI Audience Algorithm (Dores e Interesses Meta Ads)
   const handleGenerateAudienceAlgorithm = async (nicheOverride?: string, productOverride?: string) => {
     setIsGeneratingAlgorithm(true);
@@ -1526,35 +1613,161 @@ export const MetaAdsBoosterTab: React.FC<MetaAdsBoosterTabProps> = ({
               <div>
                 <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-pink-950 text-pink-300 text-xs font-bold border border-pink-700/50 mb-1">
                   <Share2 className="w-3.5 h-3.5" />
-                  <span>AUTOMAÇÃO INDIVIDUAL POR POST / REELS</span>
+                  <span>LOCALIZAÇÃO EXATA & AUTOMAÇÃO POR POST / REELS</span>
                 </div>
                 <h3 className="text-xl font-black text-white">
-                  Postagens Publicadas no Instagram & Fluxos Ativos
+                  Onde Estão Suas Postagens do Instagram & Fluxos Ativos
                 </h3>
                 <p className="text-xs text-slate-400 mt-1 max-w-2xl">
-                  Acesse suas postagens reais do Instagram. Em cada post individual, você define qual produto ofertar, qual a palavra-chave de ativação (ex: <em>"EU QUERO"</em>), a resposta pública e o Direct com a foto do produto!
+                  Cada card agora mostra exatamente em <strong>qual conta (@)</strong>, <strong>qual formato (Feed/Reels)</strong> e o <strong>link direto clicável</strong> do post. Os 3 primeiros marcados como <em>"Modelo Exemplo"</em> são referências — clique em <strong>"+ Vincular Meu Post Real"</strong> para colar os links verdadeiros do seu Instagram!
                 </p>
               </div>
 
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => setIsAddRealPostOpen(!isAddRealPostOpen)}
+                  className="px-4 py-2.5 bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-white rounded-xl text-xs font-black flex items-center gap-2 transition shadow-lg cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>{isAddRealPostOpen ? 'Fechar Cadastro' : '+ Vincular Meu Post Real do Instagram'}</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={fetchInstagramPosts}
                   className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 transition border border-slate-700 cursor-pointer shadow-md"
                 >
                   <RefreshCw className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>Atualizar Postagens</span>
+                  <span>Sincronizar via API Meta</span>
                 </button>
               </div>
             </div>
 
+            {/* Form to Link a Real User Instagram Post */}
+            {isAddRealPostOpen && (
+              <form
+                onSubmit={handleAddRealInstagramPost}
+                className="bg-slate-950 border-2 border-pink-500/70 rounded-2xl p-5 space-y-4 shadow-2xl animate-in fade-in"
+              >
+                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <span className="text-xs font-black text-pink-300 uppercase tracking-wider">
+                    📌 Vincular Link Real de Post ou Reels do Seu Instagram
+                  </span>
+                  <span className="text-[11px] text-slate-400">
+                    Fica salvo permanentemente nesta tela
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                  <div className="md:col-span-2 space-y-1">
+                    <label className="text-[11px] font-bold text-slate-300 block">
+                      Link Exato do Post ou Reels no Instagram: *
+                    </label>
+                    <input
+                      type="url"
+                      required
+                      value={newPostPermalink}
+                      onChange={(e) => setNewPostPermalink(e.target.value)}
+                      placeholder="https://www.instagram.com/p/Cxxxx/ ou https://www.instagram.com/reel/Cxxxx/"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-cyan-300 font-mono focus:outline-none focus:border-pink-500"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-slate-300 block">
+                      Conta (@) Onde Foi Postado:
+                    </label>
+                    <input
+                      type="text"
+                      value={newPostAccount}
+                      onChange={(e) => setNewPostAccount(e.target.value)}
+                      placeholder="@fluentimmersion"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-pink-500"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-slate-300 block">
+                      Localização (Onde Está):
+                    </label>
+                    <select
+                      value={newPostPlacement}
+                      onChange={(e) => setNewPostPlacement(e.target.value as any)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-pink-500"
+                    >
+                      <option value="Feed">📸 Feed do Perfil</option>
+                      <option value="Reels">🎥 Aba Reels</option>
+                      <option value="Stories">📲 Stories Próprio</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-slate-300 block">
+                      Produto Que Este Post Vende:
+                    </label>
+                    <select
+                      value={newPostProductId}
+                      onChange={(e) => setNewPostProductId(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-emerald-300 font-bold focus:outline-none focus:border-emerald-500"
+                    >
+                      {catalog.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.productName} (R$ {p.price.toFixed(2)})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-slate-300 block">
+                      Resumo / Legenda do Post:
+                    </label>
+                    <input
+                      type="text"
+                      value={newPostCaption}
+                      onChange={(e) => setNewPostCaption(e.target.value)}
+                      placeholder="Ex: Vídeo mostrando caderno de coordenação..."
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-pink-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsAddRealPostOpen(false)}
+                    className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs rounded-xl shadow cursor-pointer"
+                  >
+                    Salvar Post Real & Gerar Link Rastreado
+                  </button>
+                </div>
+              </form>
+            )}
+
             {/* List of Instagram Posts */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {instagramPosts.map((post) => (
+              {instagramPosts.map((post) => {
+                const isReal = post.isRealPost === true;
+                const postUrl = post.permalink || 'https://www.instagram.com/fluentimmersion/';
+                const accountLabel = post.accountHandle || instagramAccount || '@fluentimmersion';
+                const placement = post.placementLabel || (post.mediaType === 'VIDEO' ? 'Reels do Instagram' : 'Feed do Instagram');
+
+                return (
                 <div
                   key={post.id}
                   className={`bg-slate-950 rounded-2xl border-2 transition shadow-xl overflow-hidden flex flex-col justify-between ${
-                    post.automationActive ? 'border-pink-500/80 shadow-pink-950/20' : 'border-slate-800 opacity-80'
+                    isReal
+                      ? 'border-emerald-500/80 shadow-emerald-950/20'
+                      : post.automationActive
+                      ? 'border-pink-500/60 shadow-pink-950/20'
+                      : 'border-slate-800 opacity-85'
                   }`}
                 >
                   <div>
@@ -1568,9 +1781,18 @@ export const MetaAdsBoosterTab: React.FC<MetaAdsBoosterTabProps> = ({
                           (e.target as HTMLElement).style.display = 'none';
                         }}
                       />
-                      <div className="absolute top-2.5 left-2.5">
-                        <span className="px-2 py-0.5 rounded-md bg-slate-950/80 backdrop-blur text-[10px] font-bold text-white uppercase border border-slate-700">
-                          {post.mediaType === 'VIDEO' ? '🎥 Reels' : '📸 Imagem'}
+                      <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5">
+                        <span className="px-2 py-0.5 rounded-md bg-slate-950/90 backdrop-blur text-[10px] font-bold text-white uppercase border border-slate-700">
+                          {post.mediaType === 'VIDEO' ? '🎥 Reels' : '📸 Feed'}
+                        </span>
+                        <span
+                          className={`px-2 py-0.5 rounded-md text-[10px] font-black border ${
+                            isReal
+                              ? 'bg-emerald-600 text-slate-950 border-emerald-400'
+                              : 'bg-amber-950/90 text-amber-300 border-amber-600/70'
+                          }`}
+                        >
+                          {isReal ? '✅ POST REAL SEU' : '🧪 MODELO EXEMPLO'}
                         </span>
                       </div>
                       <div className="absolute top-2.5 right-2.5">
@@ -1587,14 +1809,38 @@ export const MetaAdsBoosterTab: React.FC<MetaAdsBoosterTabProps> = ({
                           <span>{post.automationActive ? 'Robô LIGADO' : 'Robô PAUSADO'}</span>
                         </button>
                       </div>
-                      <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between text-[11px] text-white/90 bg-slate-950/70 backdrop-blur px-2.5 py-1 rounded-lg">
-                        <span>💬 <strong>{post.commentsCount}</strong> comentários</span>
-                        <span>❤️ <strong>{post.likeCount}</strong> curtidas</span>
+                      <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between text-[11px] text-white/90 bg-slate-950/80 backdrop-blur px-2.5 py-1 rounded-lg">
+                        <span className="font-mono text-pink-300 font-bold">{accountLabel}</span>
+                        <span>💬 <strong>{post.commentsCount || 0}</strong> • ❤️ <strong>{post.likeCount || 0}</strong></span>
                       </div>
                     </div>
 
-                    {/* Post Content & Automation Settings */}
+                    {/* Exact Location & Content */}
                     <div className="p-4 space-y-3">
+                      {/* Exact Where-Is-It Box */}
+                      <div className="p-2.5 rounded-xl bg-slate-900/90 border border-cyan-800/50 space-y-1 text-[11px]">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-cyan-300 font-bold">📍 Onde está: {placement}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleDeletePost(post.id)}
+                            className="text-slate-500 hover:text-rose-400 text-[10px] font-bold cursor-pointer"
+                            title="Remover este card da lista"
+                          >
+                            Remover ✕
+                          </button>
+                        </div>
+                        <a
+                          href={postUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-300 hover:text-blue-200 underline font-mono text-[10px] flex items-center gap-1 truncate"
+                        >
+                          <ExternalLink className="w-3 h-3 shrink-0" />
+                          <span className="truncate">{postUrl}</span>
+                        </a>
+                      </div>
+
                       <p className="text-xs text-slate-300 line-clamp-2 leading-relaxed">
                         {post.caption}
                       </p>
@@ -1625,6 +1871,16 @@ export const MetaAdsBoosterTab: React.FC<MetaAdsBoosterTabProps> = ({
                   </div>
 
                   <div className="p-4 pt-0 space-y-2">
+                    <a
+                      href={postUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-700/50 font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span>Abrir Post no Instagram ({accountLabel})</span>
+                    </a>
+
                     <button
                       type="button"
                       onClick={() => {
@@ -1649,11 +1905,12 @@ export const MetaAdsBoosterTab: React.FC<MetaAdsBoosterTabProps> = ({
                       className="w-full py-2 bg-slate-900 hover:bg-slate-800 text-indigo-300 border border-indigo-900/50 hover:border-indigo-600 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
                     >
                       <Sparkles className="w-3 h-3 text-indigo-400" />
-                      <span>Impulsionar com Algoritmo de Dores</span>
+                      <span>Analisar Dores deste Público (Orgânico R$ 0)</span>
                     </button>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>

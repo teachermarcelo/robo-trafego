@@ -14,9 +14,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const totalBadgeEl = document.getElementById('total-badge');
 
   const btnScan = document.getElementById('btn-scan');
+  const btnScanInsta = document.getElementById('btn-scan-insta');
   const btnSync = document.getElementById('btn-sync');
   const btnResetMapped = document.getElementById('btn-reset-mapped');
   const btnOpenPlatform = document.getElementById('btn-open-platform');
+  const statusBanner = document.getElementById('popup-status-banner');
 
   const groupsContainer = document.getElementById('groups-container');
   const groupsItems = document.getElementById('groups-items');
@@ -43,7 +45,18 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentYtVideos = [];
   let currentPinBoards = [];
   let currentInstaStories = [];
+  let currentInstaAccounts = [];
+  let connectedInstaHandle = '@conectado';
   let activeFilter = 'all';
+
+  function showStatus(msg, isError) {
+    if (!statusBanner) return;
+    statusBanner.style.display = 'block';
+    statusBanner.style.background = isError ? '#450a0a' : '#064e3b';
+    statusBanner.style.borderColor = isError ? '#ef4444' : '#10b981';
+    statusBanner.style.color = isError ? '#fecaca' : '#a7f3d0';
+    statusBanner.textContent = msg;
+  }
 
   // Toggle handlers for dispatch channels
   function updateToggleUI(label, chk) {
@@ -61,7 +74,6 @@ document.addEventListener('DOMContentLoaded', () => {
     { label: toggleInsta, chk: chkInsta }
   ].forEach(pair => {
     pair.label.addEventListener('click', (e) => {
-      // Toggle checkbox
       if (e.target !== pair.chk) {
         pair.chk.checked = !pair.chk.checked;
       }
@@ -81,7 +93,7 @@ document.addEventListener('DOMContentLoaded', () => {
     updateToggleUI(togglePin, chkPin);
     updateToggleUI(toggleInsta, chkInsta);
     saveDispatchChannels();
-    alert('🎯 Modo selecionado: Disparo EXCLUSIVO no Facebook!');
+    showStatus('🎯 Modo selecionado: Disparo EXCLUSIVO no Facebook!');
   });
 
   btnQuickYt.addEventListener('click', () => {
@@ -94,7 +106,7 @@ document.addEventListener('DOMContentLoaded', () => {
     updateToggleUI(togglePin, chkPin);
     updateToggleUI(toggleInsta, chkInsta);
     saveDispatchChannels();
-    alert('🎯 Modo selecionado: Disparo EXCLUSIVO no YouTube!');
+    showStatus('🎯 Modo selecionado: Disparo EXCLUSIVO no YouTube!');
   });
 
   btnQuickPin.addEventListener('click', () => {
@@ -107,7 +119,7 @@ document.addEventListener('DOMContentLoaded', () => {
     updateToggleUI(togglePin, chkPin);
     updateToggleUI(toggleInsta, chkInsta);
     saveDispatchChannels();
-    alert('🎯 Modo selecionado: Disparo EXCLUSIVO no Pinterest!');
+    showStatus('🎯 Modo selecionado: Disparo EXCLUSIVO no Pinterest!');
   });
 
   btnQuickInsta.addEventListener('click', () => {
@@ -120,7 +132,7 @@ document.addEventListener('DOMContentLoaded', () => {
     updateToggleUI(togglePin, chkPin);
     updateToggleUI(toggleInsta, chkInsta);
     saveDispatchChannels();
-    alert('🎯 Modo selecionado: Disparo EXCLUSIVO no Instagram Stories!');
+    showStatus('🎯 Modo selecionado: Disparo EXCLUSIVO no Instagram Stories!');
   });
 
   function saveDispatchChannels() {
@@ -147,7 +159,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Filter tabs (all | fb | yt | pin)
+  // Filter tabs (all | fb | yt | pin | insta)
   filterTabs.forEach(tab => {
     tab.addEventListener('click', () => {
       filterTabs.forEach(t => t.classList.remove('active'));
@@ -160,19 +172,34 @@ document.addEventListener('DOMContentLoaded', () => {
   // Load existing storage data
   if (chrome.storage && chrome.storage.local) {
     chrome.storage.local.get(
-      ['autoviral_mapped_groups', 'autoviral_yt_videos', 'autoviral_pin_boards', 'autoviral_insta_stories', 'autoviral_interval', 'autoviral_target_channels'],
+      [
+        'autoviral_mapped_groups',
+        'autoviral_yt_videos',
+        'autoviral_pin_boards',
+        'autoviral_insta_stories',
+        'autoviral_insta_accounts',
+        'autoviral_insta_connected_handle',
+        'autoviral_interval',
+        'autoviral_target_channels'
+      ],
       (res) => {
-        if (res.autoviral_mapped_groups && Array.isArray(res.autoviral_mapped_groups)) {
+        if (Array.isArray(res.autoviral_mapped_groups)) {
           currentMappedGroups = res.autoviral_mapped_groups;
         }
-        if (res.autoviral_yt_videos && Array.isArray(res.autoviral_yt_videos)) {
+        if (Array.isArray(res.autoviral_yt_videos)) {
           currentYtVideos = res.autoviral_yt_videos;
         }
-        if (res.autoviral_pin_boards && Array.isArray(res.autoviral_pin_boards)) {
+        if (Array.isArray(res.autoviral_pin_boards)) {
           currentPinBoards = res.autoviral_pin_boards;
         }
-        if (res.autoviral_insta_stories && Array.isArray(res.autoviral_insta_stories)) {
+        if (Array.isArray(res.autoviral_insta_stories)) {
           currentInstaStories = res.autoviral_insta_stories;
+        }
+        if (Array.isArray(res.autoviral_insta_accounts)) {
+          currentInstaAccounts = res.autoviral_insta_accounts;
+        }
+        if (res.autoviral_insta_connected_handle) {
+          connectedInstaHandle = res.autoviral_insta_connected_handle;
         }
         if (res.autoviral_interval) {
           selectedInterval = res.autoviral_interval;
@@ -218,9 +245,8 @@ document.addEventListener('DOMContentLoaded', () => {
         fbStatusEl.style.color = '#38bdf8';
       }
 
-      // Query groups from that tab
       chrome.tabs.sendMessage(fbTab.id, { action: 'AUTOVIRAL_MAP_GROUPS' }, (res) => {
-        if (res && res.groups && Array.isArray(res.groups)) {
+        if (res && Array.isArray(res.groups)) {
           saveAndRenderGroups(res.groups);
         }
       });
@@ -248,13 +274,19 @@ document.addEventListener('DOMContentLoaded', () => {
     if (instaTab) {
       instaStatusEl.textContent = 'Instagram Conectado!';
       instaStatusEl.style.color = '#10b981';
+      chrome.tabs.sendMessage(instaTab.id, { action: 'AUTOVIRAL_MAP_INSTAGRAM_ACCOUNTS' }, (res) => {
+        if (res && Array.isArray(res.accounts)) {
+          if (res.connectedHandle) connectedInstaHandle = res.connectedHandle;
+          saveAndRenderInstaAccounts(res.accounts);
+        }
+      });
     } else {
-      instaStatusEl.textContent = 'Stories com Link Clicável';
+      instaStatusEl.textContent = 'Stories + Mapeador Ilimitado';
       instaStatusEl.style.color = '#c084fc';
     }
   });
 
-  // Manual Scan button
+  // Manual FB Scan button
   btnScan.addEventListener('click', () => {
     btnScan.textContent = '⏳ Escaneando Rolagem...';
     btnScan.disabled = true;
@@ -263,7 +295,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const fbTab = tabs.find(t => (t.url || '').includes('facebook.com'));
 
       if (!fbTab) {
-        alert('Abra uma aba do Facebook com busca de grupos ou grupos abertos e role a página para mapear!');
+        showStatus('Abra uma aba do Facebook com busca de grupos e role a página para mapear!', true);
         btnScan.textContent = '🔍 Mapear Grupos da Aba Aberta do FB';
         btnScan.disabled = false;
         return;
@@ -273,37 +305,69 @@ document.addEventListener('DOMContentLoaded', () => {
         btnScan.textContent = '🔍 Mapear Grupos da Aba Aberta do FB';
         btnScan.disabled = false;
 
-        if (response && response.groups && Array.isArray(response.groups) && response.groups.length > 0) {
+        if (response && Array.isArray(response.groups) && response.groups.length > 0) {
           saveAndRenderGroups(response.groups);
-          alert(`✅ ${response.groups.length} grupos foram capturados na sua rolagem do Facebook!`);
+          showStatus(`✅ ${response.groups.length} grupos capturados na rolagem do Facebook!`);
         } else {
-          alert('Role a página do Facebook para que novos grupos carreguem e tente novamente.');
+          showStatus('Role a página do Facebook para carregar grupos e tente novamente.', true);
         }
       });
     });
   });
 
-  // ZERAR MAPEAMENTO (Requested by user: "função zrar mapear")
+  // Manual Instagram Scan button (Unlimited)
+  if (btnScanInsta) {
+    btnScanInsta.addEventListener('click', () => {
+      btnScanInsta.textContent = '⏳ Capturando Contas do Instagram...';
+      btnScanInsta.disabled = true;
+
+      chrome.tabs.query({}, (tabs) => {
+        const instaTab = tabs.find(t => (t.url || '').includes('instagram.com'));
+
+        if (!instaTab) {
+          showStatus('Abra uma aba do Instagram (busca, seguidores ou comentários) para mapear contas!', true);
+          btnScanInsta.textContent = '🟣 Mapear Contas do Instagram (Ilimitado)';
+          btnScanInsta.disabled = false;
+          return;
+        }
+
+        chrome.tabs.sendMessage(instaTab.id, { action: 'AUTOVIRAL_MAP_INSTAGRAM_ACCOUNTS' }, (response) => {
+          btnScanInsta.textContent = '🟣 Mapear Contas do Instagram (Ilimitado)';
+          btnScanInsta.disabled = false;
+
+          if (response && Array.isArray(response.accounts)) {
+            if (response.connectedHandle) connectedInstaHandle = response.connectedHandle;
+            saveAndRenderInstaAccounts(response.accounts);
+            showStatus(`🟣 ${response.accounts.length} contas do Instagram mapeadas (Conta conectada: ${connectedInstaHandle})!`);
+          } else {
+            showStatus('Role a lista ou busca no Instagram e tente novamente.', true);
+          }
+        });
+      });
+    });
+  }
+
+  // ZERAR MAPEAMENTO
   btnResetMapped.addEventListener('click', () => {
-    const total = currentMappedGroups.length + currentYtVideos.length + currentPinBoards.length + currentInstaStories.length;
-    const confirmReset = confirm(
-      `⚠️ Deseja realmente ZERAR todos os dados mapeados (${currentMappedGroups.length} grupos FB, ${currentYtVideos.length} vídeos YT, ${currentPinBoards.length} pastas PIN, ${currentInstaStories.length} stories INSTA)?\n\nEssa ação limpará os registros mapeados para que você possa recomeçar do zero.`
-    );
-
-    if (!confirmReset) return;
-
     currentMappedGroups = [];
     currentYtVideos = [];
     currentPinBoards = [];
     currentInstaStories = [];
+    currentInstaAccounts = [];
 
     if (chrome.storage && chrome.storage.local) {
       chrome.storage.local.remove(
-        ['autoviral_mapped_groups', 'autoviral_yt_videos', 'autoviral_pin_boards', 'autoviral_insta_stories'],
+        [
+          'autoviral_mapped_groups',
+          'autoviral_yt_videos',
+          'autoviral_pin_boards',
+          'autoviral_insta_stories',
+          'autoviral_insta_accounts'
+        ],
         () => {
           updateCounts();
           renderItems();
-          alert('✅ Mapeamento ZERADO com sucesso! Você pode iniciar uma nova rolagem limpa.');
+          showStatus('✅ Mapeamento ZERADO! Pode iniciar uma nova captura limpa.');
         }
       );
     } else {
@@ -311,7 +375,6 @@ document.addEventListener('DOMContentLoaded', () => {
       renderItems();
     }
 
-    // Notify open AutoViral AI platforms that mapping was reset
     chrome.tabs.query({}, (tabs) => {
       tabs.forEach(tab => {
         const url = tab.url || '';
@@ -327,7 +390,6 @@ document.addEventListener('DOMContentLoaded', () => {
     btnSync.textContent = '⏳ Sincronizando...';
     btnSync.disabled = true;
 
-    // Tag any untagged groups with searchFolder and searchTerm
     const enrichedGroups = currentMappedGroups.map(g => ({
       ...g,
       searchFolder: g.searchFolder || 'psicopedagogia',
@@ -335,26 +397,38 @@ document.addEventListener('DOMContentLoaded', () => {
     }));
     currentMappedGroups = enrichedGroups;
 
-    // Send via BroadcastChannel (direct inter-tab sync)
+    const commonPayload = {
+      action: 'AUTOVIRAL_IMPORT_GROUPS_FROM_EXTENSION',
+      groups: enrichedGroups,
+      searchFolder: 'psicopedagogia',
+      searchQuery: 'pedagoga',
+      ytVideos: currentYtVideos,
+      pinBoards: currentPinBoards,
+      instaStories: currentInstaStories,
+      instaAccounts: currentInstaAccounts,
+      connectedHandle: connectedInstaHandle,
+      interval: selectedInterval,
+      targetChannels: {
+        facebook: chkFb.checked,
+        youtube: chkYt.checked,
+        pinterest: chkPin.checked,
+        instagram: chkInsta.checked
+      },
+      timestamp: new Date().toISOString()
+    };
+
     try {
       const bc = new BroadcastChannel('autoviral_bridge_channel');
-      bc.postMessage({
-        action: 'AUTOVIRAL_IMPORT_GROUPS_FROM_EXTENSION',
-        groups: enrichedGroups,
-        searchFolder: 'psicopedagogia',
-        searchQuery: 'pedagoga',
-        ytVideos: currentYtVideos,
-        pinBoards: currentPinBoards,
-        instaStories: currentInstaStories,
-        interval: selectedInterval,
-        targetChannels: {
-          facebook: chkFb.checked,
-          youtube: chkYt.checked,
-          pinterest: chkPin.checked,
-          instagram: chkInsta.checked
-        },
-        timestamp: new Date().toISOString()
-      });
+      bc.postMessage(commonPayload);
+      if (currentInstaAccounts.length > 0) {
+        bc.postMessage({
+          action: 'AUTOVIRAL_IMPORT_INSTAGRAM_ACCOUNTS',
+          accounts: currentInstaAccounts,
+          connectedHandle: connectedInstaHandle,
+          timestamp: new Date().toISOString()
+        });
+      }
+      setTimeout(() => bc.close(), 1000);
     } catch (err) {}
 
     chrome.tabs.query({}, (tabs) => {
@@ -370,34 +444,26 @@ document.addEventListener('DOMContentLoaded', () => {
           (tab.title && tab.title.includes('AutoViral'))
         ) {
           platformTabFound = true;
-          chrome.tabs.sendMessage(tab.id, {
-            action: 'AUTOVIRAL_IMPORT_GROUPS_FROM_EXTENSION',
-            groups: enrichedGroups,
-            searchFolder: 'psicopedagogia',
-            searchQuery: 'pedagoga',
-            ytVideos: currentYtVideos,
-            pinBoards: currentPinBoards,
-            instaStories: currentInstaStories,
-            interval: selectedInterval,
-            targetChannels: {
-              facebook: chkFb.checked,
-              youtube: chkYt.checked,
-              pinterest: chkPin.checked,
-              instagram: chkInsta.checked
-            },
-            timestamp: new Date().toISOString()
-          });
+          chrome.tabs.sendMessage(tab.id, commonPayload);
+          if (currentInstaAccounts.length > 0) {
+            chrome.tabs.sendMessage(tab.id, {
+              action: 'AUTOVIRAL_IMPORT_INSTAGRAM_ACCOUNTS',
+              accounts: currentInstaAccounts,
+              connectedHandle: connectedInstaHandle,
+              timestamp: new Date().toISOString()
+            });
+          }
         }
       });
 
       setTimeout(() => {
-        btnSync.textContent = '📡 Enviar Grupos Mapeados para o Painel AutoViral';
+        btnSync.textContent = '📡 Enviar Grupos + Contas Insta para o Painel';
         btnSync.disabled = false;
-        if (platformTabFound) {
-          alert(`✅ Sucesso! ${enrichedGroups.length} grupos mapeados da pasta "Psicopedagogia & Educação" (FB: ${enrichedGroups.length}, YT: ${currentYtVideos.length}, PIN: ${currentPinBoards.length}, INSTA: ${currentInstaStories.length}) foram sincronizados com a plataforma AutoViral AI.`);
-        } else {
-          alert(`✅ Sucesso! ${enrichedGroups.length} grupos mapeados da pasta "Psicopedagogia" foram enviados. Abra a aba do AutoViral AI para visualizar!`);
-        }
+        showStatus(
+          platformTabFound
+            ? `✅ Sincronizado! FB: ${enrichedGroups.length} grupos • Insta: ${currentInstaAccounts.length} contas.`
+            : `✅ Dados enviados (FB: ${enrichedGroups.length} • Insta: ${currentInstaAccounts.length}). Abra a aba do AutoViral AI!`
+        );
       }, 500);
     });
   });
@@ -428,13 +494,30 @@ document.addEventListener('DOMContentLoaded', () => {
     renderItems();
   }
 
+  function saveAndRenderInstaAccounts(newAccounts) {
+    if (!newAccounts || newAccounts.length === 0) return;
+    const map = new Map();
+    [...newAccounts, ...currentInstaAccounts].forEach(acc => {
+      if (acc && acc.username) {
+        map.set(acc.username.toLowerCase(), acc);
+      }
+    });
+    currentInstaAccounts = Array.from(map.values());
+    if (chrome.storage && chrome.storage.local) {
+      chrome.storage.local.set({ autoviral_insta_accounts: currentInstaAccounts });
+    }
+    updateCounts();
+    renderItems();
+  }
+
   function updateCounts() {
     fbCountEl.textContent = `${currentMappedGroups.length} grupos`;
     ytCountEl.textContent = `${currentYtVideos.length} vídeos`;
     pinCountEl.textContent = `${currentPinBoards.length} pastas`;
-    if (instaCountEl) instaCountEl.textContent = `${currentInstaStories.length} stories`;
+    const instaTotal = currentInstaAccounts.length + currentInstaStories.length;
+    if (instaCountEl) instaCountEl.textContent = `${instaTotal} contas`;
 
-    const total = currentMappedGroups.length + currentYtVideos.length + currentPinBoards.length + currentInstaStories.length;
+    const total = currentMappedGroups.length + currentYtVideos.length + currentPinBoards.length + instaTotal;
     totalBadgeEl.textContent = total.toString();
   }
 
@@ -443,7 +526,8 @@ document.addEventListener('DOMContentLoaded', () => {
       ...currentMappedGroups.map(g => ({ ...g, channel: 'facebook', channelTag: 'FB', tagClass: 'tag-fb' })),
       ...currentYtVideos.map(v => ({ ...v, channel: 'youtube', channelTag: 'YT', tagClass: 'tag-yt' })),
       ...currentPinBoards.map(p => ({ ...p, channel: 'pinterest', channelTag: 'PIN', tagClass: 'tag-pin' })),
-      ...currentInstaStories.map(s => ({ ...s, channel: 'instagram', channelTag: 'INSTA', tagClass: 'tag-insta' }))
+      ...currentInstaAccounts.map(a => ({ ...a, name: `${a.handle} (${a.name})`, channel: 'instagram', channelTag: 'INSTA', tagClass: 'tag-insta' })),
+      ...currentInstaStories.map(s => ({ ...s, channel: 'instagram', channelTag: 'STORY', tagClass: 'tag-insta' }))
     ];
 
     const filtered = allItems.filter(item => {
@@ -463,13 +547,13 @@ document.addEventListener('DOMContentLoaded', () => {
     groupsContainer.style.display = 'block';
     groupsItems.innerHTML = '';
 
-    filtered.slice(0, 20).forEach(item => {
+    filtered.slice(0, 50).forEach(item => {
       const row = document.createElement('div');
       row.className = 'group-item';
       row.innerHTML = `
         <div>
           <div class="group-name" title="${item.name || item.title}">${item.name || item.title}</div>
-          <div class="group-meta">${item.membersCount ? item.membersCount.toLocaleString('pt-BR') + ' membros' : (item.views || item.followers || 'Detectado')}</div>
+          <div class="group-meta">${item.membersCount ? item.membersCount.toLocaleString('pt-BR') + ' membros' : (item.views || item.followers || 'Mapeado')}</div>
         </div>
         <span class="channel-tag ${item.tagClass}">${item.channelTag}</span>
       `;

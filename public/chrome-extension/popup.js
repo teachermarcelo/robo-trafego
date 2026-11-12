@@ -184,7 +184,10 @@ document.addEventListener('DOMContentLoaded', () => {
       ],
       (res) => {
         if (Array.isArray(res.autoviral_mapped_groups)) {
-          currentMappedGroups = res.autoviral_mapped_groups;
+          currentMappedGroups = res.autoviral_mapped_groups.map(g => ({
+            ...g,
+            name: sanitizeGroupName(g.name) || g.name
+          }));
         }
         if (Array.isArray(res.autoviral_yt_videos)) {
           currentYtVideos = res.autoviral_yt_videos;
@@ -223,18 +226,53 @@ document.addEventListener('DOMContentLoaded', () => {
     );
   }
 
+  function sendToTabWithAutoInject(tabId, message, callback) {
+    chrome.tabs.sendMessage(tabId, message, (res) => {
+      if (!chrome.runtime.lastError && res) {
+        callback(res);
+        return;
+      }
+      if (chrome.scripting && chrome.scripting.executeScript) {
+        chrome.scripting.executeScript(
+          { target: { tabId: tabId }, files: ['content.js'] },
+          () => {
+            if (chrome.runtime.lastError) {
+              callback(null);
+              return;
+            }
+            setTimeout(() => {
+              chrome.tabs.sendMessage(tabId, message, (retryRes) => {
+                void chrome.runtime.lastError;
+                callback(retryRes || null);
+              });
+            }, 350);
+          }
+        );
+      } else {
+        callback(null);
+      }
+    });
+  }
+
+  function findPreferredTab(tabs, domain) {
+    return (
+      tabs.find(t => t.active && (t.url || '').includes(domain)) ||
+      tabs.find(t => (t.url || '').includes(domain))
+    );
+  }
+
   // Detect open tabs (Facebook, YouTube, Pinterest, Instagram)
   chrome.tabs.query({}, (tabs) => {
     if (!tabs || tabs.length === 0) return;
 
-    const fbTab = tabs.find(t => (t.url || '').includes('facebook.com'));
-    const ytTab = tabs.find(t => (t.url || '').includes('youtube.com'));
-    const pinTab = tabs.find(t => (t.url || '').includes('pinterest.com'));
-    const instaTab = tabs.find(t => (t.url || '').includes('instagram.com'));
+    const fbTab = findPreferredTab(tabs, 'facebook.com');
+    const ytTab = findPreferredTab(tabs, 'youtube.com');
+    const pinTab = findPreferredTab(tabs, 'pinterest.com');
+    const instaTab = findPreferredTab(tabs, 'instagram.com');
 
     if (fbTab) {
       const url = fbTab.url || '';
-      if (url.includes('groups/search') || url.includes('groups_home')) {
+      if (url.includes('groups/search') || url.includes('search/groups') || url.includes('groups_home')) {
         fbStatusEl.textContent = 'Busca de Grupos Aberta!';
         fbStatusEl.style.color = '#10b981';
       } else if (url.includes('groups/')) {
@@ -245,8 +283,8 @@ document.addEventListener('DOMContentLoaded', () => {
         fbStatusEl.style.color = '#38bdf8';
       }
 
-      chrome.tabs.sendMessage(fbTab.id, { action: 'AUTOVIRAL_MAP_GROUPS' }, (res) => {
-        if (res && Array.isArray(res.groups)) {
+      sendToTabWithAutoInject(fbTab.id, { action: 'AUTOVIRAL_MAP_GROUPS' }, (res) => {
+        if (res && Array.isArray(res.groups) && res.groups.length > 0) {
           saveAndRenderGroups(res.groups);
         }
       });
@@ -274,7 +312,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (instaTab) {
       instaStatusEl.textContent = 'Instagram Conectado!';
       instaStatusEl.style.color = '#10b981';
-      chrome.tabs.sendMessage(instaTab.id, { action: 'AUTOVIRAL_MAP_INSTAGRAM_ACCOUNTS' }, (res) => {
+      sendToTabWithAutoInject(instaTab.id, { action: 'AUTOVIRAL_MAP_INSTAGRAM_ACCOUNTS' }, (res) => {
         if (res && Array.isArray(res.accounts)) {
           if (res.connectedHandle) connectedInstaHandle = res.connectedHandle;
           saveAndRenderInstaAccounts(res.accounts);
@@ -288,11 +326,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Manual FB Scan button
   btnScan.addEventListener('click', () => {
-    btnScan.textContent = '⏳ Escaneando Rolagem...';
+    btnScan.textContent = '⏳ Escaneando Grupos...';
     btnScan.disabled = true;
 
     chrome.tabs.query({}, (tabs) => {
-      const fbTab = tabs.find(t => (t.url || '').includes('facebook.com'));
+      const fbTab = findPreferredTab(tabs, 'facebook.com');
 
       if (!fbTab) {
         showStatus('Abra uma aba do Facebook com busca de grupos e role a página para mapear!', true);
@@ -301,15 +339,15 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
-      chrome.tabs.sendMessage(fbTab.id, { action: 'AUTOVIRAL_MAP_GROUPS' }, (response) => {
+      sendToTabWithAutoInject(fbTab.id, { action: 'AUTOVIRAL_MAP_GROUPS' }, (response) => {
         btnScan.textContent = '🔍 Mapear Grupos da Aba Aberta do FB';
         btnScan.disabled = false;
 
         if (response && Array.isArray(response.groups) && response.groups.length > 0) {
           saveAndRenderGroups(response.groups);
-          showStatus(`✅ ${response.groups.length} grupos capturados na rolagem do Facebook!`);
+          showStatus(`✅ ${response.groups.length} grupos mapeados nesta busca do Facebook!`);
         } else {
-          showStatus('Role a página do Facebook para carregar grupos e tente novamente.', true);
+          showStatus('Role um pouco a lista de grupos no Facebook (ou recarregue a aba com F5) e clique novamente.', true);
         }
       });
     });
@@ -322,7 +360,7 @@ document.addEventListener('DOMContentLoaded', () => {
       btnScanInsta.disabled = true;
 
       chrome.tabs.query({}, (tabs) => {
-        const instaTab = tabs.find(t => (t.url || '').includes('instagram.com'));
+        const instaTab = findPreferredTab(tabs, 'instagram.com');
 
         if (!instaTab) {
           showStatus('Abra uma aba do Instagram (busca, seguidores ou comentários) para mapear contas!', true);
@@ -331,16 +369,16 @@ document.addEventListener('DOMContentLoaded', () => {
           return;
         }
 
-        chrome.tabs.sendMessage(instaTab.id, { action: 'AUTOVIRAL_MAP_INSTAGRAM_ACCOUNTS' }, (response) => {
+        sendToTabWithAutoInject(instaTab.id, { action: 'AUTOVIRAL_MAP_INSTAGRAM_ACCOUNTS' }, (response) => {
           btnScanInsta.textContent = '🟣 Mapear Contas do Instagram (Ilimitado)';
           btnScanInsta.disabled = false;
 
-          if (response && Array.isArray(response.accounts)) {
+          if (response && Array.isArray(response.accounts) && response.accounts.length > 0) {
             if (response.connectedHandle) connectedInstaHandle = response.connectedHandle;
             saveAndRenderInstaAccounts(response.accounts);
             showStatus(`🟣 ${response.accounts.length} contas do Instagram mapeadas (Conta conectada: ${connectedInstaHandle})!`);
           } else {
-            showStatus('Role a lista ou busca no Instagram e tente novamente.', true);
+            showStatus('Role a lista, pesquisa ou seguidores no Instagram (ou recarregue com F5) e tente novamente.', true);
           }
         });
       });
@@ -392,16 +430,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const enrichedGroups = currentMappedGroups.map(g => ({
       ...g,
-      searchFolder: g.searchFolder || 'psicopedagogia',
-      searchTerm: g.searchTerm || 'psicopedagogia'
+      searchFolder: g.searchFolder || 'geral',
+      searchTerm: g.searchTerm || g.searchFolder || 'geral'
     }));
     currentMappedGroups = enrichedGroups;
+    const primaryFolder = (enrichedGroups[0] && enrichedGroups[0].searchFolder) || 'geral';
+    const primaryQuery = (enrichedGroups[0] && enrichedGroups[0].searchTerm) || primaryFolder;
 
     const commonPayload = {
       action: 'AUTOVIRAL_IMPORT_GROUPS_FROM_EXTENSION',
       groups: enrichedGroups,
-      searchFolder: 'psicopedagogia',
-      searchQuery: 'pedagoga',
+      searchFolder: primaryFolder,
+      searchQuery: primaryQuery,
       ytVideos: currentYtVideos,
       pinBoards: currentPinBoards,
       instaStories: currentInstaStories,
@@ -444,15 +484,16 @@ document.addEventListener('DOMContentLoaded', () => {
           (tab.title && tab.title.includes('AutoViral'))
         ) {
           platformTabFound = true;
-          chrome.tabs.sendMessage(tab.id, commonPayload);
-          if (currentInstaAccounts.length > 0) {
-            chrome.tabs.sendMessage(tab.id, {
-              action: 'AUTOVIRAL_IMPORT_INSTAGRAM_ACCOUNTS',
-              accounts: currentInstaAccounts,
-              connectedHandle: connectedInstaHandle,
-              timestamp: new Date().toISOString()
-            });
-          }
+          sendToTabWithAutoInject(tab.id, commonPayload, () => {
+            if (currentInstaAccounts.length > 0) {
+              chrome.tabs.sendMessage(tab.id, {
+                action: 'AUTOVIRAL_IMPORT_INSTAGRAM_ACCOUNTS',
+                accounts: currentInstaAccounts,
+                connectedHandle: connectedInstaHandle,
+                timestamp: new Date().toISOString()
+              }, () => { void chrome.runtime.lastError; });
+            }
+          });
         }
       });
 
@@ -462,27 +503,54 @@ document.addEventListener('DOMContentLoaded', () => {
         showStatus(
           platformTabFound
             ? `✅ Sincronizado! FB: ${enrichedGroups.length} grupos • Insta: ${currentInstaAccounts.length} contas.`
-            : `✅ Dados enviados (FB: ${enrichedGroups.length} • Insta: ${currentInstaAccounts.length}). Abra a aba do AutoViral AI!`
+            : `✅ Dados salvos (FB: ${enrichedGroups.length} • Insta: ${currentInstaAccounts.length}). Abra a aba do AutoViral AI!`
         );
-      }, 500);
+      }, 600);
     });
   });
 
-  // Open platform
+  function sanitizeGroupName(rawName) {
+    return (rawName || '')
+      .replace(/\u00a0/g, ' ')
+      .replace(/^(foto\s+do\s+perfil\s+de|foto\s+da\s+capa\s+de|profile\s+picture\s+of|cover\s+photo\s+of)\s+/i, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  // Open or focus existing AutoViral AI platform tab
   if (btnOpenPlatform) {
     btnOpenPlatform.addEventListener('click', () => {
-      chrome.tabs.create({ url: 'https://ais-dev-fdvdpr73jbu2hzpbbibxp5-395073471759.us-west2.run.app' });
+      chrome.tabs.query({}, (tabs) => {
+        const existingTab =
+          tabs.find(t => (t.url || '').includes('run.app') || (t.url || '').includes('localhost')) ||
+          tabs.find(t => (t.title || '').includes('AutoViral'));
+
+        if (existingTab) {
+          chrome.windows.update(existingTab.windowId, { focused: true }, () => {
+            chrome.tabs.update(existingTab.id, { active: true });
+          });
+        } else {
+          chrome.tabs.create({ url: 'https://ais-dev-fdvdpr73jbu2hzpbbibxp5-395073471759.us-west2.run.app' });
+        }
+      });
     });
   }
 
   function saveAndRenderGroups(newGroups) {
     if (!newGroups || newGroups.length === 0) return;
 
-    const merged = [...currentMappedGroups];
+    const merged = currentMappedGroups.map(g => ({
+      ...g,
+      name: sanitizeGroupName(g.name) || g.name
+    }));
     newGroups.forEach(ng => {
-      const exists = merged.some(g => g.id === ng.id || g.url === ng.url || g.name === ng.name);
-      if (!exists && ng.name) {
-        merged.unshift({ ...ng, channel: 'facebook' });
+      const cleanName = sanitizeGroupName(ng.name);
+      if (!cleanName) return;
+      const existingIdx = merged.findIndex(g => g.id === ng.id || g.url === ng.url);
+      if (existingIdx === -1) {
+        merged.unshift({ ...ng, name: cleanName, channel: 'facebook' });
+      } else if ((merged[existingIdx].name || '').startsWith('Foto do') || cleanName.length > (merged[existingIdx].name || '').length) {
+        merged[existingIdx] = { ...merged[existingIdx], ...ng, name: cleanName, channel: 'facebook' };
       }
     });
 

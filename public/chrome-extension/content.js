@@ -2,6 +2,11 @@
 // Runs on Facebook, YouTube and AutoViral AI Web Platform
 
 (function () {
+  if (window.__AUTOVIRAL_CONTENT_SCRIPT_INITIALIZED__) {
+    return;
+  }
+  window.__AUTOVIRAL_CONTENT_SCRIPT_INITIALIZED__ = true;
+
   const currentHost = window.location.hostname;
   const isFacebook = currentHost.includes('facebook.com');
   const isYouTube = currentHost.includes('youtube.com');
@@ -19,11 +24,23 @@
     let localMappedGroups = [];
     let isWidgetVisible = true;
 
+    function sanitizeGroupName(rawName) {
+      return (rawName || '')
+        .replace(/\u00a0/g, ' ')
+        .replace(/^(foto\s+do\s+perfil\s+de|foto\s+da\s+capa\s+de|profile\s+picture\s+of|cover\s+photo\s+of)\s+/i, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
     // Load previously stored groups from chrome.storage
     if (chrome.storage && chrome.storage.local) {
       chrome.storage.local.get(['autoviral_mapped_groups'], (res) => {
         if (res.autoviral_mapped_groups && Array.isArray(res.autoviral_mapped_groups)) {
-          localMappedGroups = res.autoviral_mapped_groups;
+          localMappedGroups = res.autoviral_mapped_groups.map(g => ({
+            ...g,
+            name: sanitizeGroupName(g.name) || g.name
+          }));
+          chrome.storage.local.set({ autoviral_mapped_groups: localMappedGroups });
           updateFloatingBadge();
         }
       });
@@ -41,77 +58,142 @@
       return 'psicopedagogia';
     }
 
+    // Derive clean folder slug from search query
+    function deriveFolderFromQuery(q) {
+      const lower = (q || '').toLowerCase();
+      if (!lower) return 'geral';
+      if (lower.includes('pedagog') || lower.includes('psico') || lower.includes('autis') || lower.includes('tea') || lower.includes('tdah')) return 'psicopedagogia';
+      if (lower.includes('renda') || lower.includes('dinheiro') || lower.includes('milha') || lower.includes('afiliad') || lower.includes('ecom')) return 'renda_extra';
+      if (lower.includes('curitiba')) return 'curitiba';
+      return lower.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 32) || 'geral';
+    }
+
     // Function to parse all group cards currently visible in the DOM
     function scanVisibleGroups() {
       const detected = [];
       const currentQuery = getFbCurrentSearchQuery();
-      const currentFolder = (currentQuery.toLowerCase().includes('pedagog') || currentQuery.toLowerCase().includes('psico'))
-        ? 'psicopedagogia'
-        : (currentQuery.toLowerCase().includes('renda') ? 'renda_extra' : (currentQuery.toLowerCase().includes('curitiba') ? 'curitiba' : 'psicopedagogia'));
+      const currentFolder = deriveFolderFromQuery(currentQuery);
 
-      // 1. Check all anchor links that lead to groups
+      const BAD_LABELS = new Set([
+        'participar', 'participar do grupo', 'entrar', 'entrar no grupo',
+        'visitar', 'ver grupo', 'ver mais', 'grupos', 'seu feed', 'descobrir',
+        'criar novo grupo', 'join', 'join group', 'visit'
+      ]);
+
+      // Check all anchor links that lead to groups
       const links = document.querySelectorAll('a[href*="/groups/"]');
       links.forEach(link => {
-        const href = link.href || '';
-        // Skip navigation and create links
+        const href = link.getAttribute('href') || link.href || '';
+        // Skip navigation, create, and generic group directory links
         if (
-          href.includes('/create') ||
-          href.includes('/feed') ||
-          href.includes('/discover') ||
-          href.includes('/joins') ||
-          href.includes('/categories')
+          href.includes('/groups/create') ||
+          href.includes('/groups/feed') ||
+          href.includes('/groups/discover') ||
+          href.includes('/groups/joins') ||
+          href.includes('/groups/categories') ||
+          href.includes('/groups/?') ||
+          /\/groups\/?$/.test(href.split('?')[0])
         ) return;
 
-        // Clean URL to base group path (e.g. facebook.com/groups/pedagogiabrasil)
-        const cleanUrl = href.split('?')[0].replace(/\/$/, '');
-        const groupSlug = cleanUrl.split('/groups/')[1];
+        // Normalize canonical URL: https://www.facebook.com/groups/<slug>
+        const rawPath = href.split('?')[0].split('#')[0];
+        const afterGroups = rawPath.split('/groups/')[1];
+        if (!afterGroups) return;
+        const groupSlug = afterGroups.split('/')[0].trim();
         if (!groupSlug || groupSlug.length < 2) return;
+        if (['feed', 'discover', 'joins', 'create', 'categories', 'search', 'notifications'].includes(groupSlug.toLowerCase())) return;
+
+        const cleanUrl = `https://www.facebook.com/groups/${groupSlug}`;
 
         // Traverse up to find container card
         const cardContainer = link.closest('div[role="article"]') ||
+                              link.closest('div[role="listitem"]') ||
                               link.closest('div[role="feed"] > div') ||
                               link.closest('.x1yztbdb') ||
-                              link.parentElement?.parentElement?.parentElement;
+                              link.parentElement?.parentElement?.parentElement?.parentElement;
 
-        const cardText = cardContainer ? cardContainer.innerText : (link.innerText || '');
-        const nameCandidate = (link.innerText || '').trim();
+        const rawCardText = (cardContainer ? cardContainer.innerText : (link.innerText || '')).replace(/\u00a0/g, ' ');
+        const linkAria = sanitizeGroupName(link.getAttribute('aria-label') || '');
+        const rawLinkLines = (link.innerText || '')
+          .replace(/\u00a0/g, ' ')
+          .split('\n')
+          .map(s => sanitizeGroupName(s))
+          .filter(s => s.length >= 3 && !BAD_LABELS.has(s.toLowerCase()) && !/^(público|privado)\s*·/i.test(s));
 
-        // Must look like a real group name
-        if (nameCandidate.length >= 3 && !nameCandidate.includes('Participar') && !nameCandidate.includes('Ver mais')) {
-          // Extract member count
+        // Prefer explicit text anchor or heading in cardContainer over thumbnail aria-label
+        let nameCandidate = rawLinkLines[0] || '';
+        if (!nameCandidate && cardContainer) {
+          const cardTextAnchors = Array.from(cardContainer.querySelectorAll(`a[href*="/groups/${groupSlug}"]`));
+          for (const aEl of cardTextAnchors) {
+            const txt = sanitizeGroupName((aEl.innerText || '').split('\n')[0]);
+            if (txt && txt.length >= 3 && !BAD_LABELS.has(txt.toLowerCase())) {
+              nameCandidate = txt;
+              break;
+            }
+          }
+        }
+        if (!nameCandidate && linkAria && !BAD_LABELS.has(linkAria.toLowerCase())) {
+          nameCandidate = linkAria;
+        }
+        if (!nameCandidate && cardContainer) {
+          const cardLines = rawCardText
+            .split('\n')
+            .map(s => sanitizeGroupName(s))
+            .filter(s =>
+              s.length >= 3 &&
+              !BAD_LABELS.has(s.toLowerCase()) &&
+              !/^(público|privado)(\s*·|$)/i.test(s) &&
+              !/^\d[\d.,\s]*(mil|k|m)?\s*membros?/i.test(s) &&
+              !/posts?\s*(por|ao)\s*dia/i.test(s)
+            );
+          if (cardLines.length > 0) {
+            nameCandidate = cardLines[0];
+          }
+        }
+
+        // Clean trailing ellipsis or metadata
+        nameCandidate = sanitizeGroupName(nameCandidate);
+
+        if (nameCandidate.length >= 3 && !BAD_LABELS.has(nameCandidate.toLowerCase())) {
           let membersCount = 15000;
           let postsPerDay = '10+ posts/dia';
           let isPublic = true;
 
-          const memberMatch = cardText.match(/([0-9.,]+)\s*(mil|k)?\s*membros/i);
+          const memberMatch = rawCardText.match(/([0-9]+(?:[.,][0-9]+)?)\s*(mil|k|mi)?\s*membros?/i);
           if (memberMatch) {
-            let num = parseFloat(memberMatch[1].replace(/\./g, '').replace(',', '.'));
-            if (memberMatch[2] && (memberMatch[2].toLowerCase() === 'mil' || memberMatch[2].toLowerCase() === 'k')) {
-              num = num * 1000;
+            let numStr = memberMatch[1];
+            const suffix = (memberMatch[2] || '').toLowerCase();
+            if (suffix === 'mil' || suffix === 'k') {
+              numStr = numStr.replace(',', '.');
+              membersCount = Math.round(parseFloat(numStr) * 1000);
+            } else if (suffix === 'mi') {
+              numStr = numStr.replace(',', '.');
+              membersCount = Math.round(parseFloat(numStr) * 1000000);
+            } else {
+              membersCount = Math.round(parseFloat(numStr.replace(/\./g, '').replace(',', '.')));
             }
-            membersCount = Math.round(num);
           }
 
-          const postsMatch = cardText.match(/([0-9]+(\+)?\s*(post|publicação|publicações)\s*(por|ao)\s*dia)/i);
+          const postsMatch = rawCardText.match(/([0-9]+(\+)?\s*(post|publicação|publicações)\s*(por|ao)\s*dia)/i);
           if (postsMatch) {
             postsPerDay = postsMatch[0];
           }
 
-          if (cardText.includes('Privado') || cardText.includes('Grupo privado')) {
+          if (/privado/i.test(rawCardText)) {
             isPublic = false;
           }
 
-          const alreadyAdded = detected.some(g => g.url === cleanUrl || g.name === nameCandidate);
+          const alreadyAdded = detected.some(g => g.url === cleanUrl);
           if (!alreadyAdded) {
             detected.push({
               id: 'fb-grp-' + groupSlug.replace(/[^a-zA-Z0-9_-]/g, ''),
               name: nameCandidate,
               url: cleanUrl,
-              membersCount: membersCount,
+              membersCount: membersCount || 15000,
               postsPerDay: postsPerDay,
               privacy: isPublic ? 'Público' : 'Privado',
               niche: categorizeNiche(nameCandidate),
-              searchTerm: currentQuery || 'psicopedagogia',
+              searchTerm: currentQuery || currentFolder,
               searchFolder: currentFolder,
               mappedAt: new Date().toLocaleDateString('pt-BR'),
               dispatchCount: 0,
@@ -121,13 +203,25 @@
         }
       });
 
-      // Merge with stored groups
+      // Merge with stored groups (and replace dirty "Foto do perfil de ..." names if clean name is found)
       let hasNew = false;
       detected.forEach(g => {
-        const exists = localMappedGroups.some(eg => eg.name === g.name || eg.url === g.url);
-        if (!exists) {
+        const existingIdx = localMappedGroups.findIndex(eg => eg.url === g.url || eg.id === g.id);
+        if (existingIdx === -1) {
           localMappedGroups.unshift(g);
           hasNew = true;
+        } else {
+          const oldName = localMappedGroups[existingIdx].name || '';
+          const cleanedOld = sanitizeGroupName(oldName);
+          if (oldName !== cleanedOld || (g.name.length > cleanedOld.length && !g.name.endsWith('...'))) {
+            localMappedGroups[existingIdx] = {
+              ...localMappedGroups[existingIdx],
+              name: g.name.endsWith('...') ? cleanedOld : g.name,
+              searchFolder: g.searchFolder || localMappedGroups[existingIdx].searchFolder,
+              searchTerm: g.searchTerm || localMappedGroups[existingIdx].searchTerm
+            };
+            hasNew = true;
+          }
         }
       });
 
@@ -227,7 +321,7 @@
           <span style="color: #cbd5e1;">Grupos Mapeados nesta tela:</span>
           <strong id="autoviral-badge-count" style="color: #fbbf24; font-size: 14px; font-weight: 900;">0</strong>
         </div>
-        <div style="font-size: 10px; color: #94a3b8; line-height: 1.3;">
+        <div id="autoviral-badge-hint" style="font-size: 10px; color: #94a3b8; line-height: 1.3;">
           Role a página para baixo para mapear mais grupos automaticamente!
         </div>
         <button id="autoviral-badge-sync" style="
@@ -257,13 +351,13 @@
       };
 
       document.getElementById('autoviral-badge-sync').onclick = () => {
+        scanVisibleGroups();
         const count = localMappedGroups.length;
         const currentQuery = getFbCurrentSearchQuery();
-        const currentFolder = (currentQuery.toLowerCase().includes('pedagog') || currentQuery.toLowerCase().includes('psico'))
-          ? 'psicopedagogia'
-          : (currentQuery.toLowerCase().includes('renda') ? 'renda_extra' : (currentQuery.toLowerCase().includes('curitiba') ? 'curitiba' : 'psicopedagogia'));
+        const currentFolder = deriveFolderFromQuery(currentQuery);
+        const hintEl = document.getElementById('autoviral-badge-hint');
 
-        // 1. Send via BroadcastChannel (works between tabs in same browser immediately!)
+        // 1. Send via BroadcastChannel
         try {
           const bc = new BroadcastChannel('autoviral_bridge_channel');
           bc.postMessage({
@@ -273,9 +367,8 @@
             searchQuery: currentQuery,
             timestamp: new Date().toISOString()
           });
-        } catch (e) {
-          console.warn('[AutoViral AI] BroadcastChannel não suportado:', e);
-        }
+          setTimeout(() => bc.close(), 1000);
+        } catch (e) {}
 
         // 2. Window postMessage fallback
         window.postMessage({
@@ -293,11 +386,16 @@
             groups: localMappedGroups,
             searchFolder: currentFolder,
             searchQuery: currentQuery
-          }, (res) => {
-            alert(`✅ Sucesso! ${count} grupos mapeados da pasta "${currentQuery || 'Psicopedagogia'}" foram sincronizados com o Painel AutoViral AI.`);
+          }, () => {
+            void chrome.runtime.lastError;
+            if (hintEl) {
+              hintEl.textContent = `✅ ${count} grupos enviados da pasta "${currentQuery || currentFolder}"!`;
+              hintEl.style.color = '#34d399';
+            }
           });
-        } else {
-          alert(`✅ ${count} grupos mapeados da pasta "${currentQuery || 'Psicopedagogia'}" foram enviados para sincronização via Broadcast!`);
+        } else if (hintEl) {
+          hintEl.textContent = `✅ ${count} grupos sincronizados!`;
+          hintEl.style.color = '#34d399';
         }
       };
     }
@@ -314,8 +412,13 @@
     // Message listener for popup
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (request.action === 'AUTOVIRAL_MAP_GROUPS' || request.action === 'AUTOVIRAL_GET_GROUPS') {
-        scanVisibleGroups();
-        sendResponse({ success: true, groups: localMappedGroups, currentUrl: window.location.href });
+        const justFound = scanVisibleGroups();
+        sendResponse({
+          success: true,
+          groups: localMappedGroups,
+          justFoundCount: justFound.length,
+          currentUrl: window.location.href
+        });
       } else if (request.action === 'AUTOVIRAL_RESET_MAPPED_GROUPS') {
         localMappedGroups = [];
         updateFloatingBadge();
@@ -479,7 +582,15 @@
           timestamp: new Date().toISOString()
         }, '*');
 
-        alert(`✅ ${count} vídeos reais do YouTube foram sincronizados com o Painel AutoViral AI!`);
+        const ytBtn = document.getElementById('autoviral-yt-badge-sync');
+        if (ytBtn) {
+          ytBtn.textContent = `✅ ${count} vídeos enviados para o Painel!`;
+          ytBtn.style.background = '#10b981';
+          setTimeout(() => {
+            ytBtn.textContent = '📡 Sincronizar Vídeos com Painel AutoViral';
+            ytBtn.style.background = '#ef4444';
+          }, 3000);
+        }
       };
     }
 
@@ -669,10 +780,11 @@
       let newFound = 0;
 
       try {
-        const anchors = document.querySelectorAll('a[href^="/"]');
+        const anchors = document.querySelectorAll('a[href]');
         anchors.forEach((a) => {
-          const href = a.getAttribute('href') || '';
-          if (!href || href === '/' || href.includes('?')) return;
+          const rawHref = a.getAttribute('href') || '';
+          const href = rawHref.replace(/^https?:\/\/(www\.)?instagram\.com/i, '').split('?')[0].split('#')[0];
+          if (!href || href === '/') return;
 
           // Match exact single-segment profile URLs like /username/ or /username
           const match = href.match(/^\/([a-zA-Z0-9._]{2,30})\/?$/);
@@ -928,6 +1040,8 @@
         window.dispatchEvent(new CustomEvent('autoviral_extension_groups_received', {
           detail: {
             groups: data.groups,
+            searchFolder: data.searchFolder,
+            searchQuery: data.searchQuery,
             ytVideos: data.ytVideos,
             pinBoards: data.pinBoards,
             instaStories: data.instaStories,

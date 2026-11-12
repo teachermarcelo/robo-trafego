@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
-  "name": "AutoViral AI - Mapeador FB, YouTube & Robô Pinterest",
-  "version": "1.2.0",
-  "description": "Mapeia automaticamente grupos do Facebook por rolagem, sincroniza públicos qualificados, automatiza postagens humanizadas (300s a 400s), engaja no YouTube e automatiza Pins virais no Pinterest.",
+  "name": "AutoViral AI - Mapeador FB, Instagram, YouTube & Pinterest",
+  "version": "1.3.2",
+  "description": "Mapeia grupos do Facebook e contas do Instagram sem limite, sincroniza conta conectada para Stories Próprio e integra FB, YouTube e Pinterest ao AutoViral AI.",
   "action": {
     "default_popup": "popup.html",
-    "default_title": "AutoViral AI - FB, YouTube & Pinterest"
+    "default_title": "AutoViral AI - FB, Insta, YT & Pin"
   },
   "permissions": [
     "activeTab",
@@ -32,7 +32,10 @@
         "*://*.facebook.com/*",
         "*://*.youtube.com/*",
         "*://*.pinterest.com/*",
-        "*://*.instagram.com/*"
+        "*://*.instagram.com/*",
+        "*://*.run.app/*",
+        "*://*.vercel.app/*",
+        "*://localhost/*"
       ],
       "js": ["content.js"],
       "run_at": "document_idle"

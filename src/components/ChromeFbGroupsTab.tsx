@@ -356,6 +356,14 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
 
   const availableCampaigns = managedCampaigns;
 
+  const sanitizeFbGroupName = (rawName: string): string => {
+    return (rawName || '')
+      .replace(/\u00a0/g, ' ')
+      .replace(/^(foto\s+do\s+perfil\s+de|foto\s+da\s+capa\s+de|profile\s+picture\s+of|cover\s+photo\s+of)\s+/i, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  };
+
   // Subtabs: groups | audiences | campaign | youtube | pinterest | instagram | layout_studio | extension_guide | tracked_links
   const [activeSubTab, setActiveSubTab] = useState<'groups' | 'audiences' | 'campaign' | 'youtube' | 'pinterest' | 'instagram' | 'layout_studio' | 'extension_guide' | 'tracked_links'>(() => {
     try {
@@ -366,6 +374,9 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
     } catch {}
     return 'groups';
   });
+
+  const [extensionSyncBanner, setExtensionSyncBanner] = useState<{ message: string; tone: 'success' | 'warning' } | null>(null);
+  const [lastImportedGroupIds, setLastImportedGroupIds] = useState<string[]>([]);
 
   // Search folder filter: persisted in localStorage so page refresh keeps exact folder
   const [activeSearchFolder, setActiveSearchFolder] = useState<string>(() => {
@@ -383,10 +394,13 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          // Strict filter: purge any fake generated entries (e.g. rendaextra_71 or names with #)
-          const cleanReal = parsed.filter(
-            (g: any) => !g.url.includes('rendaextra_') && !g.url.includes('curitibanegocios') && !g.name.includes('#')
-          );
+          // Strict filter: purge any fake generated entries & strip dirty Chrome profile picture prefixes
+          const cleanReal = parsed
+            .filter((g: any) => !g.url.includes('rendaextra_') && !g.url.includes('curitibanegocios') && !g.name.includes('#'))
+            .map((g: any) => ({
+              ...g,
+              name: sanitizeFbGroupName(g.name || '') || g.name
+            }));
           if (cleanReal.length > 0) {
             ALL_INITIAL_FACEBOOK_GROUPS.forEach(initG => {
               if (!cleanReal.some((m: any) => m.id === initG.id || m.name === initG.name || m.url === initG.url)) {
@@ -1452,19 +1466,20 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
     const handleExtensionGroups = (event: any) => {
       if (event.detail) {
         setIsExtensionDetected(true);
-        if (Array.isArray(event.detail.groups)) {
+        if (Array.isArray(event.detail.groups) && event.detail.groups.length > 0) {
           const imported: FacebookGroup[] = event.detail.groups;
-          const detectedFolder = event.detail.searchFolder || 'psicopedagogia';
+          const detectedFolder = event.detail.searchFolder || imported[0]?.searchFolder || 'psicopedagogia';
           const enriched = imported.map(g => ({
             ...g,
+            name: sanitizeFbGroupName(g.name || '') || g.name,
             searchFolder: g.searchFolder || detectedFolder,
-            searchTerm: g.searchTerm || event.detail.searchQuery || 'pedagoga'
+            searchTerm: g.searchTerm || event.detail.searchQuery || detectedFolder
           }));
 
           setMappedGroups(prev => {
             const merged = [...enriched, ...prev];
             const unique = merged.filter((g, index, self) =>
-              index === self.findIndex(t => t.name === g.name || t.url === g.url)
+              index === self.findIndex(t => t.url === g.url || t.name === g.name)
             );
             try {
               localStorage.setItem('autoviral_fb_mapped_groups_v5_real', JSON.stringify(unique));
@@ -1472,8 +1487,15 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
             return unique;
           });
 
+          const importedIds = enriched.map(g => g.id);
+          setLastImportedGroupIds(importedIds);
           setActiveSearchFolder(detectedFolder);
-          setSelectedGroupIds(enriched.map(g => g.id));
+          setSearchQuery('');
+          setSelectedGroupIds(importedIds);
+          setExtensionSyncBanner({
+            message: `🎉 ${enriched.length} grupos recebidos da extensão Chrome na pasta "${detectedFolder}" e já selecionados para você!`,
+            tone: 'success'
+          });
         }
         if (Array.isArray(event.detail.instaStories) && event.detail.instaStories.length > 0) {
           setInstagramStoryQueue(event.detail.instaStories);
@@ -1492,27 +1514,34 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
         if (ev.data && ev.data.action === 'AUTOVIRAL_IMPORT_GROUPS_FROM_EXTENSION') {
           setIsExtensionDetected(true);
           const imported = ev.data.groups;
-          const detectedFolder = ev.data.searchFolder || 'psicopedagogia';
+          const detectedFolder = ev.data.searchFolder || (Array.isArray(imported) && imported[0]?.searchFolder) || 'psicopedagogia';
           if (Array.isArray(imported) && imported.length > 0) {
             const enriched = imported.map((g: any) => ({
               ...g,
+              name: sanitizeFbGroupName(g.name || '') || g.name,
               searchFolder: g.searchFolder || detectedFolder,
-              searchTerm: g.searchTerm || ev.data.searchQuery || 'pedagoga'
+              searchTerm: g.searchTerm || ev.data.searchQuery || detectedFolder
             }));
 
             setMappedGroups(prev => {
               const merged = [...enriched, ...prev];
               const unique = merged.filter((g, index, self) =>
-                index === self.findIndex(t => t.name === g.name || t.url === g.url)
+                index === self.findIndex(t => t.url === g.url || t.name === g.name)
               );
               try {
                 localStorage.setItem('autoviral_fb_mapped_groups_v5_real', JSON.stringify(unique));
               } catch {}
               return unique;
             });
+            const importedIds = enriched.map((g: any) => g.id);
+            setLastImportedGroupIds(importedIds);
             setActiveSearchFolder(detectedFolder);
-            setSelectedGroupIds(enriched.map(g => g.id));
-            alert(`🎉 ${imported.length} grupos mapeados da pasta "${detectedFolder}" foram sincronizados com sucesso direto da sua aba do Facebook!`);
+            setSearchQuery('');
+            setSelectedGroupIds(importedIds);
+            setExtensionSyncBanner({
+              message: `🎉 ${imported.length} grupos mapeados da pasta "${detectedFolder}" foram sincronizados direto do seu Facebook e já estão selecionados!`,
+              tone: 'success'
+            });
           }
         }
       };
@@ -1651,6 +1680,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
     }
     if (folder === 'renda_extra') {
       return mappedGroups.filter(g =>
+        g.searchFolder === 'renda_extra' ||
         g.searchTerm === 'renda extra' ||
         g.niche.includes('Renda') ||
         g.name.toLowerCase().includes('renda') ||
@@ -1662,13 +1692,23 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       );
     }
     if (folder === 'curitiba') {
-      return mappedGroups.filter(g => (g.city === 'Curitiba' || g.searchTerm === 'curitiba' || g.name.toLowerCase().includes('curitiba')));
+      return mappedGroups.filter(g => (g.searchFolder === 'curitiba' || g.city === 'Curitiba' || g.searchTerm === 'curitiba' || g.name.toLowerCase().includes('curitiba')));
     }
     if (folder === 'autismo') {
-      return mappedGroups.filter(g => (g.searchTerm === 'autismo' || g.niche.includes('Autismo') || g.name.toLowerCase().includes('autista') || g.name.toLowerCase().includes('tea')));
+      return mappedGroups.filter(g => (g.searchFolder === 'autismo' || g.searchTerm === 'autismo' || g.niche.includes('Autismo') || g.name.toLowerCase().includes('autista') || g.name.toLowerCase().includes('tea')));
     }
-    return mappedGroups.filter(g => g.searchTerm === folder || g.searchFolder === folder || g.niche === folder);
+    return mappedGroups.filter(g => g.searchFolder === folder || g.searchTerm === folder || g.niche === folder);
   };
+
+  // Dynamic custom search folders created by user's Chrome searches (e.g. "geral", "confeitaria", etc.)
+  const BUILTIN_FOLDER_KEYS = new Set(['psicopedagogia', 'pedagogia', 'pedagoga', 'renda_extra', 'curitiba', 'autismo', 'all']);
+  const dynamicCustomFolders = Array.from(
+    new Set(
+      mappedGroups
+        .map(g => (g.searchFolder || '').trim())
+        .filter(f => f.length > 0 && !BUILTIN_FOLDER_KEYS.has(f))
+    )
+  );
 
   const folderGroups = getGroupsByFolder(activeSearchFolder);
 
@@ -2034,19 +2074,24 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       zip.file('README.md', readmeText);
       zip.file(
         'COMO-INSTALAR.txt',
-        `INSTRUÇÕES DE INSTALAÇÃO NO GOOGLE CHROME:\n\n1. Descompacte este arquivo ZIP.\n2. No Chrome, abra chrome://extensions\n3. Ative a chave "Modo do desenvolvedor" (topo direito).\n4. Clique em "Carregar sem compactação" (topo esquerdo) e escolha a pasta descompactada.\n5. Abra o Facebook, YouTube e Pinterest: o robô mapeia e automatiza postagens com intervalo seguro anti-bloqueio!`
+        `INSTRUÇÕES DE INSTALAÇÃO NO GOOGLE CHROME (AutoViral AI v1.3.2):\n\n1. Extraia este arquivo ZIP em uma pasta nova.\n2. No Chrome, abra chrome://extensions e REMOVA extensões AutoViral antigas (deixe APENAS UMA v1.3.2).\n3. Ative a chave "Modo do desenvolvedor" (topo direito).\n4. Clique em "Carregar sem compactação" (topo esquerdo) e escolha a pasta extraída.\n5. Abra o Facebook (grupos), role a busca, clique em "Mapear Grupos" e depois em "Enviar para o Painel".`
       );
 
       const blob = await zip.generateAsync({ type: 'blob' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = 'extensao-autoviral-facebook-youtube-pinterest.zip';
+      link.download = 'extensao-autoviral-v1.3.2.zip';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
     } catch (err) {
       console.error('Error generating extension zip:', err);
-      window.open('/chrome-extension/manifest.json', '_blank');
+      const fallbackLink = document.createElement('a');
+      fallbackLink.href = '/api/extension/download';
+      fallbackLink.download = 'extensao-autoviral-v1.3.2.zip';
+      document.body.appendChild(fallbackLink);
+      fallbackLink.click();
+      document.body.removeChild(fallbackLink);
     } finally {
       setIsZipping(false);
     }
@@ -2303,6 +2348,90 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       {/* SUBTAB 1: MAPPED GROUPS ORGANIZED BY SEARCH TERM */}
       {activeSubTab === 'groups' && (
         <div className="space-y-6">
+          {/* INLINE EXTENSION SYNC FEEDBACK BANNER */}
+          {extensionSyncBanner && (
+            <div
+              className={`rounded-2xl p-4 border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                extensionSyncBanner.tone === 'success'
+                  ? 'bg-emerald-950/60 border-emerald-500/60 text-emerald-100'
+                  : 'bg-amber-950/60 border-amber-500/60 text-amber-100'
+              }`}
+            >
+              <div className="text-xs font-bold leading-relaxed">{extensionSyncBanner.message}</div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setActiveSubTab('campaign')}
+                  className="px-3.5 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs rounded-xl transition cursor-pointer"
+                >
+                  🚀 Ir para Disparo ({selectedGroupIds.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setExtensionSyncBanner(null)}
+                  className="px-2.5 py-2 bg-slate-900/80 hover:bg-slate-800 text-slate-300 text-xs font-bold rounded-xl border border-slate-700 cursor-pointer"
+                >
+                  Fechar
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* SIMPLE 4-STEP COMPASS GUIDE SO USER NEVER GETS LOST */}
+          <div className="bg-slate-900/95 border border-emerald-500/35 rounded-2xl p-4 sm:p-5 space-y-3 shadow-lg">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm sm:text-base font-black text-white flex items-center gap-2">
+                  <span>🗺️ Passo a Passo Simples: Onde Estão Seus Grupos e Como Divulgar</span>
+                </h2>
+                <p className="text-xs text-slate-300 mt-0.5">
+                  Dica importante: deixe apenas <strong>1 extensão AutoViral (v1.3.2)</strong> ativa no Chrome e use sempre este painel oficial (feche o site antigo <code className="text-amber-300">vercel.app</code> se estiver aberto).
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {lastImportedGroupIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveSearchFolder('all');
+                      setSearchQuery('');
+                      setSelectedGroupIds(lastImportedGroupIds);
+                    }}
+                    className="px-3 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition cursor-pointer"
+                  >
+                    ✨ Ver {lastImportedGroupIds.length} Recém-Recebidos
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setActiveSubTab('campaign')}
+                  className="px-3.5 py-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 text-xs font-black rounded-xl shadow transition cursor-pointer"
+                >
+                  🚀 Ir para Aba 3: Disparo ({selectedGroupIds.length} grupos)
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs">
+              <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3">
+                <div className="font-black text-blue-300 mb-1">1. Busque no Facebook</div>
+                <p className="text-[11px] text-slate-400 leading-relaxed">Pesquise grupos no Facebook (ex: pedagogia, renda extra) e role a lista para carregar os cards.</p>
+              </div>
+              <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3">
+                <div className="font-black text-emerald-300 mb-1">2. Mapeie &amp; Envie (v1.3.2)</div>
+                <p className="text-[11px] text-slate-400 leading-relaxed">Clique em <strong>Mapear Grupos</strong> e depois em <strong>Enviar Grupos para o Painel</strong> na extensão.</p>
+              </div>
+              <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3">
+                <div className="font-black text-purple-300 mb-1">3. Ache na Pasta ou "Todos"</div>
+                <p className="text-[11px] text-slate-400 leading-relaxed">Cada assunto vira um botão em <strong>Buscas do Facebook</strong> abaixo. Ou clique em <strong>Todos os Grupos ({mappedGroups.length})</strong>.</p>
+              </div>
+              <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3">
+                <div className="font-black text-amber-300 mb-1">4. Escolha Qtd &amp; Dispare</div>
+                <p className="text-[11px] text-slate-400 leading-relaxed">Escolha quantos grupos quer (ex: 30 ou 50), clique em <strong>Ir para Aba 3</strong>, revise sua Copy salva e inicie!</p>
+              </div>
+            </div>
+          </div>
+
           {/* TOP AUDIT & REAL VERIFIED GROUPS BANNER (Addressing user concern: "não quero simulação, quero números reais") */}
           <div className="bg-gradient-to-r from-slate-900 via-slate-900 to-indigo-950/70 border border-indigo-500/30 rounded-2xl p-5 space-y-4">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -2470,9 +2599,32 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                   {mappedGroups.length} grupos
                 </span>
               </button>
+
+              {dynamicCustomFolders.map(customFolder => (
+                <button
+                  key={customFolder}
+                  onClick={() => {
+                    setActiveSearchFolder(customFolder);
+                    const cGroups = getGroupsByFolder(customFolder);
+                    if (cGroups.length > 0) {
+                      setSelectedGroupIds(cGroups.map(g => g.id));
+                    }
+                  }}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                    activeSearchFolder === customFolder
+                      ? 'bg-cyan-600 text-white shadow-md shadow-cyan-900/40 font-black'
+                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border border-cyan-800/40'
+                  }`}
+                >
+                  <span>📂 Busca: "{customFolder.replace(/_/g, ' ')}"</span>
+                  <span className="bg-cyan-950 px-2 py-0.5 rounded-full text-[10px] text-cyan-200 font-extrabold border border-cyan-700">
+                    {getGroupsByFolder(customFolder).length} grupos
+                  </span>
+                </button>
+              ))}
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <button
                 onClick={handleSelectAllFolder}
                 className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl border border-slate-700 transition cursor-pointer"
@@ -2483,7 +2635,10 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
               <button
                 onClick={() => {
                   if (selectedGroupIds.length === 0) {
-                    alert('Selecione os grupos na lista abaixo com o checkbox para criar o público.');
+                    setExtensionSyncBanner({
+                      message: 'Selecione ao menos 1 grupo na lista abaixo (ou clique em "10 grupos" / "30 grupos") para criar um Público Salvo.',
+                      tone: 'warning'
+                    });
                     return;
                   }
                   setIsAudienceModalOpen(true);
@@ -2571,24 +2726,44 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
           </div>
 
           {/* Quick Search in Current Folder */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 text-xs">
+          <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 text-xs">
             <div className="relative flex-1 sm:w-72">
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Filtrar grupos por nome..."
-                className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                placeholder="Buscar grupo pelo nome ou assunto (ex: atividades, renda, curitiba)..."
+                className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-8 pr-20 py-2.5 text-xs text-slate-200 placeholder-slate-400 focus:outline-none focus:border-blue-500"
               />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] font-bold text-slate-400 hover:text-white cursor-pointer"
+                >
+                  Limpar
+                </button>
+              )}
             </div>
 
-            <div className="bg-slate-900/90 border border-slate-800 px-3 py-1.5 rounded-xl text-slate-300 flex items-center gap-2">
-              <span>Pasta Atual: <strong className="text-white capitalize">{activeSearchFolder}</strong> ({folderGroups.length} grupos)</span>
-              <span>•</span>
-              <span>Selecionados: <strong className="text-emerald-400">{selectedGroupIds.length}</strong></span>
-              <span>•</span>
-              <span>Alcance: <strong className="text-emerald-400">{selectedGroupsTotalMembers.toLocaleString('pt-BR')} pessoas</strong></span>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="bg-slate-900/90 border border-slate-800 px-3 py-2 rounded-xl text-slate-300 flex items-center gap-2 flex-wrap">
+                <span>Pasta: <strong className="text-white capitalize">{activeSearchFolder.replace(/_/g, ' ')}</strong> ({folderGroups.length})</span>
+                <span>•</span>
+                <span>Selecionados: <strong className="text-emerald-400">{selectedGroupIds.length}</strong></span>
+                <span>•</span>
+                <span>Alcance: <strong className="text-emerald-400">{selectedGroupsTotalMembers.toLocaleString('pt-BR')}</strong></span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setActiveSubTab('campaign')}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-xs flex items-center gap-1.5 shadow-md cursor-pointer"
+              >
+                <Zap className="w-3.5 h-3.5" />
+                Disparar nos {selectedGroupIds.length} Selecionados
+              </button>
             </div>
           </div>
 

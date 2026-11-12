@@ -51,4 +51,36 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
     return true;
   }
+
+  // Relay Instagram mapped accounts or connected handle to AutoViral platform tabs
+  if (
+    request.action === 'AUTOVIRAL_IMPORT_INSTAGRAM_ACCOUNTS' ||
+    request.action === 'AUTOVIRAL_INSTA_ACCOUNT_SYNC'
+  ) {
+    if (request.action === 'AUTOVIRAL_IMPORT_INSTAGRAM_ACCOUNTS' && Array.isArray(request.accounts)) {
+      chrome.storage.local.set({ autoviral_insta_accounts: request.accounts });
+    }
+    if (request.handle) {
+      chrome.storage.local.set({ autoviral_insta_connected_handle: request.handle });
+    }
+    chrome.tabs.query({}, (tabs) => {
+      tabs.forEach(tab => {
+        const url = tab.url || '';
+        const title = tab.title || '';
+        if (
+          url.includes('ais-') ||
+          url.includes('localhost') ||
+          url.includes('run.app') ||
+          url.includes('vercel.app') ||
+          title.includes('AutoViral')
+        ) {
+          chrome.tabs.sendMessage(tab.id, request, () => {
+            void chrome.runtime.lastError;
+          });
+        }
+      });
+      sendResponse({ success: true });
+    });
+    return true;
+  }
 });

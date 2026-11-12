@@ -4,6 +4,7 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import fs from 'fs';
+import JSZip from 'jszip';
 
 dotenv.config();
 
@@ -2352,6 +2353,42 @@ app.post('/api/whatsapp/send-campaign', (req, res) => {
     message: `🟢 WhatsApp pronto para disparo em lote! Mensagens formatadas com imagem e botão direto do checkout da Kiwify.`,
   });
 });
+app.get('/api/extension/download', async (req, res) => {
+  try {
+    const candidates = [
+      path.resolve(process.cwd(), 'public', 'chrome-extension'),
+      path.resolve(process.cwd(), 'dist', 'chrome-extension'),
+    ];
+    const extDir = candidates.find((d) => fs.existsSync(d));
+    if (!extDir) {
+      return res.status(404).json({ error: 'Pasta da extensão não encontrada no servidor' });
+    }
+
+    const zip = new JSZip();
+    const files = ['manifest.json', 'popup.html', 'popup.js', 'content.js', 'background.js', 'README.md'];
+    for (const fileName of files) {
+      const fullPath = path.join(extDir, fileName);
+      if (fs.existsSync(fullPath)) {
+        zip.file(fileName, fs.readFileSync(fullPath, 'utf-8'));
+      }
+    }
+
+    zip.file(
+      'COMO-INSTALAR.txt',
+      `INSTRUÇÕES DE INSTALAÇÃO NO GOOGLE CHROME (AutoViral AI v1.3.2):\n\n1. Extraia este arquivo ZIP em uma pasta nova no seu computador.\n2. No Chrome, acesse chrome://extensions e REMOVA extensões AutoViral antigas (deixe APENAS UMA v1.3.2 para não dar conflito!).\n3. Ative a chave "Modo do desenvolvedor" (canto superior direito).\n4. Clique em "Carregar sem compactação" e selecione a pasta extraída.\n5. Abra o Facebook (pesquisa de grupos), role para carregar os cards, clique em "Mapear Grupos" e depois em "Enviar para o Painel".\n6. Use sempre o painel atual (.run.app) e NÃO o site antigo vercel.app.`
+    );
+
+    const buffer = await zip.generateAsync({ type: 'nodebuffer' });
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', 'attachment; filename="extensao-autoviral-v1.3.2.zip"');
+    res.setHeader('Cache-Control', 'no-store');
+    return res.send(buffer);
+  } catch (err: any) {
+    console.error('Error generating extension zip on server:', err);
+    return res.status(500).json({ error: 'Falha ao gerar arquivo ZIP da extensão' });
+  }
+});
+
 app.get('/api/health', (req, res) => {
   const ai = getGeminiClient();
   res.json({

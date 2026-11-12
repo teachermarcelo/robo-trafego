@@ -49,8 +49,9 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const tabs = [
     { id: 'dashboard', label: 'Dashboard & Métricas', icon: TrendingUp },
-    { id: 'chrome_fb_groups', label: 'Extensão Chrome • FB, YT, Pinterest & Insta', icon: Share2, badge: '🔥 Multi-Canais & Anti-Ban' },
-    { id: 'robo_cidades', label: '🤖 Robô Divulgador & Cidades', icon: Bot, badge: 'Destravar 1ª Venda' },
+    { id: 'chrome_fb_groups', label: '🤖 Grupos no Chrome • Disparos & Campanhas', icon: Share2, badge: '🔥 Disparar FB & Stories' },
+    { id: 'campaigns', label: 'Minhas Campanhas', icon: DollarSign },
+    { id: 'robo_cidades', label: 'Robô Divulgador & Cidades', icon: Bot, badge: 'Destravar 1ª Venda' },
     { id: 'brevo_disparador', label: 'Disparador E-mail & WhatsApp', icon: Mail, badge: 'Brevo 579 Contatos' },
     { id: 'meta_ads', label: 'Alavanca Meta Ads', icon: Zap, badge: '🚀 10x Vendas' },
     { id: 'landing_builder', label: 'Criar / Editar Landing Page', icon: LayoutTemplate, badge: 'Editar R$' },
@@ -59,7 +60,6 @@ export const Header: React.FC<HeaderProps> = ({
     { id: 'creatives', label: 'Estúdio de Criativos IA', icon: Flame, badge: 'Viral' },
     { id: 'sales_bot', label: 'Robô de Vendas 24/7', icon: Radio },
     { id: 'tracking', label: 'Radar de Rastreio', icon: Radio, pulse: true },
-    { id: 'campaigns', label: 'Minhas Campanhas', icon: DollarSign },
     { id: 'reports', label: 'Relatórios IA', icon: TrendingUp },
     { id: 'security', label: 'Segurança & 2FA', icon: ShieldCheck },
   ];
@@ -78,18 +78,18 @@ export const Header: React.FC<HeaderProps> = ({
           </span>
           <span className="text-slate-400 hidden sm:inline">|</span>
           <span className="text-slate-300 hidden sm:inline">
-            Sem custo de anúncios na Meta • Alcance natural no TikTok, Pinterest & Instagram
+            Sem custo de anúncios na Meta • Alcance natural no Facebook, Instagram &amp; Stories
           </span>
         </div>
 
         <div className="flex items-center gap-4">
           <button
             onClick={() => setActiveTab('chrome_fb_groups')}
-            className="hidden sm:flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-blue-950/80 border border-blue-700/60 text-blue-300 hover:text-white hover:border-blue-500 transition cursor-pointer"
-            title="Ver Robô de Grupos do Facebook, YouTube & Pinterest"
+            className="flex items-center gap-1.5 text-xs px-3 py-1 rounded-full bg-gradient-to-r from-emerald-600 to-teal-600 border border-emerald-400/80 text-white font-extrabold shadow-lg shadow-emerald-950/50 hover:brightness-110 transition cursor-pointer"
+            title="Ir direto para a aba de Fazer Disparos nos 163 Grupos e Stories"
           >
-            <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block animate-pulse" />
-            <span className="font-semibold">Robô FB, YT, PIN &amp; Insta Ativo</span>
+            <span className="w-2 h-2 rounded-full bg-white inline-block animate-ping" />
+            <span>🚀 Fazer Disparos &amp; Campanhas (163 Grupos)</span>
           </button>
 
           <div className="flex items-center gap-1.5 text-emerald-400 font-medium bg-emerald-950/60 px-2.5 py-1 rounded-full border border-emerald-800/40">

@@ -151,6 +151,7 @@ export interface FacebookGroup {
   categoryBadge?: string;
   city?: string;
   searchTerm?: string;
+  searchFolder?: string;
   postsPerDay?: string;
   isVerifiedReal?: boolean;
   validationStatus?: 'verified' | 'pending' | 'needs_update';

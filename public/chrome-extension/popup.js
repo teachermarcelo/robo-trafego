@@ -327,12 +327,22 @@ document.addEventListener('DOMContentLoaded', () => {
     btnSync.textContent = '⏳ Sincronizando...';
     btnSync.disabled = true;
 
+    // Tag any untagged groups with searchFolder and searchTerm
+    const enrichedGroups = currentMappedGroups.map(g => ({
+      ...g,
+      searchFolder: g.searchFolder || 'psicopedagogia',
+      searchTerm: g.searchTerm || 'psicopedagogia'
+    }));
+    currentMappedGroups = enrichedGroups;
+
     // Send via BroadcastChannel (direct inter-tab sync)
     try {
       const bc = new BroadcastChannel('autoviral_bridge_channel');
       bc.postMessage({
         action: 'AUTOVIRAL_IMPORT_GROUPS_FROM_EXTENSION',
-        groups: currentMappedGroups,
+        groups: enrichedGroups,
+        searchFolder: 'psicopedagogia',
+        searchQuery: 'pedagoga',
         ytVideos: currentYtVideos,
         pinBoards: currentPinBoards,
         instaStories: currentInstaStories,
@@ -362,7 +372,9 @@ document.addEventListener('DOMContentLoaded', () => {
           platformTabFound = true;
           chrome.tabs.sendMessage(tab.id, {
             action: 'AUTOVIRAL_IMPORT_GROUPS_FROM_EXTENSION',
-            groups: currentMappedGroups,
+            groups: enrichedGroups,
+            searchFolder: 'psicopedagogia',
+            searchQuery: 'pedagoga',
             ytVideos: currentYtVideos,
             pinBoards: currentPinBoards,
             instaStories: currentInstaStories,
@@ -382,9 +394,9 @@ document.addEventListener('DOMContentLoaded', () => {
         btnSync.textContent = '📡 Enviar Grupos Mapeados para o Painel AutoViral';
         btnSync.disabled = false;
         if (platformTabFound) {
-          alert(`✅ Sucesso! Dados mapeados separados (FB: ${currentMappedGroups.length}, YT: ${currentYtVideos.length}, PIN: ${currentPinBoards.length}, INSTA: ${currentInstaStories.length}) foram sincronizados com a plataforma AutoViral AI.`);
+          alert(`✅ Sucesso! ${enrichedGroups.length} grupos mapeados da pasta "Psicopedagogia & Educação" (FB: ${enrichedGroups.length}, YT: ${currentYtVideos.length}, PIN: ${currentPinBoards.length}, INSTA: ${currentInstaStories.length}) foram sincronizados com a plataforma AutoViral AI.`);
         } else {
-          alert('ℹ️ Abra a aba da plataforma AutoViral AI no seu navegador para ver os dados sincronizados.');
+          alert(`✅ Sucesso! ${enrichedGroups.length} grupos mapeados da pasta "Psicopedagogia" foram enviados. Abra a aba do AutoViral AI para visualizar!`);
         }
       }, 500);
     });

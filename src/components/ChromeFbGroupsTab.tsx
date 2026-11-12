@@ -43,7 +43,9 @@ import {
   Palette,
   Edit2,
   Link2,
-  Sliders
+  Sliders,
+  Flame,
+  Radio
 } from 'lucide-react';
 import JSZip from 'jszip';
 import { PWAInstallModal } from './PWAInstallModal';
@@ -319,10 +321,18 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
   const availableCampaigns = managedCampaigns;
 
   // Subtabs: groups | audiences | campaign | youtube | pinterest | instagram | layout_studio | extension_guide | tracked_links
-  const [activeSubTab, setActiveSubTab] = useState<'groups' | 'audiences' | 'campaign' | 'youtube' | 'pinterest' | 'instagram' | 'layout_studio' | 'extension_guide' | 'tracked_links'>('groups');
+  const [activeSubTab, setActiveSubTab] = useState<'groups' | 'audiences' | 'campaign' | 'youtube' | 'pinterest' | 'instagram' | 'layout_studio' | 'extension_guide' | 'tracked_links'>(() => {
+    try {
+      const saved = localStorage.getItem('autoviral_active_subtab_groups');
+      if (saved && ['groups', 'audiences', 'campaign', 'youtube', 'pinterest', 'instagram', 'layout_studio', 'extension_guide', 'tracked_links'].includes(saved)) {
+        return saved as any;
+      }
+    } catch {}
+    return 'groups';
+  });
 
-  // Search folder filter: 'renda_extra' | 'curitiba' | 'pedagogia' | 'autismo' | 'all'
-  const [activeSearchFolder, setActiveSearchFolder] = useState<'renda_extra' | 'curitiba' | 'pedagogia' | 'autismo' | 'all'>('renda_extra');
+  // Search folder filter: 'psicopedagogia' | 'renda_extra' | 'curitiba' | 'autismo' | 'all' | string
+  const [activeSearchFolder, setActiveSearchFolder] = useState<string>('psicopedagogia');
 
   // All Mapped Groups State (Unlimited, persists in localStorage, auto-merges with real search data)
   const [mappedGroups, setMappedGroups] = useState<FacebookGroup[]>(() => {
@@ -333,11 +343,11 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
         if (Array.isArray(parsed) && parsed.length > 0) {
           // Strict filter: purge any fake generated entries (e.g. rendaextra_71 or names with #)
           const cleanReal = parsed.filter(
-            g => !g.url.includes('rendaextra_') && !g.url.includes('curitibanegocios') && !g.name.includes('#')
+            (g: any) => !g.url.includes('rendaextra_') && !g.url.includes('curitibanegocios') && !g.name.includes('#')
           );
           if (cleanReal.length > 0) {
             ALL_INITIAL_FACEBOOK_GROUPS.forEach(initG => {
-              if (!cleanReal.some(m => m.id === initG.id || m.name === initG.name || m.url === initG.url)) {
+              if (!cleanReal.some((m: any) => m.id === initG.id || m.name === initG.name || m.url === initG.url)) {
                 cleanReal.push(initG);
               }
             });
@@ -349,9 +359,9 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
     return ALL_INITIAL_FACEBOOK_GROUPS;
   });
 
-  // Selected Group IDs for audience / campaign
+  // Selected Group IDs for audience / campaign (Defaulting to psicopedagogia groups)
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>(() => {
-    return RENDA_EXTRA_GROUPS.slice(0, 30).map(g => g.id);
+    return PEDAGOGIA_GROUPS.slice(0, 50).map(g => g.id);
   });
   const [searchQuery, setSearchQuery] = useState<string>('');
 
@@ -1146,13 +1156,26 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
         setIsExtensionDetected(true);
         if (Array.isArray(event.detail.groups)) {
           const imported: FacebookGroup[] = event.detail.groups;
+          const detectedFolder = event.detail.searchFolder || 'psicopedagogia';
+          const enriched = imported.map(g => ({
+            ...g,
+            searchFolder: g.searchFolder || detectedFolder,
+            searchTerm: g.searchTerm || event.detail.searchQuery || 'pedagoga'
+          }));
+
           setMappedGroups(prev => {
-            const merged = [...imported, ...prev];
+            const merged = [...enriched, ...prev];
             const unique = merged.filter((g, index, self) =>
               index === self.findIndex(t => t.name === g.name || t.url === g.url)
             );
+            try {
+              localStorage.setItem('autoviral_fb_mapped_groups_v5_real', JSON.stringify(unique));
+            } catch {}
             return unique;
           });
+
+          setActiveSearchFolder(detectedFolder);
+          setSelectedGroupIds(enriched.map(g => g.id));
         }
         if (Array.isArray(event.detail.instaStories) && event.detail.instaStories.length > 0) {
           setInstagramStoryQueue(event.detail.instaStories);
@@ -1171,15 +1194,27 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
         if (ev.data && ev.data.action === 'AUTOVIRAL_IMPORT_GROUPS_FROM_EXTENSION') {
           setIsExtensionDetected(true);
           const imported = ev.data.groups;
+          const detectedFolder = ev.data.searchFolder || 'psicopedagogia';
           if (Array.isArray(imported) && imported.length > 0) {
+            const enriched = imported.map((g: any) => ({
+              ...g,
+              searchFolder: g.searchFolder || detectedFolder,
+              searchTerm: g.searchTerm || ev.data.searchQuery || 'pedagoga'
+            }));
+
             setMappedGroups(prev => {
-              const merged = [...imported, ...prev];
+              const merged = [...enriched, ...prev];
               const unique = merged.filter((g, index, self) =>
                 index === self.findIndex(t => t.name === g.name || t.url === g.url)
               );
+              try {
+                localStorage.setItem('autoviral_fb_mapped_groups_v5_real', JSON.stringify(unique));
+              } catch {}
               return unique;
             });
-            alert(`🎉 ${imported.length} grupos mapeados foram sincronizados com sucesso direto da sua aba do Facebook!`);
+            setActiveSearchFolder(detectedFolder);
+            setSelectedGroupIds(enriched.map(g => g.id));
+            alert(`🎉 ${imported.length} grupos mapeados da pasta "${detectedFolder}" foram sincronizados com sucesso direto da sua aba do Facebook!`);
           }
         }
       };
@@ -1192,6 +1227,7 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
       setSelectedGroupIds([]);
       setInstagramStoryQueue([]);
       try {
+        localStorage.removeItem('autoviral_fb_mapped_groups_v5_real');
         localStorage.removeItem('autoviral_fb_mapped_groups_v4');
         localStorage.removeItem('autoviral_insta_story_queue');
       } catch {}
@@ -1306,7 +1342,26 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
   };
 
   // Filter groups according to active folder search tab
-  const getGroupsByFolder = (folder: 'renda_extra' | 'curitiba' | 'pedagogia' | 'autismo' | 'all') => {
+  const getGroupsByFolder = (folder: string) => {
+    if (folder === 'all') return mappedGroups;
+
+    if (folder === 'psicopedagogia' || folder === 'pedagogia' || folder === 'pedagoga') {
+      return mappedGroups.filter(g =>
+        g.searchFolder === 'psicopedagogia' ||
+        g.searchTerm === 'psicopedagogia' ||
+        g.searchTerm === 'pedagogia' ||
+        g.niche.includes('Pedagogia') ||
+        g.niche.includes('Psicopedagogia') ||
+        g.name.toLowerCase().includes('pedagog') ||
+        g.name.toLowerCase().includes('profess') ||
+        g.name.toLowerCase().includes('atividades') ||
+        g.name.toLowerCase().includes('escolar') ||
+        g.name.toLowerCase().includes('psico') ||
+        g.name.toLowerCase().includes('lúdico') ||
+        g.name.toLowerCase().includes('ludic') ||
+        g.name.toLowerCase().includes('infantil')
+      );
+    }
     if (folder === 'renda_extra') {
       return mappedGroups.filter(g =>
         g.searchTerm === 'renda extra' ||
@@ -1322,13 +1377,10 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
     if (folder === 'curitiba') {
       return mappedGroups.filter(g => (g.city === 'Curitiba' || g.searchTerm === 'curitiba' || g.name.toLowerCase().includes('curitiba')));
     }
-    if (folder === 'pedagogia') {
-      return mappedGroups.filter(g => (g.searchTerm === 'pedagogia' || g.niche.includes('Pedagogia') || g.name.toLowerCase().includes('pedagog')));
-    }
     if (folder === 'autismo') {
       return mappedGroups.filter(g => (g.searchTerm === 'autismo' || g.niche.includes('Autismo') || g.name.toLowerCase().includes('autista') || g.name.toLowerCase().includes('tea')));
     }
-    return mappedGroups;
+    return mappedGroups.filter(g => g.searchTerm === folder || g.searchFolder === folder || g.niche === folder);
   };
 
   const folderGroups = getGroupsByFolder(activeSearchFolder);
@@ -1873,14 +1925,17 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
           onClick={() => setActiveSubTab('campaign')}
           className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition relative cursor-pointer ${
             activeSubTab === 'campaign'
-              ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/30'
-              : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
+              ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-lg shadow-emerald-900/40 ring-2 ring-emerald-400'
+              : 'bg-slate-900 text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-800'
           }`}
         >
           <Bot className="w-4 h-4 text-emerald-300" />
-          3. Robô &amp; Logística de Postagens
+          <span>3. 🚀 DISPAROS &amp; CAMPANHAS NO ROBÔ (Postar em Grupos &amp; Stories)</span>
+          <span className="bg-emerald-950 text-emerald-300 border border-emerald-700 text-[10px] px-2 py-0.5 rounded-full font-black uppercase">
+            Disparar Aqui
+          </span>
           {isBotRunning && (
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping absolute -top-0.5 -right-0.5" />
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping absolute -top-1 -right-1" />
           )}
         </button>
 
@@ -2033,12 +2088,39 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
                 Buscas do Facebook:
               </span>
 
-              {/* Renda Extra Search Folder (Requested by user: matching image_332f2159.png and image_d92892c2.png) */}
+              {/* Psicopedagogia & Pedagoga Search Folder (163 Grupos Mapeados da Extensão) */}
               <button
-                onClick={() => setActiveSearchFolder('renda_extra')}
+                onClick={() => {
+                  setActiveSearchFolder('psicopedagogia');
+                  const psiGroups = getGroupsByFolder('psicopedagogia');
+                  if (psiGroups.length > 0) {
+                    setSelectedGroupIds(psiGroups.map(g => g.id));
+                  }
+                }}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+                  activeSearchFolder === 'psicopedagogia' || activeSearchFolder === 'pedagogia'
+                    ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg shadow-indigo-950/60 ring-2 ring-indigo-400 font-black'
+                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                }`}
+              >
+                <span>🎓 Busca: "psicopedagogia &amp; pedagoga"</span>
+                <span className="bg-indigo-950 px-2.5 py-0.5 rounded-full text-[11px] text-indigo-200 font-black border border-indigo-500 shadow-sm">
+                  {getGroupsByFolder('psicopedagogia').length} grupos
+                </span>
+              </button>
+
+              {/* Renda Extra Search Folder */}
+              <button
+                onClick={() => {
+                  setActiveSearchFolder('renda_extra');
+                  const rGroups = getGroupsByFolder('renda_extra');
+                  if (rGroups.length > 0) {
+                    setSelectedGroupIds(rGroups.map(g => g.id));
+                  }
+                }}
                 className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
                   activeSearchFolder === 'renda_extra'
-                    ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-900/40'
+                    ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-900/40 font-black'
                     : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                 }`}
               >
@@ -2049,44 +2131,42 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
               </button>
 
               <button
-                onClick={() => setActiveSearchFolder('curitiba')}
+                onClick={() => {
+                  setActiveSearchFolder('curitiba');
+                  const cGroups = getGroupsByFolder('curitiba');
+                  if (cGroups.length > 0) {
+                    setSelectedGroupIds(cGroups.map(g => g.id));
+                  }
+                }}
                 className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
                   activeSearchFolder === 'curitiba'
-                    ? 'bg-blue-600 text-white shadow-md shadow-blue-900/40'
+                    ? 'bg-blue-600 text-white shadow-md shadow-blue-900/40 font-black'
                     : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                 }`}
               >
                 <span>🏙️ Busca: "curitiba"</span>
                 <span className="bg-blue-950 px-2 py-0.5 rounded-full text-[10px] text-blue-200 font-extrabold border border-blue-700">
-                  48 grupos
+                  {getGroupsByFolder('curitiba').length} grupos
                 </span>
               </button>
 
               <button
-                onClick={() => setActiveSearchFolder('pedagogia')}
-                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
-                  activeSearchFolder === 'pedagogia'
-                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-900/40'
-                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                }`}
-              >
-                <span>📚 Busca: "pedagogia"</span>
-                <span className="bg-indigo-950 px-2 py-0.5 rounded-full text-[10px] text-indigo-200 font-extrabold border border-indigo-700">
-                  7 grupos
-                </span>
-              </button>
-
-              <button
-                onClick={() => setActiveSearchFolder('autismo')}
+                onClick={() => {
+                  setActiveSearchFolder('autismo');
+                  const aGroups = getGroupsByFolder('autismo');
+                  if (aGroups.length > 0) {
+                    setSelectedGroupIds(aGroups.map(g => g.id));
+                  }
+                }}
                 className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
                   activeSearchFolder === 'autismo'
-                    ? 'bg-purple-600 text-white shadow-md shadow-purple-900/40'
+                    ? 'bg-purple-600 text-white shadow-md shadow-purple-900/40 font-black'
                     : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                 }`}
               >
                 <span>🧩 Busca: "autismo &amp; TEA"</span>
                 <span className="bg-purple-950 px-2 py-0.5 rounded-full text-[10px] text-purple-200 font-extrabold border border-purple-700">
-                  3 grupos
+                  {getGroupsByFolder('autismo').length} grupos
                 </span>
               </button>
 
@@ -2094,13 +2174,13 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
                 onClick={() => setActiveSearchFolder('all')}
                 className={`px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
                   activeSearchFolder === 'all'
-                    ? 'bg-emerald-600 text-white shadow-md shadow-emerald-900/40'
+                    ? 'bg-emerald-600 text-white shadow-md shadow-emerald-900/40 font-black'
                     : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                 }`}
               >
                 <span>⭐ Todos os Grupos Mapeados</span>
                 <span className="bg-emerald-950 px-2 py-0.5 rounded-full text-[10px] text-emerald-200 font-extrabold border border-emerald-700">
-                  {mappedGroups.length}
+                  {mappedGroups.length} grupos
                 </span>
               </button>
             </div>
@@ -2595,6 +2675,155 @@ Espero que ajude outras pessoas como me ajudou! ❤️`
               setIsDefenseModalOpen(true);
             }}
           />
+
+          {/* PASSO A PASSO STORIES REAIS FACEBOOK & INSTAGRAM (Requested by user: "stories passo a passo para que eu possa fazer o teste sem simulação") */}
+          <div className="bg-gradient-to-br from-slate-900 via-indigo-950/40 to-slate-900 border-2 border-indigo-500/40 rounded-3xl p-6 sm:p-7 shadow-2xl space-y-6">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-indigo-900/40 pb-5">
+              <div className="space-y-1">
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gradient-to-r from-rose-600 to-indigo-600 text-white text-xs font-black shadow-md">
+                  <Flame className="w-3.5 h-3.5" />
+                  PRODUTO REAL • ZERO SIMULAÇÃO
+                </div>
+                <h3 className="text-lg sm:text-xl font-black text-white flex items-center gap-2.5">
+                  <span>📖 Passo a Passo: Publicar Stories Reais com Foto &amp; Link Oficial no Facebook &amp; Instagram</span>
+                </h3>
+                <p className="text-xs text-slate-300 max-w-3xl leading-relaxed">
+                  Siga estas 5 etapas exatas para colocar seu Story no ar agora mesmo usando sua imagem 9:16 profissional e o link real da Kiwify (<strong className="text-emerald-400">R$ 9,90 no Pix</strong>). Todos os cliques e vendas caem direto na sua conta bancária!
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-950/90 border border-emerald-800/80 px-3 py-1.5 rounded-xl flex items-center gap-1.5 shadow">
+                  <CheckCheck className="w-4 h-4 text-emerald-400" />
+                  Kiwify Oficial Conectado
+                </span>
+              </div>
+            </div>
+
+            {/* 5-Step Visual Pipeline */}
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+              {/* Step 1 */}
+              <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between space-y-3">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="w-7 h-7 rounded-full bg-indigo-600 text-white font-black text-xs flex items-center justify-center">1</span>
+                    <span className="text-[10px] text-indigo-400 font-bold uppercase">Arte 9:16</span>
+                  </div>
+                  <h4 className="text-xs font-bold text-white">Baixar Imagem do Story</h4>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Baixe o criativo vertical 9:16 de alta conversão pronto com o selo de R$ 9,90.
+                  </p>
+                </div>
+
+                <a
+                  href={activeCampaign?.imageUrl || '/assets/aistudio/image_e9e67204.png'}
+                  download="story-autoviral-916.png"
+                  className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[11px] rounded-xl flex items-center justify-center gap-1.5 shadow transition cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Baixar Imagem HD
+                </a>
+              </div>
+
+              {/* Step 2 */}
+              <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between space-y-3">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="w-7 h-7 rounded-full bg-emerald-600 text-white font-black text-xs flex items-center justify-center">2</span>
+                    <span className="text-[10px] text-emerald-400 font-bold uppercase">Link Kiwify</span>
+                  </div>
+                  <h4 className="text-xs font-bold text-white">Copiar Link do Checkout</h4>
+                  <p className="text-[11px] text-slate-400 leading-relaxed font-mono truncate">
+                    {activeCampaign?.checkoutUrl || 'https://pay.kiwify.com.br/HE5xbnp'}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const link = activeCampaign?.checkoutUrl || 'https://pay.kiwify.com.br/HE5xbnp';
+                    navigator.clipboard.writeText(`${link}?utm_source=stories&utm_medium=sticker_link`);
+                    alert('📋 Link oficial do Checkout Kiwify copiado com sucesso com rastreio de Stories!');
+                  }}
+                  className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] rounded-xl flex items-center justify-center gap-1.5 shadow transition cursor-pointer"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  Copiar Link Kiwify
+                </button>
+              </div>
+
+              {/* Step 3 */}
+              <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between space-y-3">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="w-7 h-7 rounded-full bg-blue-600 text-white font-black text-xs flex items-center justify-center">3</span>
+                    <span className="text-[10px] text-blue-400 font-bold uppercase">Facebook</span>
+                  </div>
+                  <h4 className="text-xs font-bold text-white">Criar Story no Facebook</h4>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Abra o Facebook, selecione a imagem 9:16 baixada e adicione a figurinha ou legenda.
+                  </p>
+                </div>
+
+                <a
+                  href="https://www.facebook.com/stories/create"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-[11px] rounded-xl flex items-center justify-center gap-1.5 shadow transition cursor-pointer"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  Abrir FB Stories ↗
+                </a>
+              </div>
+
+              {/* Step 4 */}
+              <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between space-y-3">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="w-7 h-7 rounded-full bg-rose-600 text-white font-black text-xs flex items-center justify-center">4</span>
+                    <span className="text-[10px] text-rose-400 font-bold uppercase">Instagram</span>
+                  </div>
+                  <h4 className="text-xs font-bold text-white">Figurinha "Link" no Insta</h4>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    No Instagram, toque no ícone de figurinha, escolha <strong>"🔗 Link"</strong> e cole o link copiado.
+                  </p>
+                </div>
+
+                <a
+                  href="https://www.instagram.com/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full py-2 bg-gradient-to-r from-rose-600 to-purple-600 hover:from-rose-500 hover:to-purple-500 text-white font-bold text-[11px] rounded-xl flex items-center justify-center gap-1.5 shadow transition cursor-pointer"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  Abrir Instagram ↗
+                </a>
+              </div>
+
+              {/* Step 5 */}
+              <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between space-y-3">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="w-7 h-7 rounded-full bg-amber-600 text-white font-black text-xs flex items-center justify-center">5</span>
+                    <span className="text-[10px] text-amber-400 font-bold uppercase">Cliques &amp; Pix</span>
+                  </div>
+                  <h4 className="text-xs font-bold text-white">Acompanhar Vendas Reais</h4>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Cada clique na figurinha cai no painel oficial da Kiwify e no Radar de Rastreio em tempo real.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => onNavigateTab ? onNavigateTab('tracking') : setActiveSubTab('tracked_links')}
+                  className="w-full py-2 bg-amber-600 hover:bg-amber-500 text-slate-950 font-black text-[11px] rounded-xl flex items-center justify-center gap-1.5 shadow transition cursor-pointer"
+                >
+                  <Radio className="w-3.5 h-3.5" />
+                  Ver Cliques no Radar
+                </button>
+              </div>
+            </div>
+          </div>
 
           {/* Main Campaign & Engine Controls */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">

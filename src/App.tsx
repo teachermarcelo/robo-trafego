@@ -1001,6 +1001,12 @@ export default function App() {
             onPreviewBridge={(c) => setBridgeModalCampaign(c)}
             onDeleteCampaign={handleDeleteCampaign}
             onResetAllMetrics={handleResetToRealMode}
+            onNavigateToDispatches={(camp) => {
+              try {
+                localStorage.setItem('autoviral_selected_product_id', camp.id);
+              } catch {}
+              setActiveTab('chrome_fb_groups');
+            }}
           />
         )}
 

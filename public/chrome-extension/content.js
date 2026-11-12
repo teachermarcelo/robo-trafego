@@ -29,9 +29,25 @@
       });
     }
 
+    // Extract current Facebook search query from URL or input
+    function getFbCurrentSearchQuery() {
+      try {
+        const url = new URL(window.location.href);
+        const q = url.searchParams.get('q');
+        if (q) return decodeURIComponent(q).trim();
+      } catch (e) {}
+      const searchInput = document.querySelector('input[type="search"], input[aria-label*="Pesquisar"], input[placeholder*="Pesquisar"]');
+      if (searchInput && searchInput.value) return searchInput.value.trim();
+      return 'psicopedagogia';
+    }
+
     // Function to parse all group cards currently visible in the DOM
     function scanVisibleGroups() {
       const detected = [];
+      const currentQuery = getFbCurrentSearchQuery();
+      const currentFolder = (currentQuery.toLowerCase().includes('pedagog') || currentQuery.toLowerCase().includes('psico'))
+        ? 'psicopedagogia'
+        : (currentQuery.toLowerCase().includes('renda') ? 'renda_extra' : (currentQuery.toLowerCase().includes('curitiba') ? 'curitiba' : 'psicopedagogia'));
 
       // 1. Check all anchor links that lead to groups
       const links = document.querySelectorAll('a[href*="/groups/"]');
@@ -95,6 +111,8 @@
               postsPerDay: postsPerDay,
               privacy: isPublic ? 'Público' : 'Privado',
               niche: categorizeNiche(nameCandidate),
+              searchTerm: currentQuery || 'psicopedagogia',
+              searchFolder: currentFolder,
               mappedAt: new Date().toLocaleDateString('pt-BR'),
               dispatchCount: 0,
               status: 'ready'
@@ -240,6 +258,10 @@
 
       document.getElementById('autoviral-badge-sync').onclick = () => {
         const count = localMappedGroups.length;
+        const currentQuery = getFbCurrentSearchQuery();
+        const currentFolder = (currentQuery.toLowerCase().includes('pedagog') || currentQuery.toLowerCase().includes('psico'))
+          ? 'psicopedagogia'
+          : (currentQuery.toLowerCase().includes('renda') ? 'renda_extra' : (currentQuery.toLowerCase().includes('curitiba') ? 'curitiba' : 'psicopedagogia'));
 
         // 1. Send via BroadcastChannel (works between tabs in same browser immediately!)
         try {
@@ -247,6 +269,8 @@
           bc.postMessage({
             action: 'AUTOVIRAL_IMPORT_GROUPS_FROM_EXTENSION',
             groups: localMappedGroups,
+            searchFolder: currentFolder,
+            searchQuery: currentQuery,
             timestamp: new Date().toISOString()
           });
         } catch (e) {
@@ -257,6 +281,8 @@
         window.postMessage({
           type: 'AUTOVIRAL_IMPORT_GROUPS_FROM_EXTENSION',
           groups: localMappedGroups,
+          searchFolder: currentFolder,
+          searchQuery: currentQuery,
           timestamp: new Date().toISOString()
         }, '*');
 
@@ -264,12 +290,14 @@
         if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
           chrome.runtime.sendMessage({
             action: 'AUTOVIRAL_SYNC_WITH_PLATFORM',
-            groups: localMappedGroups
+            groups: localMappedGroups,
+            searchFolder: currentFolder,
+            searchQuery: currentQuery
           }, (res) => {
-            alert(`✅ Sucesso! ${count} grupos mapeados foram sincronizados com o Painel AutoViral AI.`);
+            alert(`✅ Sucesso! ${count} grupos mapeados da pasta "${currentQuery || 'Psicopedagogia'}" foram sincronizados com o Painel AutoViral AI.`);
           });
         } else {
-          alert(`✅ ${count} grupos mapeados foram enviados para sincronização via Broadcast!`);
+          alert(`✅ ${count} grupos mapeados da pasta "${currentQuery || 'Psicopedagogia'}" foram enviados para sincronização via Broadcast!`);
         }
       };
     }

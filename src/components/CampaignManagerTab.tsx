@@ -31,6 +31,7 @@ interface CampaignManagerTabProps {
   onPreviewBridge: (campaign: Campaign) => void;
   onDeleteCampaign?: (id: string) => void;
   onResetAllMetrics?: () => void;
+  onNavigateToDispatches?: (campaign: Campaign) => void;
 }
 
 export const CampaignManagerTab: React.FC<CampaignManagerTabProps> = ({
@@ -41,6 +42,7 @@ export const CampaignManagerTab: React.FC<CampaignManagerTabProps> = ({
   onPreviewBridge,
   onDeleteCampaign,
   onResetAllMetrics,
+  onNavigateToDispatches,
 }) => {
   const [isCreating, setIsCreating] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -405,10 +407,26 @@ export const CampaignManagerTab: React.FC<CampaignManagerTabProps> = ({
 
             {/* Actions */}
             <div className="mt-4 pt-4 border-t border-slate-800/80 space-y-2">
+              {/* Direct Dispatches & Groups Action Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  try {
+                    localStorage.setItem('autoviral_selected_product_id', camp.id);
+                  } catch {}
+                  if (onNavigateToDispatches) {
+                    onNavigateToDispatches(camp);
+                  }
+                }}
+                className="w-full py-2.5 bg-gradient-to-r from-emerald-600 via-teal-600 to-indigo-600 hover:from-emerald-500 hover:to-indigo-500 text-white rounded-xl text-xs font-black shadow-lg shadow-emerald-950/40 transition flex items-center justify-center gap-2 cursor-pointer border border-emerald-400/40 hover:scale-[1.01]"
+              >
+                <span>🚀 Fazer Disparos Desta Campanha (163 Grupos &amp; Stories)</span>
+              </button>
+
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => onPreviewBridge(camp)}
-                  className="flex-1 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-semibold shadow transition flex items-center justify-center gap-1.5"
+                  className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold shadow transition flex items-center justify-center gap-1.5"
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
                   <span>Ver Página do Lead</span>

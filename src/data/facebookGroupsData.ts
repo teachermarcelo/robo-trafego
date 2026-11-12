@@ -1,4 +1,5 @@
 import { FacebookGroup, FacebookAudience } from '../types';
+import { PSICOPEDAGOGIA_163_GROUPS } from './psicopedagogiaGroupsData';
 
 // Real groups extracted from user's Facebook search screenshots (image_718af9d3.png & image_adbacc4f.png)
 export const CURITIBA_GROUPS: FacebookGroup[] = [
@@ -306,114 +307,9 @@ export const CURITIBA_GROUPS: FacebookGroup[] = [
   }
 ];
 
-// Groups from the search "pedagogia" (image_25d5ade9.png)
-export const PEDAGOGIA_GROUPS: FacebookGroup[] = [
-  {
-    id: 'fb-grp-pedagogia-1',
-    name: 'Ideias Pedagógicas',
-    url: 'https://facebook.com/groups/ideiaspedagogicasoficial',
-    membersCount: 61000,
-    postsPerDay: '70+ posts por dia',
-    privacy: 'Público',
-    niche: 'Pedagogia & Educação',
-    city: 'Nacional',
-    searchTerm: 'pedagogia',
-    mappedAt: '10/11/2026',
-    dispatchCount: 2,
-    status: 'ready',
-    categoryBadge: '70+ posts/dia'
-  },
-  {
-    id: 'fb-grp-pedagogia-2',
-    name: 'Pedagogia',
-    url: 'https://facebook.com/groups/pedagogiabrasil',
-    membersCount: 9800,
-    postsPerDay: '10+ posts por dia',
-    privacy: 'Público',
-    niche: 'Pedagogia & Educação',
-    city: 'Nacional',
-    searchTerm: 'pedagogia',
-    mappedAt: '10/11/2026',
-    dispatchCount: 1,
-    status: 'ready',
-    categoryBadge: '10+ posts/dia'
-  },
-  {
-    id: 'fb-grp-pedagogia-3',
-    name: 'ESTÁGIO DE PEDAGOGIA',
-    url: 'https://facebook.com/groups/estagiodepedagogia',
-    membersCount: 38000,
-    postsPerDay: '10+ posts por dia',
-    privacy: 'Público',
-    niche: 'Pedagogia & Educação',
-    city: 'Nacional',
-    searchTerm: 'pedagogia',
-    mappedAt: '10/11/2026',
-    dispatchCount: 1,
-    status: 'ready',
-    categoryBadge: '10+ posts/dia'
-  },
-  {
-    id: 'fb-grp-pedagogia-4',
-    name: 'Pedagogia SP - Vagas e Dicas',
-    url: 'https://facebook.com/groups/pedagogiaspvagas',
-    membersCount: 6500,
-    postsPerDay: '7 posts por dia',
-    privacy: 'Público',
-    niche: 'Pedagogia & Educação',
-    city: 'São Paulo',
-    searchTerm: 'pedagogia',
-    mappedAt: '10/11/2026',
-    dispatchCount: 0,
-    status: 'ready',
-    categoryBadge: '7 posts/dia'
-  },
-  {
-    id: 'fb-grp-pedagogia-5',
-    name: 'Psicopedagogia e Psicopedagogos',
-    url: 'https://facebook.com/groups/psicopedagogiaepsicopedagogos',
-    membersCount: 39000,
-    postsPerDay: '20+ posts por dia',
-    privacy: 'Público',
-    niche: 'Coordenação Motora & TEA',
-    city: 'Nacional',
-    searchTerm: 'pedagogia',
-    mappedAt: '10/11/2026',
-    dispatchCount: 1,
-    status: 'ready',
-    categoryBadge: '20+ posts/dia'
-  },
-  {
-    id: 'fb-grp-pedagogia-6',
-    name: 'Alfabetização e Letramento na Prática (Atividades em PDF)',
-    url: 'https://facebook.com/groups/alfabetizacaoeletramentopratica',
-    membersCount: 82500,
-    postsPerDay: '40+ posts por dia',
-    privacy: 'Público',
-    niche: 'Pedagogia & Educação',
-    city: 'Nacional',
-    searchTerm: 'pedagogia',
-    mappedAt: '10/11/2026',
-    dispatchCount: 0,
-    status: 'ready',
-    categoryBadge: 'Alfabetização'
-  },
-  {
-    id: 'fb-grp-pedagogia-7',
-    name: 'Educação Especial Inclusiva & Neurociência Infantil',
-    url: 'https://facebook.com/groups/educacaoespecialneurocienciabr',
-    membersCount: 47200,
-    postsPerDay: '15+ posts por dia',
-    privacy: 'Público',
-    niche: 'Coordenação Motora & TEA',
-    city: 'Nacional',
-    searchTerm: 'pedagogia',
-    mappedAt: '10/11/2026',
-    dispatchCount: 0,
-    status: 'ready',
-    categoryBadge: 'Inclusão'
-  }
-];
+// 163 Grupos Mapeados da busca "pedagoga" e "psicopedagogia" (capturados na extensão pelo usuário)
+export const PEDAGOGIA_GROUPS: FacebookGroup[] = PSICOPEDAGOGIA_163_GROUPS;
+export const PSICOPEDAGOGIA_GROUPS: FacebookGroup[] = PSICOPEDAGOGIA_163_GROUPS;
 
 // Groups in the Autismo & Mães Atípicas niche
 export const AUTISMO_GROUPS: FacebookGroup[] = [
@@ -704,22 +600,22 @@ export const INITIAL_SAVED_AUDIENCES: FacebookAudience[] = [
   },
   {
     id: 'aud-pedagogia-busca',
-    name: 'Público Pedagogia Busca FB (154.300 membros em 7 grupos)',
-    description: 'Público capturado diretamente na rolagem de busca "pedagogia" no Facebook. Educadoras e professoras procurando materiais prontos.',
+    name: 'Público Psicopedagogia & Educação (163 Grupos Mapeados)',
+    description: 'Público capturado via Extensão Chrome na busca "pedagoga" e "psicopedagogia" no Facebook. 163 grupos reais com educadoras, professoras e mães atípicas.',
     groupIds: PEDAGOGIA_GROUPS.map(g => g.id),
-    groupsCount: 7,
-    estimatedMembers: 243500,
-    niche: 'Pedagogia & Educação',
+    groupsCount: 163,
+    estimatedMembers: PEDAGOGIA_GROUPS.reduce((acc, curr) => acc + curr.membersCount, 0),
+    niche: 'Psicopedagogia & Educação',
     targetProductId: 'camp-tarefinhas-autismo',
-    createdAt: '10/11/2026',
-    lastUsedAt: 'Hoje às 14:20',
-    campaignUsageCount: 2,
+    createdAt: '12/11/2026',
+    lastUsedAt: 'Agora mesmo',
+    campaignUsageCount: 6,
     groupNamesPreview: [
-      'Ideias Pedagógicas',
-      'Pedagogia',
-      'ESTÁGIO DE PEDAGOGIA',
-      'Psicopedagogia e Psicopedagogos',
-      'Alfabetização e Letramento'
+      'Vagas para Professores e Pedagogos Brasil',
+      'ATIVIDADES PEDAGÓGICAS - 2º E 3º ANO',
+      'ATIVIDADES PEDAGÓGICAS 4º E 5º ANO S.R.',
+      'atividades escolares e alfabetização lúdica',
+      'Psicopedagogia Clínica e Institucional'
     ]
   },
   {

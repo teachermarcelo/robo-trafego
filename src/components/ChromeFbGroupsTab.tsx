@@ -1595,12 +1595,13 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       ? Math.floor(Math.random() * (400 - 300 + 1)) + 300
       : intervalSeconds;
 
+    const now = new Date();
     const newLog: FacebookPostLog = {
-      id: `log-${Date.now()}`,
+      id: `log-${now.getTime()}`,
       groupId: currentGroup.id,
       groupName: `${currentGroup.name} (${currentGroup.membersCount.toLocaleString('pt-BR')} membros)`,
       groupUrl: currentGroup.url,
-      postedAt: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      postedAt: `${now.toLocaleDateString('pt-BR')} ${now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`,
       headline: postHeadline.slice(0, 55) + '...',
       status: 'success',
       intervalWaitedSeconds: waited,

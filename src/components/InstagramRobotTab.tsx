@@ -37,6 +37,7 @@ import {
 } from 'lucide-react';
 import { Campaign, InstagramStoryItem } from '../types';
 import { SecurityDefenseModal } from './SecurityDefenseModal';
+import { saveWorkspaceSyncToFirebase, subscribeWorkspaceSync } from '../lib/firebase';
 
 export interface InstagramMappedTarget {
   id: string;
@@ -298,16 +299,49 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
   const [targetCategoryFilter, setTargetCategoryFilter] = useState<'all' | 'hashtag' | 'profile_follower' | 'influencer'>('all');
   const [isMappingActive, setIsMappingActive] = useState<boolean>(false);
 
-  // Queue of Stories (Zero fake views/clicks/sales; uses real /api/r link)
+  // Queue of Stories (Merges legacy 'autoviral_insta_story_queue' + '_v2' so ZERO prior stories are ever lost!)
   const [storyQueue, setStoryQueue] = useState<InstagramStoryItem[]>(() => {
-    try {
-      const saved = localStorage.getItem('autoviral_insta_story_queue_v2');
-      if (saved) return JSON.parse(saved);
-    } catch {}
-
     const origin = typeof window !== 'undefined' ? window.location.origin : '';
     const buildTracked = (rawUrl: string, campId: string, title: string) =>
       `${origin}/api/r?to=${encodeURIComponent(rawUrl)}&src=instagram_story&city=Brasil&state=BR&camp=${encodeURIComponent(campId)}&title=${encodeURIComponent(title)}`;
+
+    const combined: InstagramStoryItem[] = [];
+    const seenIds = new Set<string>();
+    const addParsedList = (raw: string | null) => {
+      if (!raw) return;
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((item: any) => {
+            if (!item || !item.id || seenIds.has(item.id)) return;
+            seenIds.add(item.id);
+            const isLegacyHardcodedMock =
+              (item.id === 'story-1' || item.id === 'story-2') &&
+              (item.viewsEstimated === 854 || item.viewsEstimated === 1120 || item.linkClicksEstimated === 109 || item.linkClicksEstimated === 142);
+            combined.push(
+              isLegacyHardcodedMock
+                ? {
+                    ...item,
+                    stickerUrl: item.stickerUrl?.includes('/api/r?')
+                      ? item.stickerUrl
+                      : buildTracked(item.stickerUrl || defaultCampaign.checkoutUrl || 'https://pay.kiwify.com.br/HE5xbnp', item.targetCampaignId || defaultCampaign.id, item.title || defaultCampaign.title),
+                    viewsEstimated: 0,
+                    linkClicksEstimated: 0,
+                    salesEstimated: 0,
+                  }
+                : item
+            );
+          });
+        }
+      } catch {}
+    };
+
+    try {
+      addParsedList(localStorage.getItem('autoviral_insta_story_queue_v2'));
+      addParsedList(localStorage.getItem('autoviral_insta_story_queue'));
+    } catch {}
+
+    if (combined.length > 0) return combined;
 
     return [
       {
@@ -344,23 +378,155 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
   useEffect(() => {
     try {
       localStorage.setItem('autoviral_insta_story_queue_v2', JSON.stringify(storyQueue));
+      localStorage.setItem('autoviral_insta_story_queue', JSON.stringify(storyQueue));
     } catch {}
   }, [storyQueue]);
 
-  // Saved Instagram Campaigns (User requested: "ultima imagme deveria criar ' campanha instagram'")
-  const [instaCampaigns, setInstaCampaigns] = useState<InstagramCampaignItem[]>(() => {
+  // Helper to convert any existing platform Campaign into an InstagramCampaignItem so existing campaigns NEVER vanish
+  const buildFromPlatformCampaign = (camp: Campaign): InstagramCampaignItem => {
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const rawCheckout = (camp.checkoutUrl || 'https://pay.kiwify.com.br/HE5xbnp').trim();
+    const igId = `ig-base-${camp.id}`;
+    return {
+      id: igId,
+      name: camp.title,
+      baseCampaignId: camp.id,
+      price: camp.price || 9.9,
+      checkoutUrl: rawCheckout,
+      trackedUrl: `${origin}/api/r?to=${encodeURIComponent(rawCheckout)}&src=instagram_story&city=Brasil&state=BR&camp=${encodeURIComponent(camp.id)}&title=${encodeURIComponent(camp.title)}&ig=${encodeURIComponent(accountHandle)}`,
+      format: 'stories_sticker',
+      headline: camp.headline || `👉 ${camp.title.slice(0, 40)}`,
+      caption: camp.copy || camp.subheadline || camp.painPointTargeted || 'Toque no link oficial abaixo e garanta o seu acesso imediato.',
+      imageUrl: camp.imageUrl || '/assets/aistudio/image_e9e67204.png',
+      targetHandles: mappedTargets.filter(t => t.selected).map(t => t.handle),
+      status: camp.status === 'paused' ? 'paused' : 'active',
+      createdAt: camp.createdAt || 'Ativa na Plataforma',
+    };
+  };
+
+  const [deletedInstaCampIds, setDeletedInstaCampIds] = useState<string[]>(() => {
     try {
-      const saved = localStorage.getItem('autoviral_insta_campaigns_v1');
+      const saved = localStorage.getItem('autoviral_deleted_insta_camp_ids');
       if (saved) return JSON.parse(saved);
     } catch {}
     return [];
   });
+
+  // Saved Instagram Campaigns (Auto-hydrated from ALL existing campaigns so it NEVER starts empty!)
+  const [instaCampaigns, setInstaCampaigns] = useState<InstagramCampaignItem[]>(() => {
+    let savedList: InstagramCampaignItem[] = [];
+    let delSet = new Set<string>();
+    try {
+      const delRaw = localStorage.getItem('autoviral_deleted_insta_camp_ids');
+      if (delRaw) delSet = new Set(JSON.parse(delRaw));
+      const saved = localStorage.getItem('autoviral_insta_campaigns_v1');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) savedList = parsed;
+      }
+    } catch {}
+
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const existingBaseIds = new Set(savedList.map(c => c.baseCampaignId));
+    const existingIds = new Set(savedList.map(c => c.id));
+    const hydratedFromPlatform = (campaigns || [])
+      .filter(c => !delSet.has(`ig-base-${c.id}`) && !existingIds.has(`ig-base-${c.id}`) && !existingBaseIds.has(c.id))
+      .map(c => {
+        const rawCheckout = (c.checkoutUrl || 'https://pay.kiwify.com.br/HE5xbnp').trim();
+        return {
+          id: `ig-base-${c.id}`,
+          name: c.title,
+          baseCampaignId: c.id,
+          price: c.price || 9.9,
+          checkoutUrl: rawCheckout,
+          trackedUrl: `${origin}/api/r?to=${encodeURIComponent(rawCheckout)}&src=instagram_story&city=Brasil&state=BR&camp=${encodeURIComponent(c.id)}&title=${encodeURIComponent(c.title)}`,
+          format: 'stories_sticker' as const,
+          headline: c.headline || `👉 ${c.title.slice(0, 40)}`,
+          caption: c.copy || c.subheadline || c.painPointTargeted || 'Toque no link oficial abaixo e garanta o seu acesso imediato.',
+          imageUrl: c.imageUrl || '/assets/aistudio/image_e9e67204.png',
+          targetHandles: [],
+          status: (c.status === 'paused' ? 'paused' : 'active') as 'active' | 'paused',
+          createdAt: c.createdAt || 'Campanha da Plataforma',
+        };
+      });
+
+    return [...savedList, ...hydratedFromPlatform];
+  });
+
+  // Sync newly created/updated platform campaigns into instaCampaigns automatically
+  useEffect(() => {
+    if (!campaigns || campaigns.length === 0) return;
+    const delSet = new Set(deletedInstaCampIds);
+    setInstaCampaigns(prev => {
+      const next = [...prev];
+      let changed = false;
+      campaigns.forEach(camp => {
+        const autoId = `ig-base-${camp.id}`;
+        if (delSet.has(autoId)) return;
+        const existsIdx = next.findIndex(item => item.id === autoId || item.baseCampaignId === camp.id);
+        if (existsIdx === -1) {
+          next.push(buildFromPlatformCampaign(camp));
+          changed = true;
+        } else if (next[existsIdx].id === autoId && next[existsIdx].name !== camp.title) {
+          next[existsIdx] = {
+            ...next[existsIdx],
+            name: camp.title,
+            price: camp.price || next[existsIdx].price,
+            checkoutUrl: camp.checkoutUrl || next[existsIdx].checkoutUrl,
+            imageUrl: camp.imageUrl || next[existsIdx].imageUrl,
+          };
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [campaigns, deletedInstaCampIds]);
 
   useEffect(() => {
     try {
       localStorage.setItem('autoviral_insta_campaigns_v1', JSON.stringify(instaCampaigns));
     } catch {}
   }, [instaCampaigns]);
+
+  // Firestore Workspace Sync for Instagram Campaigns, Stories, and Mapped Targets
+  useEffect(() => {
+    const unsub = subscribeWorkspaceSync((cloud) => {
+      if (Array.isArray(cloud.instaCampaigns) && cloud.instaCampaigns.length > 0) {
+        setInstaCampaigns(prev => {
+          const prevIds = new Set(prev.map(i => i.id));
+          const delSet = new Set(deletedInstaCampIds);
+          const fresh = cloud.instaCampaigns!.filter((i: any) => i?.id && !prevIds.has(i.id) && !delSet.has(i.id));
+          return fresh.length > 0 ? [...prev, ...fresh] : prev;
+        });
+      }
+      if (Array.isArray(cloud.storyQueue) && cloud.storyQueue.length > 0) {
+        setStoryQueue(prev => {
+          const prevIds = new Set(prev.map(i => i.id));
+          const fresh = cloud.storyQueue!.filter((i: any) => i?.id && !prevIds.has(i.id));
+          return fresh.length > 0 ? [...prev, ...fresh] : prev;
+        });
+      }
+      if (Array.isArray(cloud.mappedInstaTargets) && cloud.mappedInstaTargets.length > 0) {
+        setMappedTargets(prev => {
+          const prevHandles = new Set(prev.map(t => (t.handle || '').toLowerCase()));
+          const fresh = cloud.mappedInstaTargets!.filter((t: any) => t?.handle && !prevHandles.has(t.handle.toLowerCase()));
+          return fresh.length > 0 ? [...fresh, ...prev] : prev;
+        });
+      }
+    });
+    return () => unsub();
+  }, [deletedInstaCampIds]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      saveWorkspaceSyncToFirebase({
+        instaCampaigns,
+        storyQueue,
+        mappedInstaTargets: mappedTargets,
+      });
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [instaCampaigns, storyQueue, mappedTargets]);
 
   // New Instagram Campaign Builder Form State
   const [campBuilderBaseId, setCampBuilderBaseId] = useState<string>(defaultCampaign.id);
@@ -934,6 +1100,19 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
 
             <button
               type="button"
+              onClick={() => {
+                setDefenseTriggerReason('Simulação Manual do Escudo Anti-Ban Instagram (59:50)');
+                setIsDefenseModalOpen(true);
+              }}
+              className="px-3 py-2 bg-slate-900 hover:bg-slate-800 border border-blue-500/40 text-blue-300 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap shrink-0"
+              title="Visualizar e testar tela de proteção Anti-Ban de 1 hora"
+            >
+              <Shield className="w-3.5 h-3.5 text-blue-400" />
+              <span>Simular Defesa (59:50)</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setIsInstagramBotRunning(!isInstagramBotRunning)}
               className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-md whitespace-nowrap shrink-0 ${
                 isInstagramBotRunning
@@ -1235,7 +1414,18 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
                       </div>
                       <button
                         type="button"
-                        onClick={() => setInstaCampaigns(prev => prev.filter(item => item.id !== camp.id))}
+                        onClick={() => {
+                          setInstaCampaigns(prev => prev.filter(item => item.id !== camp.id));
+                          if (camp.id.startsWith('ig-base-')) {
+                            setDeletedInstaCampIds(prev => {
+                              const next = [...prev, camp.id];
+                              try {
+                                localStorage.setItem('autoviral_deleted_insta_camp_ids', JSON.stringify(next));
+                              } catch {}
+                              return next;
+                            });
+                          }
+                        }}
                         className="text-slate-500 hover:text-rose-400 p-1 cursor-pointer"
                         title="Excluir campanha"
                       >

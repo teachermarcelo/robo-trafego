@@ -537,3 +537,68 @@ export function subscribeMetaAdsConfig(onUpdate: (config: MetaAdsApiConfig | nul
   );
 }
 
+/**
+ * Unified Workspace Sync (Groups, Audiences, Copies, YouTube, Pinterest, Instagram)
+ * Ensures data survives reloads and syncs across browsers/deployments without exceeding Firestore 1MB limit.
+ */
+export interface WorkspaceSyncData {
+  savedCopiesMap?: Record<string, { headline: string; copy: string; savedAt: string }>;
+  customCopyPresets?: Array<{ id: string; campaignId: string; name: string; headline: string; copy: string; savedAt: string }>;
+  audiences?: any[];
+  youtubeVideos?: any[];
+  pinterestPins?: any[];
+  instaCampaigns?: any[];
+  storyQueue?: any[];
+  mappedInstaTargets?: any[];
+  mappedGroups?: any[];
+  updatedAt?: string;
+}
+
+export async function saveWorkspaceSyncToFirebase(partial: Partial<WorkspaceSyncData>): Promise<void> {
+  try {
+    const safePayload: Record<string, any> = {
+      updatedAt: new Date().toISOString(),
+    };
+
+    Object.entries(partial).forEach(([key, value]) => {
+      if (value === undefined) return;
+      if (key === 'mappedGroups' && Array.isArray(value)) {
+        safePayload[key] = value.slice(0, 450);
+      } else if (key === 'mappedInstaTargets' && Array.isArray(value)) {
+        safePayload[key] = value.slice(0, 300);
+      } else if (Array.isArray(value)) {
+        safePayload[key] = value.slice(0, 250);
+      } else {
+        safePayload[key] = value;
+      }
+    });
+
+    // Guard against Firestore 1MB document limit
+    const serializedSize = JSON.stringify(safePayload).length;
+    if (serializedSize > 850000 && Array.isArray(safePayload.mappedGroups)) {
+      safePayload.mappedGroups = safePayload.mappedGroups.slice(0, 200);
+    }
+    if (JSON.stringify(safePayload).length > 900000) {
+      delete safePayload.mappedGroups;
+    }
+
+    await setDoc(doc(db, SETTINGS_COLLECTION, 'workspace_sync_v1'), safePayload, { merge: true });
+  } catch (error) {
+    console.warn('Workspace sync write notice:', error);
+  }
+}
+
+export function subscribeWorkspaceSync(onUpdate: (data: WorkspaceSyncData) => void): () => void {
+  const docRef = doc(db, SETTINGS_COLLECTION, 'workspace_sync_v1');
+  return onSnapshot(
+    docRef,
+    (snap) => {
+      if (snap.exists()) {
+        onUpdate(snap.data() as WorkspaceSyncData);
+      }
+    },
+    (err) => {
+      console.warn('Workspace sync subscription error:', err);
+    }
+  );
+}

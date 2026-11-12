@@ -41,6 +41,15 @@
         "hotmartUrl": { "type": "string", "maxLength": 500 },
         "whatsappNumber": { "type": "string", "maxLength": 50 },
         "deletedCampaignIds": { "type": "array" },
+        "savedCopiesMap": { "type": "object" },
+        "customCopyPresets": { "type": "array" },
+        "audiences": { "type": "array" },
+        "youtubeVideos": { "type": "array" },
+        "pinterestPins": { "type": "array" },
+        "instaCampaigns": { "type": "array" },
+        "storyQueue": { "type": "array" },
+        "mappedInstaTargets": { "type": "array" },
+        "mappedGroups": { "type": "array" },
         "updatedAt": { "type": "string", "maxLength": 100 }
       }
     },

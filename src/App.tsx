@@ -46,6 +46,7 @@ import {
   subscribeCustomerLeads,
   saveCustomerLeadToFirebase,
   deleteCustomerLeadFromFirebase,
+  saveWorkspaceSyncToFirebase,
 } from './lib/firebase';
 
 export default function App() {
@@ -903,15 +904,39 @@ export default function App() {
   };
 
 
-  // Export full cloud backup
+  const [backupRestoreStatus, setBackupRestoreStatus] = useState<string | null>(null);
+
+  // Export full cloud + local workspace backup
   const handleExportBackup = () => {
+    const safeParse = (key: string) => {
+      try {
+        const raw = localStorage.getItem(key);
+        return raw ? JSON.parse(raw) : null;
+      } catch {
+        return null;
+      }
+    };
     const backupData = {
-      version: '1.0.0',
+      version: '2.0.0',
       exportedAt: new Date().toISOString(),
       campaigns,
       trackingEventsCount: trackingEvents.length,
       trackingEvents,
+      customerLeads,
       totalRevenue,
+      workspace: {
+        managedCampaigns: safeParse('autoviral_managed_campaigns_v5'),
+        savedCopiesMap: safeParse('autoviral_saved_copies_v1'),
+        customCopyPresets: safeParse('autoviral_custom_copy_presets_v1'),
+        mappedGroups: safeParse('autoviral_fb_mapped_groups_v5_real') || safeParse('autoviral_fb_mapped_groups_v3'),
+        audiences: safeParse('autoviral_fb_audiences_v4') || safeParse('autoviral_fb_audiences_v3'),
+        botLogs: safeParse('autoviral_fb_bot_logs_v3'),
+        youtubeVideos: safeParse('autoviral_yt_videos_v2'),
+        pinterestPins: safeParse('autoviral_pinterest_pins_v1'),
+        instaCampaigns: safeParse('autoviral_insta_campaigns_v1'),
+        storyQueue: safeParse('autoviral_insta_story_queue') || safeParse('autoviral_insta_story_queue_v2'),
+        mappedInstaTargets: safeParse('autoviral_insta_mapped_targets_v2'),
+      },
     };
     const blob = new Blob([JSON.stringify(backupData, null, 2)], {
       type: 'application/json',
@@ -922,6 +947,78 @@ export default function App() {
     a.download = `autoviral_backup_${new Date().toISOString().split('T')[0]}.json`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  // Restore full backup from JSON file (merges non-destructively & syncs to Firebase)
+  const handleImportBackup = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      let restoredCampaignsCount = 0;
+
+      if (Array.isArray(parsed.campaigns) && parsed.campaigns.length > 0) {
+        setCampaigns((prev) => {
+          const seen = new Set(prev.map((c) => c.id));
+          const incoming = parsed.campaigns.filter((c: any) => c?.id && !seen.has(c.id));
+          restoredCampaignsCount = incoming.length;
+          const merged = [...incoming, ...prev];
+          try {
+            localStorage.setItem('autoviral_campaigns', JSON.stringify(merged));
+          } catch {}
+          incoming.forEach((c: Campaign) => saveCampaignToFirebase(c).catch(console.warn));
+          return merged;
+        });
+      }
+
+      if (parsed.workspace && typeof parsed.workspace === 'object') {
+        const w = parsed.workspace;
+        const putJson = (key: string, val: any) => {
+          if (val !== null && val !== undefined) {
+            try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
+          }
+        };
+        if (w.savedCopiesMap) putJson('autoviral_saved_copies_v1', w.savedCopiesMap);
+        if (w.customCopyPresets) putJson('autoviral_custom_copy_presets_v1', w.customCopyPresets);
+        if (w.mappedGroups) {
+          putJson('autoviral_fb_mapped_groups_v5_real', w.mappedGroups);
+          putJson('autoviral_fb_mapped_groups_v3', w.mappedGroups);
+        }
+        if (w.audiences) {
+          putJson('autoviral_fb_audiences_v4', w.audiences);
+          putJson('autoviral_fb_audiences_v3', w.audiences);
+        }
+        if (w.botLogs) putJson('autoviral_fb_bot_logs_v3', w.botLogs);
+        if (w.youtubeVideos) putJson('autoviral_yt_videos_v2', w.youtubeVideos);
+        if (w.pinterestPins) putJson('autoviral_pinterest_pins_v1', w.pinterestPins);
+        if (w.instaCampaigns) putJson('autoviral_insta_campaigns_v1', w.instaCampaigns);
+        if (w.storyQueue) {
+          putJson('autoviral_insta_story_queue', w.storyQueue);
+          putJson('autoviral_insta_story_queue_v2', w.storyQueue);
+        }
+        if (w.mappedInstaTargets) putJson('autoviral_insta_mapped_targets_v2', w.mappedInstaTargets);
+
+        saveWorkspaceSyncToFirebase({
+          savedCopiesMap: w.savedCopiesMap || undefined,
+          customCopyPresets: w.customCopyPresets || undefined,
+          audiences: w.audiences || undefined,
+          youtubeVideos: w.youtubeVideos || undefined,
+          pinterestPins: w.pinterestPins || undefined,
+          instaCampaigns: w.instaCampaigns || undefined,
+          storyQueue: w.storyQueue || undefined,
+          mappedInstaTargets: w.mappedInstaTargets || undefined,
+          mappedGroups: w.mappedGroups || undefined,
+        }).catch(console.warn);
+      }
+
+      setBackupRestoreStatus(
+        `✅ Backup restaurado com sucesso! (${restoredCampaignsCount} novas campanhas + grupos, públicos e copys sincronizados na nuvem)`
+      );
+    } catch {
+      setBackupRestoreStatus('⚠️ Arquivo inválido. Selecione um backup .json válido do AutoViral AI.');
+    }
+    e.target.value = '';
   };
 
   const unreadNotificationsCount = notifications.filter((n) => !n.read).length;
@@ -1053,6 +1150,8 @@ export default function App() {
             campaigns={campaigns}
             initialCampaignId={selectedCampaignForDispatches || undefined}
             onAddCampaign={handleAddCampaign}
+            onUpdateCampaign={handleUpdateCampaign}
+            onDeleteCampaign={handleDeleteCampaign}
             onAddTrackingEvent={handleAddTrackingEvent}
             onSimulateSale={(customerName, city, amount) => {
               const notif: PushNotification = {
@@ -1203,14 +1302,28 @@ export default function App() {
               <div className="p-5 bg-slate-800/50 border border-slate-700 rounded-2xl space-y-3">
                 <h3 className="text-sm font-bold text-white">Backup e Redundância na Nuvem</h3>
                 <p className="text-xs text-slate-300">
-                  Todos os dados de clientes e campanhas podem ser exportados a qualquer momento.
+                  Exporte ou restaure em 1 clique todas as suas campanhas, grupos mapeados, públicos, copys, stories e dados do Instagram/YouTube.
                 </p>
-                <button
-                  onClick={handleExportBackup}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-xs font-semibold text-white"
-                >
-                  Baixar Arquivo de Backup Completo (JSON)
-                </button>
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <button
+                    onClick={handleExportBackup}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-xs font-semibold text-white cursor-pointer"
+                  >
+                    Baixar Arquivo de Backup Completo (JSON)
+                  </button>
+                  <label className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-xl text-xs font-semibold text-white cursor-pointer inline-flex items-center">
+                    <span>Restaurar Backup (.JSON)</span>
+                    <input
+                      type="file"
+                      accept=".json,application/json"
+                      onChange={handleImportBackup}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+                {backupRestoreStatus && (
+                  <p className="text-xs font-semibold text-emerald-300">{backupRestoreStatus}</p>
+                )}
               </div>
             </div>
           </div>

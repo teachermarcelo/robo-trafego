@@ -76,6 +76,7 @@ import {
   INITIAL_SAVED_AUDIENCES
 } from '../data/facebookGroupsData';
 import { globalBotRunner } from '../utils/backgroundBotRunner';
+import { saveWorkspaceSyncToFirebase, subscribeWorkspaceSync } from '../lib/firebase';
 
 export interface CopyTemplateItem {
   id: string;
@@ -288,6 +289,8 @@ interface ChromeFbGroupsTabProps {
   onSimulateSale?: (customerName: string, city: string, amount: number) => void;
   onNavigateTab?: (tab: string) => void;
   onAddCampaign?: (newCampaign: Campaign) => void;
+  onUpdateCampaign?: (updatedCampaign: Campaign) => void;
+  onDeleteCampaign?: (id: string) => void;
 }
 
 export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
@@ -297,6 +300,8 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
   onSimulateSale,
   onNavigateTab,
   onAddCampaign,
+  onUpdateCampaign,
+  onDeleteCampaign,
 }) => {
   const defaultProduct = campaigns[0] || {
     id: 'camp-tarefinhas-autismo',
@@ -306,25 +311,33 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
     checkoutUrl: 'https://pay.kiwify.com.br/HE5xbnp',
   };
 
-  // Managed Campaigns (User requested: "agora todas minhas campanhas criadas irao aparecer no disparo?")
+  // Managed Campaigns (Syncs cleanly with App.tsx + Firebase + localStorage so edits/creations NEVER vanish!)
   const [managedCampaigns, setManagedCampaigns] = useState<Campaign[]>(() => {
+    const mergedMap = new Map<string, Campaign>();
     try {
+      const delRaw = localStorage.getItem('autoviral_deleted_campaign_ids');
+      const delSet = delRaw ? new Set<string>(JSON.parse(delRaw)) : new Set<string>(['camp-1', 'camp-2', 'camp-3']);
+
+      (campaigns || []).forEach(c => {
+        if (!delSet.has(c.id)) {
+          mergedMap.set(c.id, { ...c, status: c.status || 'active' });
+        }
+      });
+
       const saved = localStorage.getItem('autoviral_managed_campaigns_v5');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          // Merge prop campaigns with saved to guarantee any newly created campaigns are included
-          const savedIds = new Set(parsed.map((c: any) => c.id));
-          const allMerged = [...parsed];
-          (campaigns || []).forEach(c => {
-            if (!savedIds.has(c.id)) {
-              allMerged.push({ ...c, status: c.status || 'active' });
+        if (Array.isArray(parsed)) {
+          parsed.forEach((p: any) => {
+            if (!p?.id || delSet.has(p.id)) return;
+            if (!mergedMap.has(p.id)) {
+              mergedMap.set(p.id, { ...p, status: p.status || 'active' });
             }
           });
-          return allMerged;
         }
       }
     } catch {}
+    if (mergedMap.size > 0) return Array.from(mergedMap.values());
     const initialList = campaigns && campaigns.length > 0 ? campaigns : [defaultProduct];
     return initialList.map(c => ({
       ...c,
@@ -336,14 +349,19 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
   useEffect(() => {
     if (!campaigns || campaigns.length === 0) return;
     setManagedCampaigns(prev => {
-      const currentMap = new Map(prev.map(c => [c.id, c]));
-      const nextMerged: Campaign[] = campaigns.map(c => {
-        const existing = currentMap.get(c.id);
-        return existing ? { ...c, status: existing.status || c.status || 'active' } : { ...c, status: c.status || 'active' };
-      });
-      // Also retain any campaigns created only locally
+      let delSet = new Set<string>(['camp-1', 'camp-2', 'camp-3']);
+      try {
+        const delRaw = localStorage.getItem('autoviral_deleted_campaign_ids');
+        if (delRaw) delSet = new Set(JSON.parse(delRaw));
+      } catch {}
+
+      const nextMerged: Campaign[] = campaigns
+        .filter(c => !delSet.has(c.id))
+        .map(c => ({ ...c, status: c.status || 'active' }));
+
+      // Also retain any campaigns created locally that have not propagated yet
       prev.forEach(p => {
-        if (!nextMerged.some(m => m.id === p.id)) {
+        if (!delSet.has(p.id) && !nextMerged.some(m => m.id === p.id)) {
           nextMerged.push(p);
         }
       });
@@ -353,6 +371,8 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       return nextMerged;
     });
   }, [campaigns]);
+
+  const [pendingDeleteCampId, setPendingDeleteCampId] = useState<string | null>(null);
 
   const availableCampaigns = managedCampaigns;
 
@@ -459,29 +479,38 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
     return 'psicopedagogia';
   });
 
-  // All Mapped Groups State (Unlimited, persists in localStorage, auto-merges with real search data)
+  // All Mapped Groups State (Merges v5_real, v4, and v3 so zero prior mapped groups disappear)
   const [mappedGroups, setMappedGroups] = useState<FacebookGroup[]>(() => {
     try {
-      const saved = localStorage.getItem('autoviral_fb_mapped_groups_v5_real') || localStorage.getItem('autoviral_fb_mapped_groups_v4') || localStorage.getItem('autoviral_fb_mapped_groups_v3');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          // Strict filter: purge any fake generated entries & strip dirty Chrome profile picture prefixes
-          const cleanReal = parsed
-            .filter((g: any) => !g.url.includes('rendaextra_') && !g.url.includes('curitibanegocios') && !g.name.includes('#'))
-            .map((g: any) => ({
-              ...g,
-              name: sanitizeFbGroupName(g.name || '') || g.name
-            }));
-          if (cleanReal.length > 0) {
-            ALL_INITIAL_FACEBOOK_GROUPS.forEach(initG => {
-              if (!cleanReal.some((m: any) => m.id === initG.id || m.name === initG.name || m.url === initG.url)) {
-                cleanReal.push(initG);
-              }
-            });
-            return cleanReal;
+      const collected: FacebookGroup[] = [];
+      const seenUrlOrName = new Set<string>();
+      const pushList = (raw: string | null) => {
+        if (!raw) return;
+        try {
+          const parsed = JSON.parse(raw);
+          if (!Array.isArray(parsed)) return;
+          parsed.forEach((g: any) => {
+            if (!g || !g.url || !g.name) return;
+            if (g.url.includes('rendaextra_') || g.url.includes('curitibanegocios') || String(g.name).includes('#')) return;
+            const cleanName = sanitizeFbGroupName(g.name) || g.name;
+            const key = `${g.url}`.toLowerCase();
+            if (!seenUrlOrName.has(key)) {
+              seenUrlOrName.add(key);
+              collected.push({ ...g, name: cleanName });
+            }
+          });
+        } catch {}
+      };
+      pushList(localStorage.getItem('autoviral_fb_mapped_groups_v5_real'));
+      pushList(localStorage.getItem('autoviral_fb_mapped_groups_v4'));
+      pushList(localStorage.getItem('autoviral_fb_mapped_groups_v3'));
+      if (collected.length > 0) {
+        ALL_INITIAL_FACEBOOK_GROUPS.forEach(initG => {
+          if (!collected.some(m => m.id === initG.id || m.name === initG.name || m.url === initG.url)) {
+            collected.push(initG);
           }
-        }
+        });
+        return collected;
       }
     } catch {}
     return ALL_INITIAL_FACEBOOK_GROUPS;
@@ -527,14 +556,28 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
   const [isBulkImportModalOpen, setIsBulkImportModalOpen] = useState<boolean>(false);
   const [bulkImportText, setBulkImportText] = useState<string>('');
 
-  // Saved Audiences Library (Display & Reusable)
+  // Saved Audiences Library (Merges BOTH v4 and v3 so saved audiences never disappear on refresh)
   const [audiences, setAudiences] = useState<FacebookAudience[]>(() => {
     try {
-      const saved = localStorage.getItem('autoviral_fb_audiences_v4');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
+      const collected: FacebookAudience[] = [];
+      const seenIds = new Set<string>();
+      const pushList = (raw: string | null) => {
+        if (!raw) return;
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            parsed.forEach((a: any) => {
+              if (a?.id && !seenIds.has(a.id)) {
+                seenIds.add(a.id);
+                collected.push(a);
+              }
+            });
+          }
+        } catch {}
+      };
+      pushList(localStorage.getItem('autoviral_fb_audiences_v4'));
+      pushList(localStorage.getItem('autoviral_fb_audiences_v3'));
+      if (collected.length > 0) return collected;
     } catch {}
     return INITIAL_SAVED_AUDIENCES;
   });
@@ -832,11 +875,13 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
   const [formCampCopy, setFormCampCopy] = useState<string>('');
 
   const handleToggleCampaignStatus = (campId: string) => {
+    let toggledCamp: Campaign | null = null;
     setManagedCampaigns(prev => {
       const updated = prev.map(c => {
         if (c.id === campId) {
           const nextStatus: 'active' | 'paused' = c.status === 'active' ? 'paused' : 'active';
-          return { ...c, status: nextStatus };
+          toggledCamp = { ...c, status: nextStatus };
+          return toggledCamp;
         }
         return c;
       });
@@ -845,6 +890,9 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       } catch {}
       return updated;
     });
+    if (toggledCamp && onUpdateCampaign) {
+      onUpdateCampaign(toggledCamp);
+    }
   };
 
   const handleSetActiveCampaign = (camp: Campaign) => {
@@ -863,6 +911,9 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       } catch {}
       return updated;
     });
+    if (camp.status === 'paused' && onUpdateCampaign) {
+      onUpdateCampaign({ ...camp, status: 'active' });
+    }
 
     const savedForCamp = savedCopiesMap[camp.id];
     if (savedForCamp && (savedForCamp.copy || savedForCamp.headline)) {
@@ -894,7 +945,8 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
 
   const handleSaveNewCampaign = () => {
     if (!formCampTitle.trim()) {
-      alert('Por favor, digite o título do produto/campanha.');
+      setCopySaveNotice('⚠️ Por favor, digite o título do produto/campanha.');
+      setTimeout(() => setCopySaveNotice(null), 4000);
       return;
     }
     const newCamp: Campaign = {
@@ -931,7 +983,8 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
 
     handleSetActiveCampaign(newCamp);
     setIsCreateCampaignModalOpen(false);
-    alert(`🎉 Nova Campanha "${newCamp.title}" criada e ativada no robô!`);
+    setCopySaveNotice(`🎉 Nova Campanha "${newCamp.title}" criada, ativada e sincronizada na nuvem!`);
+    setTimeout(() => setCopySaveNotice(null), 5000);
   };
 
   const handleOpenEditCampaign = (camp: Campaign) => {
@@ -948,11 +1001,12 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
 
   const handleSaveEditCampaign = () => {
     if (!editingCampaignItem) return;
+    let editedCamp: Campaign | null = null;
     const updated = managedCampaigns.map(c => {
       if (c.id === editingCampaignItem.id) {
-        return {
+        editedCamp = {
           ...c,
-          title: formCampTitle.trim(),
+          title: formCampTitle.trim() || c.title,
           niche: (formCampNiche.trim() as NicheType) || 'outro',
           nicheLabel: formCampNiche.trim() || 'Geral',
           price: formCampPrice,
@@ -961,6 +1015,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
           headline: formCampHeadline.trim(),
           copy: formCampCopy.trim(),
         };
+        return editedCamp;
       }
       return c;
     });
@@ -970,26 +1025,36 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       localStorage.setItem('autoviral_managed_campaigns_v5', JSON.stringify(updated));
     } catch {}
 
+    if (editedCamp && onUpdateCampaign) {
+      onUpdateCampaign(editedCamp);
+    }
+
     setIsEditCampaignModalOpen(false);
     setEditingCampaignItem(null);
-    alert('✅ Dados da campanha atualizados com sucesso!');
+    setCopySaveNotice('✅ Dados da campanha atualizados e sincronizados na nuvem!');
+    setTimeout(() => setCopySaveNotice(null), 4000);
   };
 
   const handleDeleteCampaign = (campId: string) => {
     if (managedCampaigns.length <= 1) {
-      alert('Você precisa manter ao menos 1 campanha cadastrada.');
+      setCopySaveNotice('⚠️ Você precisa manter ao menos 1 campanha cadastrada.');
+      setTimeout(() => setCopySaveNotice(null), 4000);
       return;
     }
-    if (confirm('Deseja realmente excluir esta campanha da lista?')) {
-      const updated = managedCampaigns.filter(c => c.id !== campId);
-      setManagedCampaigns(updated);
-      try {
-        localStorage.setItem('autoviral_managed_campaigns_v5', JSON.stringify(updated));
-      } catch {}
-      if (selectedProductId === campId && updated[0]) {
-        handleSetActiveCampaign(updated[0]);
-      }
+    const updated = managedCampaigns.filter(c => c.id !== campId);
+    setManagedCampaigns(updated);
+    setPendingDeleteCampId(null);
+    try {
+      localStorage.setItem('autoviral_managed_campaigns_v5', JSON.stringify(updated));
+    } catch {}
+    if (onDeleteCampaign) {
+      onDeleteCampaign(campId);
     }
+    if (selectedProductId === campId && updated[0]) {
+      handleSetActiveCampaign(updated[0]);
+    }
+    setCopySaveNotice('🗑️ Campanha removida da plataforma.');
+    setTimeout(() => setCopySaveNotice(null), 3500);
   };
 
   // PWA Install Modal State (Requested by user: "CRIE UM apk pra instalar no celular")
@@ -1105,13 +1170,29 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
     return 'all';
   });
 
-  // Instagram Story Queue (receives stories from VisualLayoutStudio and runs them)
+  // Instagram Story Queue (merges both legacy & v2 keys so zero stories disappear)
   const [instagramStoryQueue, setInstagramStoryQueue] = useState<InstagramStoryItem[]>(() => {
+    const merged: InstagramStoryItem[] = [];
+    const seen = new Set<string>();
+    const addRaw = (raw: string | null) => {
+      if (!raw) return;
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((s: any) => {
+            if (s?.id && !seen.has(s.id)) {
+              seen.add(s.id);
+              merged.push(s);
+            }
+          });
+        }
+      } catch {}
+    };
     try {
-      const saved = localStorage.getItem('autoviral_insta_story_queue');
-      if (saved) return JSON.parse(saved);
+      addRaw(localStorage.getItem('autoviral_insta_story_queue_v2'));
+      addRaw(localStorage.getItem('autoviral_insta_story_queue'));
     } catch {}
-    return [];
+    return merged;
   });
 
   const handleToggleTargetChannel = (channel: 'facebook' | 'facebookStories' | 'youtube' | 'pinterest' | 'instagram') => {
@@ -1144,6 +1225,8 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       setMappedGroups([]);
       setSelectedGroupIds([]);
       try {
+        localStorage.removeItem('autoviral_fb_mapped_groups_v5_real');
+        localStorage.removeItem('autoviral_fb_mapped_groups_v4');
         localStorage.removeItem('autoviral_fb_mapped_groups_v3');
       } catch {}
     }
@@ -1162,11 +1245,15 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
     if (scope === 'all' || scope === 'instagram') {
       setInstagramStoryQueue([]);
       try {
+        localStorage.removeItem('autoviral_insta_story_queue_v2');
         localStorage.removeItem('autoviral_insta_story_queue');
       } catch {}
     }
     setIsResetModalOpen(false);
-    alert(`✅ Mapeamento ${scope === 'all' ? 'de TODOS os canais' : `do canal ${scope.toUpperCase()}`} foi ZERADO com sucesso!`);
+    setExtensionSyncBanner({
+      message: `✅ Mapeamento ${scope === 'all' ? 'de TODOS os canais' : `do canal ${scope.toUpperCase()}`} foi zerado com sucesso.`,
+      tone: 'success'
+    });
   };
 
   // Bot Running Engine & Countdown
@@ -1503,10 +1590,12 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
   const [newPinUrl, setNewPinUrl] = useState<string>('https://pay.kiwify.com.br/HE5xbnp');
   const [newPinPrice, setNewPinPrice] = useState<number>(9.90);
 
-  // Persist State to LocalStorage
+  // Persist State consistently to LocalStorage (all active keys synced) + Firebase Cloud Workspace Sync
   useEffect(() => {
     try {
+      localStorage.setItem('autoviral_fb_mapped_groups_v5_real', JSON.stringify(mappedGroups));
       localStorage.setItem('autoviral_fb_mapped_groups_v3', JSON.stringify(mappedGroups));
+      localStorage.setItem('autoviral_fb_audiences_v4', JSON.stringify(audiences));
       localStorage.setItem('autoviral_fb_audiences_v3', JSON.stringify(audiences));
       localStorage.setItem('autoviral_fb_bot_logs_v3', JSON.stringify(botLogs));
       localStorage.setItem('autoviral_fb_daily_completed_v3', dailyDispatchesCompleted.toString());
@@ -1514,6 +1603,66 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       localStorage.setItem('autoviral_pinterest_pins_v1', JSON.stringify(pinterestPins));
     } catch {}
   }, [mappedGroups, audiences, botLogs, dailyDispatchesCompleted, youtubeVideos, pinterestPins]);
+
+  // Real-time Firebase Workspace Sync (receives and merges non-destructively across domains/browsers)
+  useEffect(() => {
+    const unsub = subscribeWorkspaceSync((cloud) => {
+      if (cloud.savedCopiesMap && typeof cloud.savedCopiesMap === 'object') {
+        setSavedCopiesMap(prev => ({ ...cloud.savedCopiesMap, ...prev }));
+      }
+      if (Array.isArray(cloud.customCopyPresets) && cloud.customCopyPresets.length > 0) {
+        setCustomCopyPresets(prev => {
+          const seen = new Set(prev.map(p => p.id));
+          const fresh = cloud.customCopyPresets!.filter((p: any) => p?.id && !seen.has(p.id));
+          return fresh.length > 0 ? [...prev, ...fresh] : prev;
+        });
+      }
+      if (Array.isArray(cloud.audiences) && cloud.audiences.length > 0) {
+        setAudiences(prev => {
+          const seen = new Set(prev.map(a => a.id));
+          const fresh = cloud.audiences!.filter((a: any) => a?.id && !seen.has(a.id));
+          return fresh.length > 0 ? [...prev, ...fresh] : prev;
+        });
+      }
+      if (Array.isArray(cloud.youtubeVideos) && cloud.youtubeVideos.length > 0) {
+        setYoutubeVideos(prev => {
+          const seen = new Set(prev.map(v => v.url));
+          const fresh = cloud.youtubeVideos!.filter((v: any) => v?.url && !seen.has(v.url));
+          return fresh.length > 0 ? [...fresh, ...prev] : prev;
+        });
+      }
+      if (Array.isArray(cloud.pinterestPins) && cloud.pinterestPins.length > 0) {
+        setPinterestPins(prev => {
+          const seen = new Set(prev.map(p => p.id));
+          const fresh = cloud.pinterestPins!.filter((p: any) => p?.id && !seen.has(p.id));
+          return fresh.length > 0 ? [...fresh, ...prev] : prev;
+        });
+      }
+      if (Array.isArray(cloud.mappedGroups) && cloud.mappedGroups.length > 0) {
+        setMappedGroups(prev => {
+          const seenUrls = new Set(prev.map(g => g.url));
+          const fresh = cloud.mappedGroups!.filter((g: any) => g?.url && !seenUrls.has(g.url));
+          return fresh.length > 0 ? [...fresh, ...prev] : prev;
+        });
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  // Push workspace state to Firebase Cloud debounced
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      saveWorkspaceSyncToFirebase({
+        savedCopiesMap,
+        customCopyPresets,
+        audiences,
+        youtubeVideos,
+        pinterestPins,
+        mappedGroups,
+      });
+    }, 1800);
+    return () => clearTimeout(timer);
+  }, [savedCopiesMap, customCopyPresets, audiences, youtubeVideos, pinterestPins, mappedGroups]);
 
   // Hook into Persistent Background Bot Runner
   useEffect(() => {
@@ -1988,32 +2137,35 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
     });
 
     if (newGroupsToAdd.length === 0) {
-      alert('Nenhum novo grupo encontrado ou os links colados já estão presentes na lista.');
+      setExtensionSyncBanner({
+        message: 'Nenhum novo grupo encontrado ou os links colados já estão presentes na lista.',
+        tone: 'warning'
+      });
       return;
     }
 
     const updated = [...newGroupsToAdd, ...mappedGroups];
     setMappedGroups(updated);
     try {
+      localStorage.setItem('autoviral_fb_mapped_groups_v5_real', JSON.stringify(updated));
       localStorage.setItem('autoviral_fb_mapped_groups_v3', JSON.stringify(updated));
     } catch {}
 
     setBulkImportText('');
     setIsBulkImportModalOpen(false);
-    alert(`🎉 Sucesso! ${newGroupsToAdd.length} grupos reais do Facebook foram importados e validados!`);
+    setExtensionSyncBanner({
+      message: `🎉 Sucesso! ${newGroupsToAdd.length} grupos reais do Facebook foram importados e validados!`,
+      tone: 'success'
+    });
   };
 
-  // Purge Fake / Broken / Legacy Groups
+  // Purge Fake / Broken / Legacy Groups (Preserves user's saved audiences!)
   const handlePurgeFakeGroups = () => {
-    if (!confirm('Deseja purgar os grupos antigos com IDs de teste (como #70, #71 ou rendaextra_) e manter apenas grupos 100% reais verificados?')) {
-      return;
-    }
-
     const cleaned = mappedGroups.filter(g => {
-      const isFakePattern = 
-        g.url.includes('rendaextra_') || 
-        g.name.includes('#') || 
-        g.url.includes('curitibanegocios') || 
+      const isFakePattern =
+        g.url.includes('rendaextra_') ||
+        g.name.includes('#') ||
+        g.url.includes('curitibanegocios') ||
         !g.url.includes('/groups/');
       return !isFakePattern;
     });
@@ -2021,11 +2173,14 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
     setMappedGroups(cleaned);
     setSelectedGroupIds(prev => prev.filter(id => cleaned.some(c => c.id === id)));
     try {
+      localStorage.setItem('autoviral_fb_mapped_groups_v5_real', JSON.stringify(cleaned));
       localStorage.setItem('autoviral_fb_mapped_groups_v3', JSON.stringify(cleaned));
-      localStorage.setItem('autoviral_fb_audiences_v4', JSON.stringify(INITIAL_SAVED_AUDIENCES));
     } catch {}
 
-    alert(`🧹 Limpeza concluída com sucesso! Todos os grupos agora possuem links canônicos reais do Facebook.`);
+    setExtensionSyncBanner({
+      message: `🧹 Limpeza concluída! Mantidos ${cleaned.length} grupos reais com links canônicos do Facebook.`,
+      tone: 'success'
+    });
   };
 
   // Delete Selected Groups in bulk
@@ -2454,11 +2609,11 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
             >
               <span className="flex items-center gap-2.5 truncate">
                 <Bot className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span className="truncate">Disparos FB (Comentador)</span>
+                <span className="truncate">Campanhas &amp; Disparos</span>
               </span>
-              {isBotRunning && (
-                <span className="text-[10px] font-bold text-emerald-300 shrink-0">Ativo</span>
-              )}
+              <span className={`text-[11px] tabular-nums shrink-0 ${isBotRunning ? 'text-emerald-300 font-bold' : 'text-slate-400'}`}>
+                {isBotRunning ? 'Ativo' : managedCampaigns.length}
+              </span>
             </button>
 
             <button
@@ -2476,6 +2631,20 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
               </span>
               <span className="text-[11px] text-purple-300 tabular-nums shrink-0">{mappedInstaProfilesCount}</span>
             </button>
+
+            {onNavigateTab && (
+              <button
+                type="button"
+                onClick={() => onNavigateTab('campaigns')}
+                className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl text-xs font-medium text-emerald-300 hover:text-white hover:bg-slate-900/80 border border-slate-800/70 transition cursor-pointer whitespace-nowrap"
+              >
+                <span className="flex items-center gap-2 truncate">
+                  <Target className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span className="truncate">Ver Todas Minhas Campanhas</span>
+                </span>
+                <span className="text-[11px] text-emerald-400 font-bold tabular-nums shrink-0">{managedCampaigns.length}</span>
+              </button>
+            )}
           </div>
 
           {/* Section 2: CANAIS & CRIATIVOS */}
@@ -3578,6 +3747,18 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
 
               {/* 1. Target Campaign / Multi-Campaign Manager (Requested by user: "poder criar várias camapnha e ativar/desativar/pausar garantindo a campanha certa") */}
               <div className="bg-slate-950/90 border border-emerald-500/30 rounded-2xl p-4 sm:p-5 space-y-4">
+                {copySaveNotice && (
+                  <div className="p-3 bg-emerald-950/70 border border-emerald-500/60 rounded-xl text-xs font-bold text-emerald-200 flex items-center justify-between gap-2">
+                    <span>{copySaveNotice}</span>
+                    <button
+                      type="button"
+                      onClick={() => setCopySaveNotice(null)}
+                      className="text-emerald-300 hover:text-white text-[11px] font-semibold shrink-0 cursor-pointer"
+                    >
+                      Fechar
+                    </button>
+                  </div>
+                )}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
                   <div>
                     <div className="flex items-center gap-2">
@@ -3601,7 +3782,12 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                       onClick={() => {
                         const next = !isRotationModeActive;
                         setIsRotationModeActive(next);
-                        alert(next ? '🔄 Modo Rodízio ATIVADO! O robô alternará automaticamente entre todas as campanhas ativas a cada disparo.' : 'Modo Rodízio DESATIVADO. O robô focará na campanha selecionada.');
+                        setCopySaveNotice(
+                          next
+                            ? '🔄 Modo Rodízio ATIVADO! O robô alternará automaticamente entre todas as campanhas ativas a cada disparo.'
+                            : 'Modo Rodízio DESATIVADO. O robô focará na campanha selecionada.'
+                        );
+                        setTimeout(() => setCopySaveNotice(null), 4000);
                       }}
                       className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
                         isRotationModeActive
@@ -3757,14 +3943,33 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                             </button>
 
                             {managedCampaigns.length > 1 && (
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteCampaign(camp.id)}
-                                className="p-1.5 bg-slate-800 hover:bg-rose-600/30 text-slate-300 hover:text-rose-300 rounded-lg border border-slate-700 transition cursor-pointer"
-                                title="Excluir campanha"
-                              >
-                                <Trash2 className="w-3 h-3" />
-                              </button>
+                              pendingDeleteCampId === camp.id ? (
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteCampaign(camp.id)}
+                                    className="px-2 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-[10px] font-bold cursor-pointer"
+                                  >
+                                    Confirmar
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setPendingDeleteCampId(null)}
+                                    className="px-1.5 py-1 bg-slate-800 text-slate-300 rounded-lg text-[10px] cursor-pointer"
+                                  >
+                                    Cancelar
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setPendingDeleteCampId(camp.id)}
+                                  className="p-1.5 bg-slate-800 hover:bg-rose-600/30 text-slate-300 hover:text-rose-300 rounded-lg border border-slate-700 transition cursor-pointer"
+                                  title="Excluir campanha"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              )
                             )}
                           </div>
                         </div>

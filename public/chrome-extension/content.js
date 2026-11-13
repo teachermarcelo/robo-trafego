@@ -625,6 +625,24 @@
       return false;
     }
 
+    function isFacebookGroupUnavailable() {
+      try {
+        if (findComposerTrigger() || findJoinGroupButton()) return false;
+        const bodyText = (document.body ? document.body.innerText : '').toLowerCase();
+        return (
+          bodyText.includes('este conteúdo não está disponível no momento') ||
+          bodyText.includes('este conteudo nao esta disponivel no momento') ||
+          bodyText.includes('esta página não está disponível') ||
+          bodyText.includes('esta pagina nao esta disponivel') ||
+          bodyText.includes('conteúdo indisponível') ||
+          bodyText.includes("this content isn't available right now") ||
+          bodyText.includes("this page isn't available") ||
+          bodyText.includes('the link you followed may be broken')
+        );
+      } catch (e) {}
+      return false;
+    }
+
     function findComposerTrigger() {
       const composerTriggers = Array.from(document.querySelectorAll('div[role="button"], span'));
       return composerTriggers.find((el) => {
@@ -811,6 +829,22 @@
         }
         return;
       }
+      if (isFacebookGroupUnavailable()) {
+        sendRealPostResultToPlatform({
+          logId: pending.logId,
+          groupId: pending.groupId,
+          groupUrl: window.location.href,
+          groupName: pending.groupName,
+          approvalStatus: 'unavailable',
+          note: 'Facebook exibiu: Este conteúdo não está disponível no momento'
+        });
+        clearStoredPendingGroupPost(currentSlug);
+        if (msgEl) {
+          msgEl.textContent = '🚫 Grupo indisponível ou excluído no Facebook! Removido da fila do AutoViral.';
+          msgEl.style.color = '#fb7185';
+        }
+        return;
+      }
       try {
         navigator.clipboard.writeText(pending.fullText).catch(() => {});
       } catch (e) {}
@@ -836,10 +870,43 @@
       let triggerTries = 0;
       const waitTrigger = setInterval(() => {
         triggerTries++;
+        if (isFacebookGroupUnavailable()) {
+          clearInterval(waitTrigger);
+          sendRealPostResultToPlatform({
+            logId: pending.logId,
+            groupId: pending.groupId,
+            groupUrl: window.location.href,
+            groupName: pending.groupName,
+            approvalStatus: 'unavailable',
+            note: 'Facebook exibiu: Este conteúdo não está disponível no momento'
+          });
+          clearStoredPendingGroupPost(currentSlug);
+          if (msgEl) {
+            msgEl.textContent = '🚫 Grupo indisponível/excluído no Facebook! Removido automaticamente da fila.';
+            msgEl.style.color = '#fb7185';
+          }
+          return;
+        }
         const trigger = findComposerTrigger();
         if (trigger || triggerTries >= 10) {
           clearInterval(waitTrigger);
           if (!trigger) {
+            if (isFacebookGroupUnavailable()) {
+              sendRealPostResultToPlatform({
+                logId: pending.logId,
+                groupId: pending.groupId,
+                groupUrl: window.location.href,
+                groupName: pending.groupName,
+                approvalStatus: 'unavailable',
+                note: 'Facebook exibiu: Este conteúdo não está disponível no momento'
+              });
+              clearStoredPendingGroupPost(currentSlug);
+              if (msgEl) {
+                msgEl.textContent = '🚫 Grupo indisponível/excluído no Facebook! Removido automaticamente da fila.';
+                msgEl.style.color = '#fb7185';
+              }
+              return;
+            }
             if (msgEl) {
               msgEl.textContent = '📋 Texto copiado! Clique em "Escreva algo..." no grupo e cole (Ctrl+V).';
               msgEl.style.color = '#fbbf24';
@@ -980,6 +1047,25 @@
         const btnAdm = document.getElementById('autoviral-btn-confirm-admin');
 
         const triggerJoinThenPost = (autoSubmitPost) => {
+          if (isFacebookGroupUnavailable()) {
+            if (pending) {
+              sendRealPostResultToPlatform({
+                logId: pending.logId,
+                groupId: pending.groupId,
+                groupUrl: window.location.href,
+                groupName: pending.groupName,
+                approvalStatus: 'unavailable',
+                note: 'Facebook exibiu: Este conteúdo não está disponível no momento'
+              });
+            }
+            clearStoredPendingGroupPost(currentSlug);
+            if (msgEl) {
+              msgEl.textContent = '🚫 Este grupo não está disponível no Facebook ("Este conteúdo não está disponível no momento"). Removido da fila!';
+              msgEl.style.color = '#fb7185';
+            }
+            return;
+          }
+
           if (isFacebookRateLimited()) {
             if (pending) {
               sendRealPostResultToPlatform({
@@ -1130,6 +1216,28 @@
               msgEl.style.color = '#fbbf24';
             }
           };
+        }
+
+        // Check unavailable/deleted/private page immediately before taking any action
+        if (isFacebookGroupUnavailable()) {
+          if (pending) {
+            sendRealPostResultToPlatform({
+              logId: pending.logId,
+              groupId: pending.groupId,
+              groupUrl: window.location.href,
+              groupName: pending.groupName,
+              approvalStatus: 'unavailable',
+              note: 'Facebook exibiu: Este conteúdo não está disponível no momento'
+            });
+            clearStoredPendingGroupPost(currentSlug);
+          }
+          if (btnFill) btnFill.style.display = 'none';
+          if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
+          if (msgEl) {
+            msgEl.textContent = '🚫 Este grupo/link está indisponível ou foi excluído no Facebook ("Este conteúdo não está disponível no momento"). Removido da fila do AutoViral!';
+            msgEl.style.color = '#fb7185';
+          }
+          return;
         }
 
         // Automatically run Stage 1 (Join) -> Stage 2 (Post) when opened from AutoViral!

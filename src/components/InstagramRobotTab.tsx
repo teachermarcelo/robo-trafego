@@ -896,7 +896,7 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
       finished = true;
       cleanup();
       setIsMappingActive(false);
-      setInstaSyncNotice('⚠️ Extensão Chrome v1.3.5 não respondeu. Instale/atualize a Extensão v1.3.5 em chrome://extensions, recarregue o Instagram (F5) e este painel.');
+      setInstaSyncNotice('⚠️ Extensão Chrome v1.3.6 não respondeu. Instale/atualize a Extensão v1.3.6 em chrome://extensions, recarregue o Instagram (F5) e este painel.');
       setTimeout(() => setInstaSyncNotice(null), 7000);
     }, 2800);
 
@@ -2132,7 +2132,7 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
                   Fila de Perfis Segmentados Prontos para Interação (Ilimitado)
                 </h4>
                 <p className="text-[11px] text-slate-400 mt-0.5">
-                  Todos os perfis capturados pela Extensão Chrome v1.3.5 com botões diretos para agir
+                  Todos os perfis capturados pela Extensão Chrome v1.3.6 com botões diretos para agir
                 </p>
               </div>
               <span className="text-xs text-emerald-400 font-bold bg-emerald-950/80 border border-emerald-800/60 px-3 py-1 rounded-xl">

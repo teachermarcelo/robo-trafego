@@ -1,7 +1,7 @@
 // AutoViral AI Chrome Extension - Background Service Worker (Manifest V3)
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('[AutoViral AI] Extensão v1.3.5 instalada com sucesso!');
+  console.log('[AutoViral AI] Extensão v1.3.6 instalada com sucesso!');
   chrome.storage.local.get(['autoviral_interval', 'autoviral_mapped_groups'], (res) => {
     chrome.storage.local.set({
       autoviral_interval: res.autoviral_interval || 350,
@@ -172,25 +172,45 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  // Open a specific Facebook Group tab for assisted real posting
+  // Open a specific Facebook Group tab for automated Join + Post flow
   if (request.action === 'AUTOVIRAL_OPEN_GROUP_FOR_POST') {
+    const groupUrl = request.groupUrl || '';
+    const slugMatch = groupUrl.match(/\/groups\/([^\/?#]+)/i);
+    const groupSlug = slugMatch ? slugMatch[1].toLowerCase() : '';
     const pendingPost = {
       logId: request.logId || '',
       groupId: request.groupId || '',
-      groupUrl: request.groupUrl || '',
+      groupUrl: groupUrl,
+      groupSlug: groupSlug,
       groupName: request.groupName || '',
       fullText: request.fullText || '',
+      autoJoinAndPost: request.autoJoinAndPost !== false,
       createdAt: new Date().toISOString()
     };
-    chrome.storage.local.set({ autoviral_pending_fb_post: pendingPost }, () => {
-      if (pendingPost.groupUrl) {
-        chrome.tabs.create({ url: pendingPost.groupUrl, active: true }, (tab) => {
-          void chrome.runtime.lastError;
-          sendResponse({ success: true, tabId: tab ? tab.id : null });
-        });
-      } else {
-        sendResponse({ success: false });
+
+    chrome.storage.local.get(['autoviral_pending_fb_posts_map'], (res) => {
+      const postsMap = (res && res.autoviral_pending_fb_posts_map && typeof res.autoviral_pending_fb_posts_map === 'object')
+        ? res.autoviral_pending_fb_posts_map
+        : {};
+      if (groupSlug) {
+        postsMap[groupSlug] = pendingPost;
       }
+      chrome.storage.local.set(
+        {
+          autoviral_pending_fb_post: pendingPost,
+          autoviral_pending_fb_posts_map: postsMap
+        },
+        () => {
+          if (pendingPost.groupUrl) {
+            chrome.tabs.create({ url: pendingPost.groupUrl, active: true }, (tab) => {
+              void chrome.runtime.lastError;
+              sendResponse({ success: true, tabId: tab ? tab.id : null });
+            });
+          } else {
+            sendResponse({ success: false });
+          }
+        }
+      );
     });
     return true;
   }

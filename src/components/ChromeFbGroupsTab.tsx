@@ -442,7 +442,19 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
   const [realRadarSourceFilter, setRealRadarSourceFilter] = useState<string>('all');
   const [smartLinkChannel, setSmartLinkChannel] = useState<'facebook_groups' | 'instagram_story' | 'youtube_comments' | 'pinterest' | 'whatsapp'>('facebook_groups');
   const [copiedSmartUrlFeedback, setCopiedSmartUrlFeedback] = useState<boolean>(false);
-  const [postsLogFilter, setPostsLogFilter] = useState<'all' | 'published' | 'awaiting_admin' | 'not_member' | 'pending_verification' | 'pending' | 'legacy_unverified' | 'error'>('all');
+  const [postsLogFilter, setPostsLogFilter] = useState<'all' | 'published' | 'awaiting_admin' | 'join_requested' | 'not_member' | 'pending_verification' | 'pending' | 'legacy_unverified' | 'error'>('all');
+  const [autoJoinAndPostEnabled, setAutoJoinAndPostEnabled] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('autoviral_fb_auto_join_post');
+      return saved === null ? true : saved === 'true';
+    } catch {}
+    return true;
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem('autoviral_fb_auto_join_post', String(autoJoinAndPostEnabled));
+    } catch {}
+  }, [autoJoinAndPostEnabled]);
   const [lastOpenedPostLog, setLastOpenedPostLog] = useState<{ logId: string; groupName: string; groupUrl: string } | null>(null);
   const [manyChatOverridesMap, setManyChatOverridesMap] = useState<Record<string, any>>(() => loadManyChatOverrides());
   const [manyChatSavedBanner, setManyChatSavedBanner] = useState<string | null>(null);
@@ -1868,7 +1880,10 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       const now = new Date();
       const formattedNow = `${now.toLocaleDateString('pt-BR')} ${now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
       const normalizedStatus: FacebookPostLog['approvalStatus'] =
-        approvalStatus === 'published' || approvalStatus === 'awaiting_admin' || approvalStatus === 'not_member'
+        approvalStatus === 'published' ||
+        approvalStatus === 'awaiting_admin' ||
+        approvalStatus === 'not_member' ||
+        approvalStatus === 'join_requested'
           ? approvalStatus
           : 'pending_verification';
 
@@ -1903,9 +1918,14 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
         return [created, ...prev];
       });
 
-      if (normalizedStatus === 'not_member') {
+      if (normalizedStatus === 'join_requested') {
         setExtensionSyncBanner({
-          message: `⚠️ Grupo "${groupName || 'Facebook'}" bloqueado: você ainda não participa dele ("Participar do grupo" detectado). Clique no link do grupo para entrar primeiro.`,
+          message: `🚪 Entrada solicitada automaticamente em "${groupName || 'grupo'}"! A postagem ficou salva — quando o administrador aprovar, clique em "🔄 Tentar Postar" no histórico.`,
+          tone: 'warning'
+        });
+      } else if (normalizedStatus === 'not_member') {
+        setExtensionSyncBanner({
+          message: `⚠️ Grupo "${groupName || 'Facebook'}" ainda precisa de entrada. Clique em "🔄 Tentar Postar" para a extensão v1.3.6 solicitar entrada e postar automaticamente.`,
           tone: 'warning'
         });
       } else if (normalizedStatus === 'awaiting_admin') {
@@ -2023,7 +2043,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       )
     );
 
-    // Send real command to Chrome Extension to open the group tab & check membership ("Participar do grupo")
+    // Send real command to Chrome Extension to auto-join (if needed) & auto-post
     try {
       window.postMessage(
         {
@@ -2032,18 +2052,62 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
           groupId: currentGroup.id,
           groupUrl: currentGroup.url,
           groupName: currentGroup.name,
-          fullText
+          fullText,
+          autoJoinAndPost: autoJoinAndPostEnabled
         },
         '*'
       );
     } catch {}
 
     setExtensionSyncBanner({
-      message: `📋 Texto copiado! Grupo "${currentGroup.name}" enviado para abertura no Facebook. Publique e confirme o status real (ou aguarde a extensão detectar).`,
+      message: autoJoinAndPostEnabled
+        ? `🤖 Grupo "${currentGroup.name}" aberto! A Extensão v1.3.6 vai solicitar entrada (se precisar) e postar automaticamente.`
+        : `📋 Texto copiado! Grupo "${currentGroup.name}" aberto para postagem manual assistida.`,
       tone: 'success'
     });
 
     setCurrentPostingIndex(prev => (prev + 1) % targetGroups.length);
+  };
+
+  // Re-run auto-join check & auto-post on a previously join-requested/not_member group
+  const handleRetryJoinOrPost = (log: FacebookPostLog) => {
+    const fullText = `${postHeadline}\n\n${postCopy}`.trim();
+    try {
+      navigator.clipboard?.writeText(fullText);
+    } catch {}
+
+    setBotLogs(prev =>
+      prev.map(l =>
+        l.id === log.id
+          ? { ...l, approvalStatus: 'pending_verification', status: 'success' }
+          : l
+      )
+    );
+    setLastOpenedPostLog({
+      logId: log.id,
+      groupName: log.groupName,
+      groupUrl: log.groupUrl
+    });
+
+    try {
+      window.postMessage(
+        {
+          type: 'AUTOVIRAL_OPEN_GROUP_FOR_POST',
+          logId: log.id,
+          groupId: log.groupId,
+          groupUrl: log.groupUrl,
+          groupName: log.groupName,
+          fullText,
+          autoJoinAndPost: true
+        },
+        '*'
+      );
+    } catch {}
+
+    setExtensionSyncBanner({
+      message: `🔄 Reabrindo "${log.groupName}" para verificar aprovação e finalizar a postagem automaticamente!`,
+      tone: 'success'
+    });
   };
 
   // Toggle Bot Execution with Background Persistence
@@ -2485,13 +2549,13 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       zip.file('README.md', readmeText);
       zip.file(
         'COMO-INSTALAR.txt',
-        `INSTRUÇÕES DE INSTALAÇÃO NO GOOGLE CHROME (AutoViral AI v1.3.5):\n\n1. Extraia este arquivo ZIP em uma pasta nova.\n2. No Chrome, abra chrome://extensions e REMOVA extensões AutoViral antigas (deixe APENAS UMA v1.3.5).\n3. Ative a chave "Modo do desenvolvedor" (topo direito).\n4. Clique em "Carregar sem compactação" (topo esquerdo) e escolha a pasta extraída.\n5. Abra o Facebook (grupos), role a busca, clique em "Mapear Grupos" e depois em "Enviar para o Painel".`
+        `INSTRUÇÕES DE INSTALAÇÃO NO GOOGLE CHROME (AutoViral AI v1.3.6):\n\n1. Extraia este arquivo ZIP em uma pasta nova.\n2. No Chrome, abra chrome://extensions e REMOVA extensões AutoViral antigas (deixe APENAS UMA v1.3.6).\n3. Ative a chave "Modo do desenvolvedor" (topo direito).\n4. Clique em "Carregar sem compactação" (topo esquerdo) e escolha a pasta extraída.\n5. Abra o Facebook (grupos), role a busca, clique em "Mapear Grupos" e depois em "Enviar para o Painel".`
       );
 
       const blob = await zip.generateAsync({ type: 'blob' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = 'extensao-autoviral-v1.3.5.zip';
+      link.download = 'extensao-autoviral-v1.3.6.zip';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -2499,7 +2563,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       console.error('Error generating extension zip:', err);
       const fallbackLink = document.createElement('a');
       fallbackLink.href = '/api/extension/download';
-      fallbackLink.download = 'extensao-autoviral-v1.3.5.zip';
+      fallbackLink.download = 'extensao-autoviral-v1.3.6.zip';
       document.body.appendChild(fallbackLink);
       fallbackLink.click();
       document.body.removeChild(fallbackLink);
@@ -2515,6 +2579,9 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
   const verifiedPublishedLogs = botLogs.filter(
     l => l.isVerifiedReal === true && l.status === 'success' && l.approvalStatus === 'published'
   );
+  const joinRequestedLogs = botLogs.filter(
+    l => l.approvalStatus === 'join_requested'
+  );
   const notMemberLogs = botLogs.filter(
     l => l.approvalStatus === 'not_member'
   );
@@ -2526,6 +2593,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       l.isVerifiedReal !== true &&
       l.approvalStatus !== 'pending_verification' &&
       l.approvalStatus !== 'not_member' &&
+      l.approvalStatus !== 'join_requested' &&
       l.status === 'success'
   );
   const dispatchedGroupIds = new Set(
@@ -2534,7 +2602,8 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
         l =>
           l.isVerifiedReal === true ||
           l.approvalStatus === 'pending_verification' ||
-          l.approvalStatus === 'not_member'
+          l.approvalStatus === 'not_member' ||
+          l.approvalStatus === 'join_requested'
       )
       .map(l => l.groupId)
   );
@@ -2544,7 +2613,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
 
   const handleToggleLogApprovalStatus = (
     logId: string,
-    nextApproval: 'awaiting_admin' | 'published' | 'not_member'
+    nextApproval: 'awaiting_admin' | 'published' | 'not_member' | 'join_requested'
   ) => {
     setBotLogs(prev =>
       prev.map(l =>
@@ -2566,7 +2635,8 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
         l =>
           l.isVerifiedReal === true ||
           l.approvalStatus === 'pending_verification' ||
-          l.approvalStatus === 'not_member'
+          l.approvalStatus === 'not_member' ||
+          l.approvalStatus === 'join_requested'
       )
     );
     setPostsLogFilter('all');
@@ -2995,7 +3065,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
             >
               <span className="flex items-center gap-2.5 truncate">
                 <HelpCircle className="w-4 h-4 text-slate-400 shrink-0" />
-                <span className="truncate">Tutorial Chrome (v1.3.5)</span>
+                <span className="truncate">Tutorial Chrome (v1.3.6)</span>
               </span>
             </button>
           </div>
@@ -3043,7 +3113,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                   <span>🗺️ Passo a Passo Simples: Onde Estão Seus Grupos e Como Divulgar</span>
                 </h2>
                 <p className="text-xs text-slate-300 mt-0.5">
-                  Dica importante: deixe apenas <strong>1 extensão AutoViral (v1.3.5)</strong> ativa no Chrome e use sempre este painel oficial (feche o site antigo <code className="text-amber-300">vercel.app</code> se estiver aberto).
+                  Dica importante: deixe apenas <strong>1 extensão AutoViral (v1.3.6)</strong> ativa no Chrome e use sempre este painel oficial (feche o site antigo <code className="text-amber-300">vercel.app</code> se estiver aberto).
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -3076,7 +3146,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                 <p className="text-[11px] text-slate-400 leading-relaxed">Pesquise grupos no Facebook (ex: pedagogia, renda extra) e role a lista para carregar os cards.</p>
               </div>
               <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3">
-                <div className="font-black text-emerald-300 mb-1">2. Mapeie &amp; Envie (v1.3.5)</div>
+                <div className="font-black text-emerald-300 mb-1">2. Mapeie &amp; Envie (v1.3.6)</div>
                 <p className="text-[11px] text-slate-400 leading-relaxed">Clique em <strong>Mapear Grupos</strong> e depois em <strong>Enviar Grupos para o Painel</strong> na extensão.</p>
               </div>
               <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3">
@@ -3790,6 +3860,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
               <div className="space-y-1.5 max-h-36 overflow-y-auto">
                 {botLogs.slice(0, 4).map((log, idx) => {
                   const isAwaitingAdmin = log.approvalStatus === 'awaiting_admin';
+                  const isJoinReq = log.approvalStatus === 'join_requested';
                   const isNotMember = log.approvalStatus === 'not_member';
                   const isPendingVerify = log.approvalStatus === 'pending_verification';
                   const isVerifiedPub = log.isVerifiedReal === true && log.approvalStatus === 'published';
@@ -3797,7 +3868,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                     <div key={log.id || idx} className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1 text-[11px] py-1 border-b border-slate-900">
                       <div className="flex items-center gap-2 min-w-0">
                         <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                          isNotMember ? 'bg-rose-400' : isAwaitingAdmin ? 'bg-amber-400' : isVerifiedPub ? 'bg-emerald-400' : 'bg-blue-400'
+                          isNotMember ? 'bg-rose-400' : isJoinReq ? 'bg-purple-400' : isAwaitingAdmin ? 'bg-amber-400' : isVerifiedPub ? 'bg-emerald-400' : 'bg-blue-400'
                         }`} />
                         <strong className="text-white font-mono tabular-nums shrink-0">{log.postedAt}</strong>
                         <span className="text-slate-300 truncate max-w-[260px]">{log.groupName}</span>
@@ -3806,6 +3877,8 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                         <span className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${
                           isNotMember
                             ? 'bg-rose-950/80 text-rose-300 border-rose-800/60'
+                            : isJoinReq
+                            ? 'bg-purple-950/80 text-purple-300 border-purple-800/60'
                             : isAwaitingAdmin
                             ? 'bg-amber-950/80 text-amber-300 border-amber-800/60'
                             : isVerifiedPub
@@ -3816,6 +3889,8 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                         }`}>
                           {isNotMember
                             ? 'Precisa Participar'
+                            : isJoinReq
+                            ? 'Entrada Solicitada'
                             : isAwaitingAdmin
                             ? 'Aguardando Admin'
                             : isVerifiedPub
@@ -4853,18 +4928,28 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                 </div>
               </div>
 
-              {/* Assisted Real Posting Notice & Controls */}
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-2 text-xs">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-bold text-white">
-                    Como funciona o Disparo Real nos Grupos do Facebook:
+              {/* Auto-Join + Auto-Post Controls */}
+              <div className="bg-slate-950 border border-emerald-800/50 rounded-xl p-3.5 space-y-2.5 text-xs">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <span className="font-bold text-white flex items-center gap-1.5">
+                    🤖 Fluxo Automático: Solicitar Entrada + Postagem (Extensão v1.3.6)
                   </span>
-                  <span className="text-[11px] font-semibold text-emerald-400">
-                    Verificação Real Ativa
-                  </span>
+                  <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={autoJoinAndPostEnabled}
+                      onChange={(e) => setAutoJoinAndPostEnabled(e.target.checked)}
+                      className="w-4 h-4 accent-emerald-500 rounded cursor-pointer"
+                    />
+                    <span className={`text-[11px] font-bold ${autoJoinAndPostEnabled ? 'text-emerald-400' : 'text-slate-400'}`}>
+                      {autoJoinAndPostEnabled ? 'Ativo (Entra &amp; Posta)' : 'Apenas Assistido'}
+                    </span>
+                  </label>
                 </div>
-                <p className="text-[11px] text-slate-400 leading-relaxed">
-                  Nenhum site pode postar escondido dentro do Facebook. Ao clicar abaixo, o sistema copia sua copy, abre o grupo real via Extensão Chrome, verifica se você já participa do grupo (avisa se ainda tiver o botão <strong className="text-slate-200">"Participar do grupo"</strong>) e só registra <strong className="text-emerald-400">Postagem Feita</strong> ou <strong className="text-amber-300">Aguardando Admin</strong> após confirmação real.
+                <p className="text-[11px] text-slate-300 leading-relaxed">
+                  <strong>1.</strong> Se ainda aparecer <strong>"Participar do grupo"</strong>, a Extensão v1.3.6 clica automaticamente para solicitar sua entrada.
+                  <br />
+                  <strong>2.</strong> Em grupos públicos (entrada imediata), ela já abre <em>"Escreva algo..."</em>, cola a copy e publica na sequência. Em grupos que exigem aprovação do admin, ela registra <strong className="text-purple-300">Entrada Solicitada</strong> e guarda o post para você clicar em <strong>🔄 Tentar Postar</strong> quando aprovar!
                 </p>
 
                 {lastOpenedPostLog && (
@@ -5036,6 +5121,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                 <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
                   {botLogs.map(log => {
                     const isAwaiting = log.approvalStatus === 'awaiting_admin';
+                    const isJoinReq = log.approvalStatus === 'join_requested';
                     const isNotMem = log.approvalStatus === 'not_member';
                     const isPendingVer = log.approvalStatus === 'pending_verification';
                     const isVerifiedPub = log.isVerifiedReal === true && log.approvalStatus === 'published';
@@ -5049,6 +5135,8 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                           <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border shrink-0 ${
                             isNotMem
                               ? 'text-rose-300 bg-rose-950 border-rose-800/60'
+                              : isJoinReq
+                              ? 'text-purple-300 bg-purple-950 border-purple-800/60'
                               : isAwaiting
                               ? 'text-amber-300 bg-amber-950 border-amber-800/60'
                               : isVerifiedPub
@@ -5059,6 +5147,8 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                           }`}>
                             {isNotMem
                               ? 'Precisa Participar'
+                              : isJoinReq
+                              ? 'Entrada Solicitada'
                               : isAwaiting
                               ? 'Aguardando Admin'
                               : isVerifiedPub
@@ -5073,16 +5163,27 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                           {log.headline}
                         </p>
 
-                        <div className="flex items-center justify-between pt-1 text-[10px] text-slate-500">
+                        <div className="flex items-center justify-between pt-1 text-[10px] text-slate-500 gap-2">
                           <span className="font-mono tabular-nums">{log.postedAt} · {log.intervalWaitedSeconds}s</span>
-                          <a
-                            href={log.groupUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-blue-400 hover:text-blue-300 flex items-center gap-0.5"
-                          >
-                            Ver no FB <ExternalLink className="w-2.5 h-2.5" />
-                          </a>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {(isJoinReq || isNotMem) && (
+                              <button
+                                type="button"
+                                onClick={() => handleRetryJoinOrPost(log)}
+                                className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold cursor-pointer transition"
+                              >
+                                🔄 Entrar / Postar Agora
+                              </button>
+                            )}
+                            <a
+                              href={log.groupUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-blue-400 hover:text-blue-300 flex items-center gap-0.5"
+                            >
+                              Ver no FB <ExternalLink className="w-2.5 h-2.5" />
+                            </a>
+                          </div>
                         </div>
                       </div>
                     );
@@ -5136,7 +5237,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
             {/* HOW TO MAP YOUTUBE URLS GUIDE */}
             <div className="bg-red-950/20 border border-red-800/40 rounded-xl p-3.5 grid grid-cols-1 md:grid-cols-3 gap-2.5 text-xs">
               <div className="bg-slate-950/80 border border-slate-800 rounded-lg p-2.5">
-                <div className="font-black text-red-300 mb-0.5">Opção 1: Pela Extensão Chrome (v1.3.5)</div>
+                <div className="font-black text-red-300 mb-0.5">Opção 1: Pela Extensão Chrome (v1.3.6)</div>
                 <p className="text-[11px] text-slate-300 leading-relaxed">Abra a busca ou um vídeo no YouTube, clique em <strong>▶️ Mapear Vídeos / URLs do YouTube</strong> na extensão e depois em <strong>📡 Enviar Tudo</strong>.</p>
               </div>
               <div className="bg-slate-950/80 border border-slate-800 rounded-lg p-2.5">
@@ -5606,6 +5707,9 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
           if (postsLogFilter === 'published') {
             return l.isVerifiedReal === true && l.status === 'success' && l.approvalStatus === 'published';
           }
+          if (postsLogFilter === 'join_requested') {
+            return l.approvalStatus === 'join_requested';
+          }
           if (postsLogFilter === 'not_member') {
             return l.approvalStatus === 'not_member';
           }
@@ -5613,7 +5717,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
             return l.approvalStatus === 'pending_verification';
           }
           if (postsLogFilter === 'legacy_unverified') {
-            return l.isVerifiedReal !== true && l.approvalStatus !== 'pending_verification' && l.approvalStatus !== 'not_member' && l.status === 'success';
+            return l.isVerifiedReal !== true && l.approvalStatus !== 'pending_verification' && l.approvalStatus !== 'not_member' && l.approvalStatus !== 'join_requested' && l.status === 'success';
           }
           if (postsLogFilter === 'error') {
             return l.status === 'error' && l.approvalStatus !== 'not_member';
@@ -5630,7 +5734,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                   Display Real de Status dos Grupos &amp; Postagens
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Acompanhe apenas status reais confirmados no Facebook: Postagem Feita, Aguardando Permissão do Administrador, Precisa Participar e Pendente na fila.
+                  Acompanhe apenas status reais confirmados no Facebook: Postagem Feita, Aguardando Permissão do Administrador, Entrada Solicitada e Pendente na fila.
                 </p>
               </div>
 
@@ -5644,7 +5748,9 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                         l.postedAt || '',
                         (l.groupName || '').replace(/,/g, ' '),
                         l.groupUrl || '',
-                        l.approvalStatus === 'not_member'
+                        l.approvalStatus === 'join_requested'
+                          ? 'Entrada Solicitada (Aguard. Admin Aprovar)'
+                          : l.approvalStatus === 'not_member'
                           ? 'Precisa Participar (Não é Membro)'
                           : l.approvalStatus === 'pending_verification'
                           ? 'Aberto — Aguardando Confirmação'
@@ -5815,6 +5921,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                   { id: 'all', label: `Todos (${botLogs.length + pendingQueueGroups.length})` },
                   { id: 'awaiting_admin', label: `Aguardando Admin (${awaitingAdminLogs.length})` },
                   { id: 'published', label: `Postagem Feita (${verifiedPublishedLogs.length})` },
+                  { id: 'join_requested', label: `Entrada Solicitada (${joinRequestedLogs.length})` },
                   { id: 'not_member', label: `Precisa Participar (${notMemberLogs.length})` },
                   { id: 'pending_verification', label: `Aguard. Confirmação (${pendingVerificationLogs.length})` },
                   { id: 'pending', label: `Pendente na Fila (${pendingQueueGroups.length})` },
@@ -5904,10 +6011,11 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                 <div className="divide-y divide-slate-800/70">
                   {filteredLogs.map(log => {
                     const isAwaitingAdmin = log.approvalStatus === 'awaiting_admin';
+                    const isJoinRequested = log.approvalStatus === 'join_requested';
                     const isNotMember = log.approvalStatus === 'not_member';
                     const isPendingVerification = log.approvalStatus === 'pending_verification';
                     const isVerifiedPublished = log.isVerifiedReal === true && log.approvalStatus === 'published';
-                    const isLegacyUnverified = log.isVerifiedReal !== true && !isPendingVerification && !isNotMember;
+                    const isLegacyUnverified = log.isVerifiedReal !== true && !isPendingVerification && !isNotMember && !isJoinRequested;
                     return (
                       <div key={log.id} className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs hover:bg-slate-950/60 px-2 rounded-lg transition">
                         <div className="space-y-1 min-w-0">
@@ -5925,6 +6033,10 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                             {isNotMember ? (
                               <span className="px-2 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-800/60 text-[11px] font-semibold">
                                 Precisa Participar (Não é Membro)
+                              </span>
+                            ) : isJoinRequested ? (
+                              <span className="px-2 py-0.5 rounded bg-purple-950 text-purple-300 border border-purple-700/60 text-[11px] font-semibold">
+                                Entrada Solicitada — Aguardando Admin Aprovar
                               </span>
                             ) : isPendingVerification ? (
                               <span className="px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800/60 text-[11px] font-semibold">
@@ -5960,6 +6072,15 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                         </div>
 
                         <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                          {(isJoinRequested || isNotMember) && (
+                            <button
+                              type="button"
+                              onClick={() => handleRetryJoinOrPost(log)}
+                              className="px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[11px] transition cursor-pointer"
+                            >
+                              🔄 Entrar / Postar Agora
+                            </button>
+                          )}
                           {!isVerifiedPublished && (
                             <button
                               type="button"

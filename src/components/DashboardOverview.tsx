@@ -8,19 +8,18 @@ import {
   Percent,
   Sparkles,
   Users,
-  Smartphone,
   ShieldCheck,
   ArrowUpRight,
   Flame,
-  Zap,
   RotateCcw,
   Target,
   MessageSquare,
   Phone,
   Bot,
-  MapPin,
   Mail,
   Share2,
+  Zap,
+  ExternalLink,
 } from 'lucide-react';
 import { Campaign, TrackingEvent, CustomerLead } from '../types';
 
@@ -44,6 +43,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   onOpenCustomerModal,
 }) => {
   const [radarView, setRadarView] = React.useState<'visits' | 'customers'>('visits');
+
   // Aggregate KPI metrics
   const totalImpressions = campaigns.reduce((acc, c) => acc + c.impressions, 0);
   const totalClicks = campaigns.reduce((acc, c) => acc + c.clicks, 0);
@@ -52,549 +52,334 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   const avgConversionRate =
     totalClicks > 0 ? ((totalConversions / totalClicks) * 100).toFixed(2) : '0.00';
 
-  // Real-time events calculations
-  const recentEvents = trackingEvents.slice(0, 7);
+  const recentEvents = trackingEvents.slice(0, 6);
   const highIntentLeads = trackingEvents.filter((e) => (e.leadScore ?? 0) >= 85);
+  const realClicksCount = trackingEvents.filter((e) => e.isSimulation === false).length;
 
-  // Group events by source
-  const sourceStats: Record<string, number> = {
-    tiktok: 0,
-    pinterest: 0,
-    instagram: 0,
-    whatsapp: 0,
-    google_organic: 0,
-  };
-  trackingEvents.forEach((evt) => {
-    if (sourceStats[evt.source] !== undefined) {
-      sourceStats[evt.source] += 1;
-    }
-  });
+  const formattedRevenue = new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+  }).format(totalRevenue);
 
-  // Brazilian state distribution
-  const stateCounts: Record<string, number> = {};
-  trackingEvents.forEach((e) => {
-    const st = e.geo?.state || 'SP';
-    stateCounts[st] = (stateCounts[st] || 0) + 1;
-  });
+  const quickLaunchModules = [
+    {
+      id: 'robo_cidades',
+      title: 'Robô por Cidades',
+      meta: 'Direct orgânico segmentado',
+      action: 'Ligar Robô',
+      icon: Bot,
+      accent: 'text-emerald-400',
+    },
+    {
+      id: 'chrome_fb_groups',
+      title: 'Grupos FB & ManyChat',
+      meta: 'Extensão 300s–400s · Link curto',
+      action: 'Abrir Grupos',
+      icon: Share2,
+      accent: 'text-blue-400',
+    },
+    {
+      id: 'meta_ads',
+      title: 'Alavanca Meta Ads',
+      meta: 'Auto-DM em anúncios ativos',
+      action: 'Abrir Meta Ads',
+      icon: Zap,
+      accent: 'text-indigo-400',
+    },
+    {
+      id: 'brevo_disparador',
+      title: 'Disparador Brevo',
+      meta: 'E-mail e WhatsApp com tracking',
+      action: 'Abrir Brevo',
+      icon: Mail,
+      accent: 'text-cyan-400',
+    },
+  ];
 
   return (
     <div className="space-y-6">
-      {/* Welcome Banner for Family Income & Freedom */}
-      <div className="bg-gradient-to-r from-slate-900 via-indigo-950/60 to-slate-900 border border-indigo-800/40 rounded-2xl p-6 relative overflow-hidden shadow-2xl">
-        <div className="absolute right-0 top-0 bottom-0 w-1/3 bg-radial from-emerald-500/10 to-transparent pointer-events-none" />
-        <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-          <div className="space-y-2 max-w-2xl">
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-950/80 border border-emerald-700/50 text-emerald-400 text-xs font-semibold">
-              <Zap className="w-3.5 h-3.5" />
-              <span>Sistema Autônomo para Geração de Renda Familiar</span>
-            </div>
-            <h2 className="text-2xl font-extrabold text-white tracking-tight">
-              Seu Negócio Digital Rodando no Piloto Automático
-            </h2>
-            <p className="text-sm text-slate-300 leading-relaxed">
-              Você não precisa pagar fortunas para a Meta nem arriscar contas bloqueadas.
-              O algoritmo do <strong>TikTok, Pinterest e Instagram</strong> entrega seus produtos
-              para pessoas reais através de conteúdos que atacam as maiores dores do público.
-            </p>
+      {/* Workspace Header & Primary Actions */}
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+        <div className="space-y-1.5 max-w-2xl">
+          <div className="flex items-center gap-2 text-xs text-slate-400 font-medium">
+            <span className="w-2 h-2 rounded-full bg-emerald-400" />
+            <span>Webhook Kiwify &amp; Hotmart conectado</span>
+            <span className="text-slate-600">·</span>
+            <span>Rastreamento orgânico ativo</span>
           </div>
-
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto">
-            <button
-              onClick={() => onNavigateTab('lead_finder')}
-              className="flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-slate-950 font-bold text-xs px-4 py-3 rounded-xl shadow-lg shadow-emerald-600/30 transition transform active:scale-95"
-            >
-              <Target className="w-4 h-4 text-slate-950" />
-              <span>Achar Pessoas Reais (Guia & Ferramentas)</span>
-            </button>
-
-            <button
-              onClick={() => onNavigateTab('pain_finder')}
-              className="flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-indigo-300 font-semibold text-xs px-4 py-3 rounded-xl transition"
-            >
-              <Sparkles className="w-4 h-4 text-amber-300" />
-              <span>Buscar Dores com IA</span>
-            </button>
-
-            {onResetAllMetrics && (
-              <button
-                onClick={onResetAllMetrics}
-                className="flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-amber-400 font-semibold text-xs px-3 py-3 rounded-xl transition"
-                title="Zerar dados de exemplo para acompanhar apenas seus números reais"
-              >
-                <RotateCcw className="w-4 h-4" />
-                <span>Zerar (R$ 0,00)</span>
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Robô Divulgador por Cidades & Saldo Integrado (Destravar 1ª Venda) */}
-      <div className="bg-gradient-to-r from-emerald-950 via-slate-900 to-indigo-950 border-2 border-emerald-500/80 rounded-2xl p-5 shadow-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3.5">
-          <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center text-white shadow-lg shadow-emerald-500/30 shrink-0">
-            <Bot className="w-6 h-6 animate-pulse" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-sm font-black text-white">
-                🤖 Robô Divulgador Autônomo & Disparo por Cidades
-              </span>
-              <span className="text-[10px] bg-amber-950 text-amber-300 border border-amber-700 px-2 py-0.5 rounded-full font-bold">
-                🔥 Destravar 1ª Venda no Pix
-              </span>
-              <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded-full font-bold">
-                Pague Direto Aqui
-              </span>
-            </div>
-            <p className="text-xs text-slate-300 mt-1">
-              O robô entra nas contas (@fluentimmersion), localiza mães e pedagogas em <strong>Curitiba, São Paulo, Rio, BH</strong> e envia Direct com a foto da apostila de R$ 9,90. Acompanhe os envios ao vivo!
-            </p>
-          </div>
-        </div>
-
-        <button
-          onClick={() => onNavigateTab('robo_cidades')}
-          className="px-5 py-3 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-emerald-900/40 flex items-center gap-2 shrink-0 transition cursor-pointer transform hover:scale-105 active:scale-95"
-        >
-          <span>Ligar Robô por Cidades</span>
-          <ArrowUpRight className="w-4 h-4 text-slate-950" />
-        </button>
-      </div>
-
-      {/* Meta Ads Active Campaign Detected Banner */}
-      <div className="bg-gradient-to-r from-blue-950 via-slate-900 to-indigo-950 border-2 border-blue-500/60 rounded-2xl p-5 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3.5">
-          <div className="w-10 h-10 rounded-2xl bg-blue-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/30 shrink-0">
-            <Zap className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-sm font-black text-white">
-                Campanha no Meta Ads Ativa: FluentImmersion (71542...)
-              </span>
-              <span className="text-[10px] bg-blue-900 text-blue-200 border border-blue-700 px-2 py-0.5 rounded-full font-bold">
-                3 Criativos Mapeados
-              </span>
-              <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded-full font-bold">
-                Auto-DM nos Anúncios
-              </span>
-            </div>
-            <p className="text-xs text-slate-300 mt-0.5">
-              Multiplique as vendas dos seus anúncios respondendo comentários no Direct em 3 segundos e rastreando conversões no Radar.
-            </p>
-          </div>
-        </div>
-
-        <button
-          onClick={() => onNavigateTab('meta_ads')}
-          className="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-blue-900/40 flex items-center gap-1.5 shrink-0 transition cursor-pointer"
-        >
-          <span>Abrir Alavanca Meta Ads</span>
-          <ArrowUpRight className="w-4 h-4" />
-        </button>
-      </div>
-
-      {/* Brevo Email & WhatsApp Disparador Banner */}
-      <div className="bg-gradient-to-r from-emerald-950 via-slate-900 to-teal-950 border-2 border-emerald-500/60 rounded-2xl p-5 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3.5">
-          <div className="w-10 h-10 rounded-2xl bg-emerald-600 flex items-center justify-center text-white shadow-lg shadow-emerald-500/30 shrink-0">
-            <Mail className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-sm font-black text-white">
-                Disparador Brevo &amp; WhatsApp: 579 Contatos Prontos
-              </span>
-              <span className="text-[10px] bg-emerald-900 text-emerald-200 border border-emerald-700 px-2 py-0.5 rounded-full font-bold">
-                4.742 Créditos
-              </span>
-              <span className="text-[10px] bg-cyan-950 text-cyan-300 border border-cyan-800 px-2 py-0.5 rounded-full font-bold">
-                Abertura 30,2%
-              </span>
-              <span className="text-[10px] bg-purple-950 text-purple-300 border border-purple-800 px-2 py-0.5 rounded-full font-bold">
-                Botão Kiwify R$ 9,90
-              </span>
-            </div>
-            <p className="text-xs text-slate-300 mt-0.5">
-              Crie campanhas nos formatos exatos com upload de fotos do produto, texto persuasivo e botão direto para o checkout com rastreio de aberturas e cliques!
-            </p>
-          </div>
-        </div>
-
-        <button
-          onClick={() => onNavigateTab('brevo_disparador')}
-          className="px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-emerald-900/40 flex items-center gap-1.5 shrink-0 transition cursor-pointer"
-        >
-          <span>Abrir Disparador Brevo</span>
-          <ArrowUpRight className="w-4 h-4 text-slate-950" />
-        </button>
-      </div>
-
-      {/* Chrome Extension & Facebook Groups Mapeador Banner */}
-      <div className="bg-gradient-to-r from-blue-950 via-slate-900 to-indigo-950 border-2 border-blue-500/60 rounded-2xl p-5 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3.5">
-          <div className="w-10 h-10 rounded-2xl bg-blue-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/30 shrink-0">
-            <Share2 className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-sm font-black text-white">
-                Extensão Chrome: Mapeador FB por Rolagem &amp; Robô YouTube
-              </span>
-              <span className="text-[10px] bg-blue-900 text-blue-200 border border-blue-700 px-2 py-0.5 rounded-full font-bold">
-                Rolagem Automática
-              </span>
-              <span className="text-[10px] bg-red-950 text-red-300 border border-red-800 px-2 py-0.5 rounded-full font-bold">
-                YouTube Comentários &amp; Likes
-              </span>
-              <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-2 py-0.5 rounded-full font-bold">
-                300s a 400s • Até 500/dia
-              </span>
-            </div>
-            <p className="text-xs text-slate-300 mt-0.5">
-              Conforme você rola a busca de grupos no Facebook, o robô captura todos os grupos automaticamente. Divulgue com descanso anti-ban e comente em canais do YouTube!
-            </p>
-          </div>
-        </div>
-
-        <button
-          onClick={() => onNavigateTab('chrome_fb_groups')}
-          className="px-4 py-2.5 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 text-white font-black text-xs rounded-xl shadow-lg shadow-blue-900/40 flex items-center gap-1.5 shrink-0 transition cursor-pointer"
-        >
-          <span>Abrir Mapeador FB &amp; YouTube</span>
-          <ArrowUpRight className="w-4 h-4 text-white" />
-        </button>
-      </div>
-
-      {/* Real Metrics Transparency & Defense Alert Banner */}
-      <div className="bg-[#121624] border border-slate-800 rounded-2xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs font-bold text-white flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse inline-block" />
-              Veracidade das Métricas:
-            </span>
-            <span className="text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-700/60 font-black px-2 py-0.5 rounded-full">
-              🟢 Conexão com Webhook Kiwify &amp; Hotmart Ativa
-            </span>
-            <span className="text-[10px] bg-slate-800 text-slate-300 font-semibold px-2 py-0.5 rounded-full">
-              Rastreamento de Cliques em Tempo Real
-            </span>
-          </div>
-          <p className="text-xs text-slate-400">
-            {totalRevenue > 0
-              ? 'Os valores abaixo incluem simulações de teste do painel somadas aos acessos rastreados. Para ver somente vendas 100% reais, clique em "Zerar para Base R$ 0,00".'
-              : 'Painel zerado. Pronto para receber cliques e registrar apenas vendas reais confirmadas.'}
+          <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
+            Visão Geral da Operação
+          </h2>
+          <p className="text-xs sm:text-sm text-slate-400 leading-relaxed">
+            Acompanhe alcance orgânico, cliques reais nos links rastreados, atendimento no WhatsApp e conversão por campanha em um único painel.
           </p>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0 flex-wrap">
+        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          <button
+            type="button"
+            onClick={() => onNavigateTab('lead_finder')}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold text-xs transition cursor-pointer"
+          >
+            <Target className="w-4 h-4" />
+            <span>Achar Pessoas Reais</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onNavigateTab('pain_finder')}
+            className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold text-xs transition cursor-pointer"
+          >
+            <Sparkles className="w-4 h-4 text-amber-400" />
+            <span>Buscar Dores (IA)</span>
+          </button>
+
           {onResetAllMetrics && (
             <button
+              type="button"
               onClick={onResetAllMetrics}
-              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-amber-300 font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
-              title="Zerar todos os números para começar do zero absoluto"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 text-amber-400 font-semibold text-xs transition cursor-pointer"
+              title="Zerar simulações para acompanhar apenas vendas reais a partir de R$ 0,00"
             >
-              <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
-              <span>Zerar para Base R$ 0,00</span>
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Zerar (R$ 0,00)</span>
             </button>
           )}
-          <button
-            onClick={() => onNavigateTab('chrome_fb_groups')}
-            className="px-3 py-1.5 bg-blue-950/80 hover:bg-blue-900 border border-blue-600/60 text-blue-300 font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer"
-          >
-            <ShieldCheck className="w-3.5 h-3.5 text-blue-400" />
-            <span>Ver Escudo de Defesa</span>
-          </button>
         </div>
       </div>
 
-      {/* KPI Stats Grid */}
+      {/* 4-Card KPI Strip */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Card 1: Faturamento & Renda Familiar */}
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 hover:border-emerald-500/50 transition">
-          <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-xs font-semibold uppercase tracking-wider">Renda Familiar Gerada</span>
-            <div className="p-2 rounded-lg bg-emerald-950/70 text-emerald-400 border border-emerald-800/40">
-              <DollarSign className="w-4 h-4" />
-            </div>
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-2">
+          <div className="flex items-center justify-between text-slate-400">
+            <span className="text-[11px] font-semibold uppercase tracking-wider">Renda Gerada</span>
+            <DollarSign className="w-4 h-4 text-emerald-400" />
           </div>
-          <div className="text-2xl font-black text-white">
-            {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalRevenue)}
+          <div className="text-2xl font-bold text-white font-mono tabular-nums tracking-tight">
+            {formattedRevenue}
           </div>
-          <div className="mt-2 flex items-center gap-1.5 text-xs text-emerald-400">
-            <ArrowUpRight className="w-3.5 h-3.5" />
-            <span className="font-semibold">+32.4%</span>
-            <span className="text-slate-400">vs semana anterior</span>
+          <div className="text-xs text-slate-400 flex items-center gap-1.5">
+            <span className="text-emerald-400 font-semibold font-mono tabular-nums">+32,4%</span>
+            <span>vs semana anterior</span>
           </div>
         </div>
 
-        {/* Card 2: Visualizações Orgânicas */}
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 hover:border-indigo-500/50 transition">
-          <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-xs font-semibold uppercase tracking-wider">Alcance Orgânico Total</span>
-            <div className="p-2 rounded-lg bg-indigo-950/70 text-indigo-400 border border-indigo-800/40">
-              <Eye className="w-4 h-4" />
-            </div>
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-2">
+          <div className="flex items-center justify-between text-slate-400">
+            <span className="text-[11px] font-semibold uppercase tracking-wider">Alcance Orgânico</span>
+            <Eye className="w-4 h-4 text-indigo-400" />
           </div>
-          <div className="text-2xl font-black text-white">
-            {totalImpressions.toLocaleString('pt-BR')} <span className="text-sm font-normal text-slate-400">views</span>
+          <div className="text-2xl font-bold text-white font-mono tabular-nums tracking-tight">
+            {totalImpressions.toLocaleString('pt-BR')}
           </div>
-          <div className="mt-2 flex items-center gap-1 text-xs text-indigo-300">
+          <div className="text-xs text-slate-400 flex items-center gap-1.5">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-            <span>100% Gratuito (Zero Gasto em Anúncios)</span>
+            <span>Zero custo em tráfego</span>
           </div>
         </div>
 
-        {/* Card 3: Cliques & Entradas no Funil */}
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 hover:border-cyan-500/50 transition">
-          <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-xs font-semibold uppercase tracking-wider">Cliques & Leads Rastreados</span>
-            <div className="p-2 rounded-lg bg-cyan-950/70 text-cyan-400 border border-cyan-800/40">
-              <MousePointerClick className="w-4 h-4" />
-            </div>
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-2">
+          <div className="flex items-center justify-between text-slate-400">
+            <span className="text-[11px] font-semibold uppercase tracking-wider">Cliques &amp; Acessos</span>
+            <MousePointerClick className="w-4 h-4 text-cyan-400" />
           </div>
-          <div className="text-2xl font-black text-white">
-            {totalClicks.toLocaleString('pt-BR')} <span className="text-sm font-normal text-slate-400">acessos</span>
+          <div className="text-2xl font-bold text-white font-mono tabular-nums tracking-tight">
+            {totalClicks.toLocaleString('pt-BR')}
           </div>
-          <div className="mt-2 flex items-center gap-1.5 text-xs text-cyan-400">
-            <Users className="w-3.5 h-3.5" />
-            <span>{highIntentLeads.length} leads quentes (Score 85+)</span>
+          <div className="text-xs text-slate-400 flex items-center gap-2 font-mono tabular-nums">
+            <span className="text-cyan-400">{highIntentLeads.length} score 85+</span>
+            <span className="text-slate-600">·</span>
+            <span className="text-emerald-400">{realClicksCount} reais</span>
           </div>
         </div>
 
-        {/* Card 4: Taxa de Conversão & ROI */}
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 hover:border-purple-500/50 transition">
-          <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-xs font-semibold uppercase tracking-wider">Conversão & Vendas</span>
-            <div className="p-2 rounded-lg bg-purple-950/70 text-purple-400 border border-purple-800/40">
-              <Percent className="w-4 h-4" />
-            </div>
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-2">
+          <div className="flex items-center justify-between text-slate-400">
+            <span className="text-[11px] font-semibold uppercase tracking-wider">Taxa de Conversão</span>
+            <Percent className="w-4 h-4 text-purple-400" />
           </div>
-          <div className="text-2xl font-black text-white flex items-baseline gap-2">
-            <span>{avgConversionRate}%</span>
-            <span className="text-xs font-semibold text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/40">
+          <div className="flex items-baseline gap-2.5">
+            <span className="text-2xl font-bold text-white font-mono tabular-nums tracking-tight">
+              {avgConversionRate}%
+            </span>
+            <span className="text-xs text-emerald-400 font-semibold font-mono tabular-nums">
               {totalConversions} vendas
             </span>
           </div>
-          <div className="mt-2 flex items-center gap-1.5 text-xs text-purple-300">
-            <span>ROI Orgânico:</span>
-            <strong className="text-emerald-400 font-bold">Infinito (Sem custo de anúncio)</strong>
+          <div className="text-xs text-slate-400">
+            ROI orgânico sem gasto de anúncio
           </div>
         </div>
       </div>
 
-      {/* Seção Explicativa: Onde Estão as Vendas & Saldo da Hotmart */}
-      <div className="p-5 bg-gradient-to-r from-slate-900 via-indigo-950/40 to-slate-900 border border-slate-800 rounded-2xl space-y-4">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-orange-500/10 border border-orange-500/30 flex items-center justify-center text-orange-400">
-              <DollarSign className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
-                <span>Onde Estão Essas Vendas & Saldo Real?</span>
-                <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-normal">
-                  Transparência de Saldo
-                </span>
-              </h3>
-              <p className="text-xs text-slate-400">
-                Entenda exatamente de onde vem o valor de {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalRevenue)} e onde o dinheiro cai
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 flex-wrap">
-            <a
-              href="https://app.hotmart.com/sales"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-4 py-2 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white font-bold text-xs rounded-xl shadow-md transition flex items-center gap-1.5"
+      {/* Quick Launch Strip (Replaces stacked full-width promo banners) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        {quickLaunchModules.map((mod) => {
+          const Icon = mod.icon;
+          return (
+            <button
+              key={mod.id}
+              type="button"
+              onClick={() => onNavigateTab(mod.id)}
+              className="group bg-slate-900 hover:bg-slate-800/80 border border-slate-800 hover:border-slate-700 rounded-xl p-4 text-left transition cursor-pointer flex flex-col justify-between gap-3"
             >
-              <span>Abrir Saldo na Hotmart ↗</span>
-            </a>
-            {onResetAllMetrics && (
-              <button
-                onClick={onResetAllMetrics}
-                className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-700 rounded-xl text-xs font-semibold transition flex items-center gap-1 cursor-pointer"
-                title="Zerar simulações e deixar apenas vendas reais"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>Zerar Simulações (R$ 0,00)</span>
-              </button>
-            )}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-          <div className="p-3.5 bg-slate-950/80 rounded-xl border border-slate-800 space-y-1.5">
-            <span className="font-bold text-white flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-amber-400"></span>
-              De onde veio o valor de R$ {totalRevenue.toFixed(2).replace('.', ',')} no painel?
-            </span>
-            <p className="text-slate-400 text-[11px] leading-relaxed">
-              Esse valor é a soma dos <strong>testes e simulações do painel</strong> (como a simulação de R$ 3,99 vista no radar e o teste de R$ 9,90). Eles servem para testar os gráficos e funis. Se desejar que o painel mostre <strong>R$ 0,00</strong> até entrar a primeira venda real, basta clicar no botão <strong>"Zerar Simulações"</strong>.
-            </p>
-          </div>
-
-          <div className="p-3.5 bg-slate-950/80 rounded-xl border border-emerald-900/40 space-y-1.5">
-            <span className="font-bold text-emerald-300 flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-              Onde cai o dinheiro de vendas reais?
-            </span>
-            <p className="text-slate-300 text-[11px] leading-relaxed">
-              O dinheiro dos clientes que compram <strong>cai diretamente na sua conta da Hotmart</strong> (ou Eduzz). A Hotmart recebe o Pix ou Cartão e transfere o dinheiro para o seu banco. O AutoViral AI é o robô que traz as pessoas e rastreia os cliques.
-            </p>
-          </div>
-        </div>
+              <div className="flex items-start justify-between gap-2">
+                <Icon className={`w-4 h-4 ${mod.accent} shrink-0 mt-0.5`} />
+                <ArrowUpRight className="w-3.5 h-3.5 text-slate-500 group-hover:text-white transition shrink-0" />
+              </div>
+              <div>
+                <div className="text-xs font-bold text-white">{mod.title}</div>
+                <div className="text-[11px] text-slate-400 mt-0.5">{mod.meta}</div>
+              </div>
+            </button>
+          );
+        })}
       </div>
 
-      {/* Main Grid: Funnel Chart & Real-Time Radar Preview */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column: Visual Funnel & Channel Breakdown (2 cols) */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* Funil de Conversão Visual */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
-            <div className="flex items-center justify-between mb-4">
+      {/* Main 2-Column SaaS Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Left Main Area (8 cols) */}
+        <div className="lg:col-span-8 space-y-6">
+          {/* Organic Conversion Funnel */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-4">
               <div>
-                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
                   <TrendingUp className="w-4 h-4 text-emerald-400" />
-                  Funil de Conversão Orgânica Automatizado
+                  <span>Funil de Conversão Orgânica</span>
                 </h3>
-                <p className="text-xs text-slate-400">
-                  Acompanhe em tempo real por onde os clientes chegam e onde convertem
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Acompanhe cada etapa do alcance até o checkout no Pix ou Cartão
                 </p>
               </div>
-              <span className="text-xs font-semibold px-2.5 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700">
-                Otimização IA Ativa
+              <span className="text-[11px] text-slate-400 font-medium">
+                Atualização em tempo real
               </span>
             </div>
 
-            {/* Funnel Visual Bars */}
-            <div className="space-y-3.5 pt-2">
+            <div className="space-y-4">
               <div>
-                <div className="flex justify-between text-xs font-medium mb-1">
-                  <span className="text-slate-300">1. Pessoas Alcançadas no TikTok, Pinterest & Instagram</span>
-                  <span className="text-white font-bold">{totalImpressions.toLocaleString('pt-BR')} (100%)</span>
+                <div className="flex justify-between text-xs mb-1.5">
+                  <span className="text-slate-300">1. Alcance Orgânico (TikTok, Pinterest, FB &amp; IG)</span>
+                  <span className="text-white font-semibold font-mono tabular-nums">
+                    {totalImpressions.toLocaleString('pt-BR')} (100%)
+                  </span>
                 </div>
-                <div className="h-3 w-full bg-slate-800 rounded-full overflow-hidden">
-                  <div className="h-full bg-gradient-to-r from-blue-600 to-indigo-500 rounded-full w-full" />
+                <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden">
+                  <div className="h-full bg-indigo-500 rounded-full w-full" />
                 </div>
               </div>
 
               <div>
-                <div className="flex justify-between text-xs font-medium mb-1">
-                  <span className="text-slate-300">2. Cliques no Link da Bio / Smart Link</span>
-                  <span className="text-cyan-400 font-bold">
+                <div className="flex justify-between text-xs mb-1.5">
+                  <span className="text-slate-300">2. Cliques no Link Curto / Rastreador</span>
+                  <span className="text-cyan-400 font-semibold font-mono tabular-nums">
                     {totalClicks.toLocaleString('pt-BR')} ({((totalClicks / (totalImpressions || 1)) * 100).toFixed(1)}%)
                   </span>
                 </div>
-                <div className="h-3 w-full bg-slate-800 rounded-full overflow-hidden">
+                <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-gradient-to-r from-cyan-500 to-teal-400 rounded-full"
-                    style={{ width: `${Math.max(12, (totalClicks / (totalImpressions || 1)) * 100 * 5)}%` }}
+                    className="h-full bg-cyan-500 rounded-full"
+                    style={{ width: `${Math.min(100, Math.max(8, (totalClicks / (totalImpressions || 1)) * 100 * 5))}%` }}
                   />
                 </div>
               </div>
 
               <div>
-                <div className="flex justify-between text-xs font-medium mb-1">
-                  <span className="text-slate-300">3. Conversas com Robô de Vendas / WhatsApp</span>
-                  <span className="text-amber-400 font-bold">
-                    {Math.round(totalClicks * 0.42)} ({((Math.round(totalClicks * 0.42) / (totalClicks || 1)) * 100).toFixed(0)}%)
+                <div className="flex justify-between text-xs mb-1.5">
+                  <span className="text-slate-300">3. Conversas / Pré-atendimento ManyChat &amp; WhatsApp</span>
+                  <span className="text-amber-400 font-semibold font-mono tabular-nums">
+                    {Math.round(totalClicks * 0.42).toLocaleString('pt-BR')} (42%)
                   </span>
                 </div>
-                <div className="h-3 w-full bg-slate-800 rounded-full overflow-hidden">
-                  <div className="h-full bg-gradient-to-r from-amber-500 to-orange-400 rounded-full w-[42%]" />
+                <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden">
+                  <div className="h-full bg-amber-500 rounded-full w-[42%]" />
                 </div>
               </div>
 
               <div>
-                <div className="flex justify-between text-xs font-medium mb-1">
-                  <span className="text-slate-300">4. Vendas Fechadas (Checkout / Pix / Cartão)</span>
-                  <span className="text-emerald-400 font-bold">
+                <div className="flex justify-between text-xs mb-1.5">
+                  <span className="text-slate-300">4. Vendas Confirmadas (Checkout / Pix)</span>
+                  <span className="text-emerald-400 font-semibold font-mono tabular-nums">
                     {totalConversions} ({avgConversionRate}%)
                   </span>
                 </div>
-                <div className="h-3 w-full bg-slate-800 rounded-full overflow-hidden">
+                <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-gradient-to-r from-emerald-500 to-green-400 rounded-full"
-                    style={{ width: `${Math.max(8, Number(avgConversionRate) * 4)}%` }}
+                    className="h-full bg-emerald-500 rounded-full"
+                    style={{ width: `${Math.min(100, Math.max(6, Number(avgConversionRate) * 4))}%` }}
                   />
                 </div>
               </div>
             </div>
 
-            {/* Channels performance */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-5 border-t border-slate-800">
-              <div className="p-3 rounded-xl bg-slate-800/50 border border-slate-700/50">
-                <span className="text-[11px] text-slate-400 block font-medium">TikTok Orgânico</span>
-                <span className="text-base font-bold text-white">48% das Vendas</span>
-                <span className="text-[10px] text-emerald-400 block mt-0.5">Maior Viralidade</span>
+            {/* Channel Mix */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-4 border-t border-slate-800">
+              <div>
+                <span className="text-[11px] text-slate-400 block">TikTok Orgânico</span>
+                <span className="text-sm font-bold text-white font-mono tabular-nums">48% das vendas</span>
+                <span className="text-[11px] text-emerald-400 block">Maior viralidade</span>
               </div>
-              <div className="p-3 rounded-xl bg-slate-800/50 border border-slate-700/50">
-                <span className="text-[11px] text-slate-400 block font-medium">Pinterest SEO</span>
-                <span className="text-base font-bold text-white">28% das Vendas</span>
-                <span className="text-[10px] text-purple-400 block mt-0.5">Tráfego Duradouro</span>
+              <div>
+                <span className="text-[11px] text-slate-400 block">Pinterest SEO</span>
+                <span className="text-sm font-bold text-white font-mono tabular-nums">28% das vendas</span>
+                <span className="text-[11px] text-indigo-400 block">Tráfego contínuo</span>
               </div>
-              <div className="p-3 rounded-xl bg-slate-800/50 border border-slate-700/50">
-                <span className="text-[11px] text-slate-400 block font-medium">Instagram Reels</span>
-                <span className="text-base font-bold text-white">16% das Vendas</span>
-                <span className="text-[10px] text-pink-400 block mt-0.5">Forte Engajamento</span>
+              <div>
+                <span className="text-[11px] text-slate-400 block">Instagram Reels</span>
+                <span className="text-sm font-bold text-white font-mono tabular-nums">16% das vendas</span>
+                <span className="text-[11px] text-slate-400 block">Engajamento ativo</span>
               </div>
-              <div className="p-3 rounded-xl bg-slate-800/50 border border-slate-700/50">
-                <span className="text-[11px] text-slate-400 block font-medium">WhatsApp / Direto</span>
-                <span className="text-base font-bold text-white">8% das Vendas</span>
-                <span className="text-[10px] text-emerald-400 block mt-0.5">Fechamento Rápido</span>
+              <div>
+                <span className="text-[11px] text-slate-400 block">WhatsApp / FB Grupos</span>
+                <span className="text-sm font-bold text-white font-mono tabular-nums">8% das vendas</span>
+                <span className="text-[11px] text-emerald-400 block">Fechamento rápido</span>
               </div>
             </div>
           </div>
 
-          {/* Campanhas Ativas com Destaque de Nichos */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-bold text-white flex items-center gap-2">
+          {/* Active Campaigns Table-style Rows */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
                 <Flame className="w-4 h-4 text-amber-400" />
-                Desempenho por Nicho Ativo
+                <span>Desempenho por Nicho e Campanha</span>
               </h3>
               <button
+                type="button"
                 onClick={() => onNavigateTab('campaigns')}
-                className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold"
+                className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold cursor-pointer"
               >
-                Gerenciar Todas &rarr;
+                Gerenciar Campanhas &rarr;
               </button>
             </div>
 
-            <div className="space-y-3">
+            <div className="divide-y divide-slate-800/70">
               {campaigns.map((camp) => (
                 <div
                   key={camp.id}
-                  className="p-4 rounded-xl bg-slate-800/40 border border-slate-800 hover:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition"
+                  className="py-3.5 first:pt-1 last:pb-1 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                 >
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-bold text-white">{camp.title}</span>
-                      <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-950 text-indigo-300 border border-indigo-800/40">
-                        {camp.nicheLabel}
-                      </span>
-                      <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800/40">
-                        Anti-Bloqueio Ativo
+                  <div className="space-y-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-semibold text-white truncate">{camp.title}</span>
+                      <span className="text-[11px] text-slate-400">
+                        · {camp.nicheLabel} · Anti-bloqueio ativo
                       </span>
                     </div>
-                    <p className="text-xs text-slate-400 line-clamp-1">
-                      Dor tratada: <em>"{camp.painPointTargeted}"</em>
+                    <p className="text-xs text-slate-400 truncate">
+                      Dor alvo: {camp.painPointTargeted}
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-5 text-right sm:self-center">
+                  <div className="flex items-center gap-6 shrink-0 font-mono tabular-nums text-right">
                     <div>
-                      <span className="text-[11px] text-slate-400 block">Vendas</span>
-                      <strong className="text-sm text-white font-bold">{camp.conversions}</strong>
+                      <span className="text-[10px] uppercase text-slate-500 block">Vendas</span>
+                      <strong className="text-sm text-white">{camp.conversions}</strong>
                     </div>
                     <div>
-                      <span className="text-[11px] text-slate-400 block">Faturamento</span>
-                      <strong className="text-sm text-emerald-400 font-bold">
+                      <span className="text-[10px] uppercase text-slate-500 block">Faturamento</span>
+                      <strong className="text-sm text-emerald-400">
                         {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(camp.revenue)}
                       </strong>
                     </div>
@@ -603,121 +388,122 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
               ))}
             </div>
           </div>
-        </div>
 
-        {/* Right Column: Real-Time Leads Radar & Predictive AI Score */}
-        <div className="space-y-6">
-          {/* Radar ao Vivo */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <span className="relative flex h-2.5 w-2.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500"></span>
-                </span>
-                <h3 className="text-sm font-bold text-white">Radar de Pessoas ao Vivo</h3>
+          {/* Balance Transparency & Hotmart Settlement */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-white">Transparência de Saldo &amp; Recebimentos</h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {totalRevenue > 0
+                    ? `O total de ${formattedRevenue} inclui testes locais somados aos cliques rastreados. Vendas reais caem na sua conta Hotmart/Kiwify.`
+                    : 'Painel zerado em R$ 0,00. Pronto para registrar apenas acessos reais e vendas confirmadas.'}
+                </p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 shrink-0">
                 <a
                   href="https://app.hotmart.com/sales"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-[10px] px-2 py-0.5 rounded bg-orange-950 text-orange-300 border border-orange-800/60 hover:bg-orange-900 font-bold transition flex items-center gap-1"
-                  title="Conferir saldo e vendas oficiais no painel da Hotmart"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-white transition"
                 >
-                  <span>Conferir na Hotmart ↗</span>
+                  <span>Saldo na Hotmart</span>
+                  <ExternalLink className="w-3.5 h-3.5 text-amber-400" />
                 </a>
                 <button
-                  onClick={() => onNavigateTab('tracking')}
-                  className="text-[11px] text-indigo-400 hover:text-indigo-300 font-medium cursor-pointer"
+                  type="button"
+                  onClick={() => onNavigateTab('chrome_fb_groups')}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 text-xs font-semibold text-slate-300 transition cursor-pointer"
                 >
-                  Ver Completo
+                  <ShieldCheck className="w-3.5 h-3.5 text-blue-400" />
+                  <span>Escudo</span>
                 </button>
               </div>
             </div>
+          </div>
+        </div>
 
-            {/* Radar View Toggle: Visitas vs Compradores WhatsApp */}
-            <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800 mb-3 gap-1">
+        {/* Right Sidebar Area (4 cols) */}
+        <div className="lg:col-span-4 space-y-6">
+          {/* Live Radar & WhatsApp Buyers */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-rose-500" />
+                <span>Radar ao Vivo</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => onNavigateTab('tracking')}
+                className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold cursor-pointer"
+              >
+                Ver Completo &rarr;
+              </button>
+            </div>
+
+            {/* Segmented Switch */}
+            <div className="grid grid-cols-2 bg-slate-950 p-1 rounded-lg border border-slate-800 gap-1">
               <button
                 type="button"
                 onClick={() => setRadarView('visits')}
-                className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                className={`py-1.5 px-2 rounded-md text-xs font-semibold transition flex items-center justify-center gap-1.5 cursor-pointer ${
                   radarView === 'visits'
-                    ? 'bg-slate-800 text-white shadow'
+                    ? 'bg-slate-800 text-white'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                <Eye className="w-3.5 h-3.5 text-indigo-400" />
-                <span>Visitas ao Vivo</span>
+                <Eye className="w-3.5 h-3.5" />
+                <span>Visitas</span>
               </button>
               <button
                 type="button"
                 onClick={() => setRadarView('customers')}
-                className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                className={`py-1.5 px-2 rounded-md text-xs font-semibold transition flex items-center justify-center gap-1.5 cursor-pointer ${
                   radarView === 'customers'
-                    ? 'bg-emerald-500 text-slate-950 font-black shadow'
+                    ? 'bg-emerald-600 text-slate-950 font-bold'
                     : 'text-emerald-400 hover:text-emerald-300'
                 }`}
               >
                 <MessageSquare className="w-3.5 h-3.5" />
-                <span>WhatsApp de Compradores ({customers.length})</span>
+                <span>WhatsApp ({customers.length})</span>
               </button>
             </div>
 
             {radarView === 'customers' ? (
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] text-slate-400">
-                    Contatos de quem comprou ou solicitou atendimento:
-                  </span>
-                  {onOpenCustomerModal && (
-                    <button
-                      onClick={onOpenCustomerModal}
-                      className="text-[10px] text-emerald-400 hover:underline font-bold"
-                    >
-                      Configurar Webhook ⚙️
-                    </button>
-                  )}
-                </div>
-
                 {customers.length === 0 ? (
-                  <div className="p-4 bg-slate-950/70 rounded-xl border border-dashed border-slate-800 text-center space-y-2">
+                  <div className="py-6 text-center space-y-3 border-t border-slate-800">
                     <p className="text-xs text-slate-400">Nenhum comprador com WhatsApp ainda.</p>
                     <button
+                      type="button"
                       onClick={onSimulateConversion}
-                      className="px-3 py-1.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded-lg text-[11px] font-bold hover:bg-emerald-500 hover:text-slate-950 transition cursor-pointer"
+                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 rounded-lg text-xs font-semibold transition cursor-pointer"
                     >
                       + Simular Venda com WhatsApp
                     </button>
                   </div>
                 ) : (
-                  <div className="space-y-2">
+                  <div className="divide-y divide-slate-800/80">
                     {customers.slice(0, 5).map((cust) => (
-                      <div
-                        key={cust.id}
-                        className="p-2.5 rounded-xl bg-slate-950 border border-emerald-900/40 hover:border-emerald-600/60 transition space-y-1.5"
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold text-white text-xs truncate max-w-[170px]">
-                            {cust.name}
-                          </span>
-                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-700/60">
-                            {cust.status === 'comprador_aprovado' ? 'Compra Aprovada' : 'Lead WhatsApp'}
+                      <div key={cust.id} className="py-3 first:pt-1 space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-semibold text-white text-xs truncate">{cust.name}</span>
+                          <span className="text-[11px] text-emerald-400 font-medium shrink-0">
+                            {cust.status === 'comprador_aprovado' ? 'Aprovado' : 'Lead'}
                           </span>
                         </div>
-
-                        <div className="flex items-center justify-between pt-1">
-                          <span className="text-[11px] text-emerald-400 font-mono font-bold flex items-center gap-1">
-                            <Phone className="w-3 h-3" />
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[11px] text-slate-400 font-mono tabular-nums flex items-center gap-1">
+                            <Phone className="w-3 h-3 text-emerald-400" />
                             +{cust.phone}
                           </span>
                           <a
                             href={`https://wa.me/${cust.phone.replace(/\D/g, '')}?text=${encodeURIComponent(
-                              `Olá ${cust.name.split(' ')[0]}! Tudo bem? Vi que você garantiu as 100 Tarefinhas de Educação Infantil e Autismo na Hotmart! O acesso foi enviado no seu e-mail. Se precisar de qualquer suporte, estou por aqui!`
+                              `Olá ${cust.name.split(' ')[0]}! Tudo bem? Vi seu interesse no material. Estou por aqui no WhatsApp para te ajudar!`
                             )}`}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="px-2.5 py-1 bg-gradient-to-r from-emerald-500 to-green-500 hover:from-emerald-400 hover:to-green-400 text-slate-950 font-black text-[10px] rounded-lg shadow transition flex items-center gap-1"
+                            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold text-[11px] rounded-md transition inline-flex items-center gap-1"
                           >
                             <MessageSquare className="w-3 h-3" />
                             <span>Chamar</span>
@@ -725,159 +511,130 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
                         </div>
                       </div>
                     ))}
-
-                    {onOpenCustomerModal && (
-                      <button
-                        onClick={onOpenCustomerModal}
-                        className="w-full py-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-xl text-xs text-slate-300 font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
-                      >
-                        <Users className="w-3.5 h-3.5 text-emerald-400" />
-                        <span>Ver Todos os Contatos & Configurações ({customers.length})</span>
-                      </button>
-                    )}
                   </div>
                 )}
-              </div>
-            ) : (
-              <div className="space-y-2.5">
-                {recentEvents.map((event) => {
-                  const isHighIntent = (event.leadScore ?? 0) >= 85;
-                  const isConversion = event.type === 'conversion';
-                  const isSimulated = event.isSimulation === true || (isConversion && (event.amount === 3.99 || !event.isSimulation));
-                  return (
-                    <div
-                      key={event.id}
-                      className={`p-2.5 rounded-lg border text-xs transition ${
-                        isConversion
-                          ? 'bg-emerald-950/40 border-emerald-700/60'
-                          : isHighIntent
-                          ? 'bg-indigo-950/30 border-indigo-700/50'
-                          : 'bg-slate-800/40 border-slate-800'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-1 gap-1 flex-wrap">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className={`w-1.5 h-1.5 rounded-full ${isSimulated ? 'bg-amber-400' : 'bg-emerald-400'}`} />
-                          <span className="font-semibold text-white">
-                            {event.geo.city}, {event.geo.state}
-                          </span>
-                          {isSimulated ? (
-                            <span className="text-[9px] font-bold px-1.5 py-0.2 bg-amber-950/80 text-amber-300 border border-amber-800/60 rounded">
-                              TESTE DO PAINEL
-                            </span>
-                          ) : (
-                            <span className="text-[9px] font-bold px-1.5 py-0.2 bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 rounded">
-                              ACESSO REAL AO VIVO
-                            </span>
-                          )}
-                        </div>
-                        <span className="text-[10px] text-slate-400 font-mono">
-                          {new Date(event.timestamp).toLocaleTimeString('pt-BR', {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
-                        </span>
-                      </div>
 
-                      <div className="flex items-center justify-between text-slate-300 text-[11px]">
-                        <span>
-                          Canal: <strong className="text-indigo-300 capitalize">{event.source}</strong>
-                        </span>
-                        <span
-                          className={`font-bold px-1.5 py-0.2 rounded text-[10px] ${
-                            isHighIntent
-                              ? 'bg-rose-950 text-rose-300 border border-rose-800/50'
-                              : 'bg-slate-700 text-slate-300'
-                          }`}
-                        >
-                          Score: {event.leadScore || 75}/100
-                        </span>
-                      </div>
-
-                      {/* If event has attached customer contact (WhatsApp) */}
-                      {event.customerPhone && (
-                        <div className="mt-2 p-2 rounded-lg bg-emerald-950/90 border border-emerald-600/50 flex items-center justify-between gap-2">
-                          <div className="min-w-0">
-                            <span className="font-bold text-white text-[11px] block truncate">
-                              {event.customerName || 'Comprador Confirmado'}
-                            </span>
-                            <span className="text-[10px] text-emerald-300 font-mono">
-                              +{event.customerPhone}
-                            </span>
-                          </div>
-                          <a
-                            href={`https://wa.me/${event.customerPhone.replace(/\D/g, '')}?text=${encodeURIComponent(
-                              `Olá! Vi que você garantiu as 100 Tarefinhas de Educação Infantil e Autismo! Qualquer dúvida estou aqui.`
-                            )}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="px-2 py-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-[10px] rounded flex items-center gap-1 transition shrink-0"
-                          >
-                            <MessageSquare className="w-3 h-3" />
-                            <span>WhatsApp</span>
-                          </a>
-                        </div>
-                      )}
-
-                      {isConversion && !event.customerPhone && (
-                        <div className="mt-1.5 p-1.5 rounded bg-emerald-950/60 border border-emerald-800/40 text-[11px] font-bold text-emerald-400 flex items-center justify-between">
-                          <div className="flex items-center gap-1">
-                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                            <span>{isSimulated ? 'Simulação de Venda:' : 'Venda Rastreada:'} R$ {event.amount?.toFixed(2)}</span>
-                          </div>
-                          <a
-                            href="https://app.hotmart.com/sales"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-[10px] text-emerald-300 underline font-normal"
-                          >
-                            Conferir na Hotmart
-                          </a>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Guia de Confirmação Oficial */}
-            <div className="mt-3 p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-300 space-y-1.5">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-white block">ℹ️ Como você recebe o WhatsApp de quem compra:</span>
                 {onOpenCustomerModal && (
                   <button
+                    type="button"
                     onClick={onOpenCustomerModal}
-                    className="text-[10px] text-emerald-400 font-bold hover:underline cursor-pointer"
+                    className="w-full py-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-lg text-xs text-slate-300 font-semibold transition flex items-center justify-center gap-1.5 cursor-pointer"
                   >
-                    Ver Webhook ↗
+                    <Users className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Gerenciar Contatos &amp; Webhook</span>
                   </button>
                 )}
               </div>
-              <p className="text-slate-400 leading-relaxed text-[10px]">
-                O Instagram <strong>não</strong> entrega o telefone de quem apenas clica por sigilo da LGPD. Mas quando a pessoa <strong>compra na Hotmart</strong> ou clica em <strong>Tirar Dúvidas no WhatsApp</strong>, o número dela aparece automaticamente aqui com botão para você chamar direto no WhatsApp!
-              </p>
+            ) : (
+              <div className="divide-y divide-slate-800/80">
+                {recentEvents.length === 0 ? (
+                  <div className="py-6 text-center text-xs text-slate-400">
+                    Nenhum evento registrado ainda.
+                  </div>
+                ) : (
+                  recentEvents.map((event) => {
+                    const isConversion = event.type === 'conversion';
+                    const isReal = event.isSimulation === false;
+                    return (
+                      <div key={event.id} className="py-2.5 first:pt-1 space-y-1 text-xs">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span
+                              className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                                isReal ? 'bg-emerald-400' : 'bg-amber-400'
+                              }`}
+                            />
+                            <span className="font-semibold text-white truncate">
+                              {event.geo.city}, {event.geo.state}
+                            </span>
+                            <span className="text-[10px] text-slate-400 shrink-0">
+                              · {isReal ? 'Real' : 'Teste'}
+                            </span>
+                          </div>
+                          <span className="text-[11px] text-slate-400 font-mono tabular-nums shrink-0">
+                            {new Date(event.timestamp).toLocaleTimeString('pt-BR', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between text-[11px] text-slate-400">
+                          <span className="capitalize truncate">{event.source.replace('_', ' ')}</span>
+                          <span className="font-mono tabular-nums text-slate-300">
+                            Score {event.leadScore || 75}/100
+                          </span>
+                        </div>
+
+                        {event.customerPhone && (
+                          <div className="pt-1 flex items-center justify-between gap-2 text-[11px]">
+                            <span className="font-mono text-emerald-400">+{event.customerPhone}</span>
+                            <a
+                              href={`https://wa.me/${event.customerPhone.replace(/\D/g, '')}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-emerald-400 hover:underline font-semibold"
+                            >
+                              Abrir WhatsApp &rarr;
+                            </a>
+                          </div>
+                        )}
+
+                        {isConversion && !event.customerPhone && (
+                          <div className="pt-1 flex items-center justify-between text-[11px] text-emerald-400 font-semibold font-mono tabular-nums">
+                            <span className="flex items-center gap-1">
+                              <CheckCircle2 className="w-3 h-3" />
+                              R$ {event.amount?.toFixed(2)}
+                            </span>
+                            <a
+                              href="https://app.hotmart.com/sales"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-slate-400 hover:text-white underline font-sans font-normal"
+                            >
+                              Hotmart
+                            </a>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            )}
+
+            <div className="pt-3 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-400">
+              <span>Webhook automático via Hotmart/Kiwify e WhatsApp</span>
+              {onOpenCustomerModal && (
+                <button
+                  type="button"
+                  onClick={onOpenCustomerModal}
+                  className="text-emerald-400 hover:underline font-semibold shrink-0 cursor-pointer"
+                >
+                  Configurar
+                </button>
+              )}
             </div>
           </div>
 
-          {/* Dica de Renda Familiar da IA */}
-          <div className="bg-gradient-to-br from-indigo-950/80 to-purple-950/80 border border-indigo-700/50 rounded-2xl p-5 space-y-3">
-            <div className="flex items-center gap-2 text-indigo-300 text-xs font-bold uppercase tracking-wider">
-              <Sparkles className="w-4 h-4 text-amber-300" />
-              <span>Conselheiro de Renda da IA</span>
+          {/* Strategy Recommendation Card */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
+            <div className="flex items-center gap-2 text-xs font-semibold text-indigo-400 uppercase tracking-wider">
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              <span>Próxima Ação Recomendada</span>
             </div>
             <h4 className="text-sm font-bold text-white">
-              Estratégia Recomendada para Esta Semana
+              Combine Grupos do Facebook + Link Curto ManyChat
             </h4>
-            <p className="text-xs text-slate-300 leading-relaxed">
-              O nicho de <strong>Psicopedagogia</strong> está com procura alta no Pinterest por atividades de alfabetização para férias/estudos.
-              Você pode publicar 3 novos pins verticais hoje sem gastar nada e conectar com o WhatsApp para fechar mães diretamente.
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Use o link curto <code className="text-emerald-400">/z/produto</code> ou o post estilo Botão WhatsApp nos grupos para levar leads aquecidos direto ao pré-atendimento automático.
             </p>
             <button
-              onClick={() => onNavigateTab('pain_finder')}
-              className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold shadow transition"
+              type="button"
+              onClick={() => onNavigateTab('chrome_fb_groups')}
+              className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white rounded-lg text-xs font-semibold transition cursor-pointer"
             >
-              Abrir Busca de Dores para Psicopedagogia
+              Abrir Funil Grupos &rarr; WhatsApp
             </button>
           </div>
         </div>

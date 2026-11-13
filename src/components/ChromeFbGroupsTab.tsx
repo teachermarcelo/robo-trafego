@@ -442,10 +442,16 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
   const [realRadarSourceFilter, setRealRadarSourceFilter] = useState<string>('all');
   const [smartLinkChannel, setSmartLinkChannel] = useState<'facebook_groups' | 'instagram_story' | 'youtube_comments' | 'pinterest' | 'whatsapp'>('facebook_groups');
   const [copiedSmartUrlFeedback, setCopiedSmartUrlFeedback] = useState<boolean>(false);
-  const [postsLogFilter, setPostsLogFilter] = useState<'all' | 'success' | 'error'>('all');
+  const [postsLogFilter, setPostsLogFilter] = useState<'all' | 'awaiting_admin' | 'published' | 'pending' | 'error'>('all');
+  const [newPostApprovalMode, setNewPostApprovalMode] = useState<'awaiting_admin' | 'published'>('awaiting_admin');
   const [manyChatOverridesMap, setManyChatOverridesMap] = useState<Record<string, any>>(() => loadManyChatOverrides());
   const [manyChatSavedBanner, setManyChatSavedBanner] = useState<string | null>(null);
   const [copiedShortFunnelKey, setCopiedShortFunnelKey] = useState<string | null>(null);
+  const [fbWaPageName, setFbWaPageName] = useState<string>('ABC do Futuro Digital');
+  const [fbWaCategory, setFbWaCategory] = useState<string>('Educação');
+  const [fbWaShareCaption, setFbWaShareCaption] = useState<string>('Estou compartilhando o link para quem tiver interesse.');
+  const [fbWaSnippet, setFbWaSnippet] = useState<string>('');
+  const [fbWaDestMode, setFbWaDestMode] = useState<'manychat' | 'wa_me'>('manychat');
 
   const fetchRealTrackingEvents = async () => {
     setIsLoadingRealEvents(true);
@@ -1289,6 +1295,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
         postedAt: '10/11/2026 15:52',
         headline: '🌸 Meninas e colegas de Curitiba, achei esse material...',
         status: 'success',
+        approvalStatus: 'published',
         intervalWaitedSeconds: 345,
         checkoutUrl: 'https://pay.kiwify.com.br/HE5xbnp'
       },
@@ -1300,6 +1307,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
         postedAt: '10/11/2026 15:46',
         headline: '🌸 Meninas e colegas de Curitiba, achei esse material...',
         status: 'success',
+        approvalStatus: 'awaiting_admin',
         intervalWaitedSeconds: 372,
         checkoutUrl: 'https://pay.kiwify.com.br/HE5xbnp'
       },
@@ -1311,6 +1319,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
         postedAt: '10/11/2026 15:40',
         headline: '🌸 Meninas e colegas de Curitiba, achei esse material...',
         status: 'success',
+        approvalStatus: 'published',
         intervalWaitedSeconds: 318,
         checkoutUrl: 'https://pay.kiwify.com.br/HE5xbnp'
       }
@@ -1948,6 +1957,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       postedAt: `${now.toLocaleDateString('pt-BR')} ${now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`,
       headline: postHeadline.slice(0, 55) + '...',
       status: 'success',
+      approvalStatus: newPostApprovalMode,
       intervalWaitedSeconds: waited,
       checkoutUrl: selectedCheckoutUrl
     };
@@ -2448,10 +2458,32 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
     }
   };
 
-  // Logistics & Analytics Calculations
+  // Logistics & Analytics Calculations (3 distinct group post states)
+  const awaitingAdminLogs = botLogs.filter(
+    l => l.status === 'success' && l.approvalStatus === 'awaiting_admin'
+  );
+  const publishedLogs = botLogs.filter(
+    l => l.status === 'success' && l.approvalStatus !== 'awaiting_admin'
+  );
+  const dispatchedGroupIds = new Set(
+    botLogs.filter(l => l.status === 'success').map(l => l.groupId)
+  );
+  const pendingQueueGroups = mappedGroups.filter(
+    g => selectedGroupIds.includes(g.id) && !dispatchedGroupIds.has(g.id)
+  );
+
+  const handleToggleLogApprovalStatus = (
+    logId: string,
+    nextApproval: 'awaiting_admin' | 'published'
+  ) => {
+    setBotLogs(prev =>
+      prev.map(l => (l.id === logId ? { ...l, approvalStatus: nextApproval } : l))
+    );
+  };
+
   const totalTargetGroups = selectedGroupIds.length;
   const completedCount = botLogs.length;
-  const pendingCount = Math.max(0, totalTargetGroups - (completedCount % (totalTargetGroups || 1)));
+  const pendingCount = pendingQueueGroups.length;
   const successPercentage = totalTargetGroups > 0 ? Math.min(100, Math.round((completedCount / totalTargetGroups) * 100)) : 100;
   const pendingPercentage = Math.max(0, 100 - successPercentage);
 
@@ -2561,11 +2593,47 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
           <div className="flex flex-wrap items-center gap-2 text-slate-400 text-xs tabular-nums">
             <button
               type="button"
-              onClick={() => setActiveSubTab('posts_log')}
+              onClick={() => {
+                setPostsLogFilter('awaiting_admin');
+                setActiveSubTab('posts_log');
+              }}
+              className="bg-amber-950/60 hover:bg-amber-900/70 border border-amber-700/60 text-amber-200 px-2.5 py-1.5 rounded-lg font-semibold transition cursor-pointer"
+              title="Grupos onde o post aguarda aprovação do administrador"
+            >
+              Aguardando Admin: <strong className="text-white font-mono">{awaitingAdminLogs.length}</strong>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setPostsLogFilter('published');
+                setActiveSubTab('posts_log');
+              }}
+              className="bg-emerald-950/60 hover:bg-emerald-900/70 border border-emerald-700/60 text-emerald-200 px-2.5 py-1.5 rounded-lg font-semibold transition cursor-pointer"
+              title="Grupos com postagem já publicada/aprovada"
+            >
+              Postagem Feita: <strong className="text-white font-mono">{publishedLogs.length}</strong>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setPostsLogFilter('pending');
+                setActiveSubTab('posts_log');
+              }}
+              className="bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 px-2.5 py-1.5 rounded-lg font-semibold transition cursor-pointer"
+              title="Grupos selecionados que ainda estão pendentes na fila"
+            >
+              Pendente: <strong className="text-white font-mono">{pendingQueueGroups.length}</strong>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setPostsLogFilter('all');
+                setActiveSubTab('posts_log');
+              }}
               className="bg-slate-900 hover:bg-slate-800 border border-slate-700 hover:border-emerald-500/60 px-2.5 py-1.5 rounded-lg transition cursor-pointer"
               title="Ver todos os posts realizados e baixar CSV"
             >
-              Disparos Hoje: <strong className="text-white">{dailyDispatchesCompleted} / {dailyDispatchLimit}</strong>
+              Hoje: <strong className="text-white font-mono">{dailyDispatchesCompleted} / {dailyDispatchLimit}</strong>
             </button>
             <button
               type="button"
@@ -3560,67 +3628,96 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
               </span>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <div className="bg-slate-950/80 p-3.5 rounded-xl border border-slate-800">
-                <span className="text-[10px] text-slate-400 uppercase font-bold block">1. Total de Tentativas</span>
-                <div className="text-2xl font-black text-white mt-1">
-                  {Math.max(completedCount, 3)}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setPostsLogFilter('awaiting_admin');
+                  setActiveSubTab('posts_log');
+                }}
+                className="bg-slate-950 hover:bg-slate-900 p-3.5 rounded-xl border border-amber-700/50 text-left transition cursor-pointer"
+              >
+                <span className="text-[10px] text-amber-400 uppercase font-bold block">
+                  1. Grupo (Aguardando Permissão Administrador)
+                </span>
+                <div className="text-2xl font-black text-amber-300 font-mono tabular-nums mt-1">
+                  {awaitingAdminLogs.length}
                 </div>
-                <span className="text-[10px] text-slate-400">Ciclos de envio disparados</span>
-              </div>
+                <span className="text-[10px] text-slate-400">Enviados para fila de aprovação do admin</span>
+              </button>
 
-              <div className="bg-slate-950/80 p-3.5 rounded-xl border border-emerald-900/40 bg-emerald-950/10">
-                <span className="text-[10px] text-emerald-300 uppercase font-bold block">2. Postagens c/ Sucesso</span>
-                <div className="text-2xl font-black text-emerald-400 mt-1">
-                  {completedCount}
+              <button
+                type="button"
+                onClick={() => {
+                  setPostsLogFilter('published');
+                  setActiveSubTab('posts_log');
+                }}
+                className="bg-slate-950 hover:bg-slate-900 p-3.5 rounded-xl border border-emerald-800/50 text-left transition cursor-pointer"
+              >
+                <span className="text-[10px] text-emerald-400 uppercase font-bold block">
+                  2. Postagem Feita
+                </span>
+                <div className="text-2xl font-black text-emerald-400 font-mono tabular-nums mt-1">
+                  {publishedLogs.length}
                 </div>
-                <span className="text-[10px] text-emerald-300/80">Publicadas e confirmadas</span>
-              </div>
+                <span className="text-[10px] text-slate-400">Publicadas e visíveis no grupo</span>
+              </button>
 
-              <div className="bg-slate-950/80 p-3.5 rounded-xl border border-slate-800">
-                <span className="text-[10px] text-rose-400 uppercase font-bold block">3. Erros / Bloqueios</span>
-                <div className="text-2xl font-black text-rose-400 mt-1">
-                  0
+              <button
+                type="button"
+                onClick={() => {
+                  setPostsLogFilter('pending');
+                  setActiveSubTab('posts_log');
+                }}
+                className="bg-slate-950 hover:bg-slate-900 p-3.5 rounded-xl border border-slate-700 text-left transition cursor-pointer"
+              >
+                <span className="text-[10px] text-blue-400 uppercase font-bold block">
+                  3. Pendente (Na Fila)
+                </span>
+                <div className="text-2xl font-black text-white font-mono tabular-nums mt-1">
+                  {pendingQueueGroups.length}
                 </div>
-                <span className="text-[10px] text-slate-400">Zero bloqueios (blindado)</span>
-              </div>
-
-              <div className="bg-slate-950/80 p-3.5 rounded-xl border border-slate-800">
-                <span className="text-[10px] text-indigo-400 uppercase font-bold block">4. Taxa Real de Conclusão</span>
-                <div className="text-2xl font-black text-indigo-300 mt-1">
-                  100%
-                </div>
-                <span className="text-[10px] text-slate-400">Intervalo 300s a 400s</span>
-              </div>
+                <span className="text-[10px] text-slate-400">Grupos selecionados aguardando envio</span>
+              </button>
             </div>
 
             {/* Audit log breakdown details */}
             <div className="bg-slate-950/90 rounded-xl border border-slate-800 p-3.5 text-xs space-y-2">
               <div className="flex items-center justify-between text-slate-300 font-semibold border-b border-slate-800/80 pb-2">
                 <span className="text-[11px] uppercase tracking-wider text-slate-400 font-bold">
-                  Histórico Detalhado das Últimas Tentativas do Robô:
+                  Últimos Grupos Processados:
                 </span>
-                <span className="text-[10px] text-emerald-400 font-mono">
-                  ✓ Todas as tentativas bem-sucedidas no Facebook
-                </span>
+                <button
+                  type="button"
+                  onClick={() => setActiveSubTab('posts_log')}
+                  className="text-[11px] text-indigo-400 hover:underline font-semibold cursor-pointer"
+                >
+                  Abrir Painel Completo &rarr;
+                </button>
               </div>
 
               <div className="space-y-1.5 max-h-36 overflow-y-auto">
-                {botLogs.slice(0, 4).map((log, idx) => (
-                  <div key={log.id || idx} className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1 text-[11px] py-1 border-b border-slate-900">
-                    <div className="flex items-center gap-2">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                      <strong className="text-white font-mono">{log.postedAt}</strong>
-                      <span className="text-slate-300 truncate max-w-[280px]">{log.groupName}</span>
+                {botLogs.slice(0, 4).map((log, idx) => {
+                  const isAwaitingAdmin = log.status === 'success' && log.approvalStatus === 'awaiting_admin';
+                  return (
+                    <div key={log.id || idx} className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1 text-[11px] py-1 border-b border-slate-900">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isAwaitingAdmin ? 'bg-amber-400' : 'bg-emerald-400'}`} />
+                        <strong className="text-white font-mono tabular-nums shrink-0">{log.postedAt}</strong>
+                        <span className="text-slate-300 truncate max-w-[260px]">{log.groupName}</span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${
+                          isAwaitingAdmin
+                            ? 'bg-amber-950/80 text-amber-300 border-amber-800/60'
+                            : 'bg-emerald-950/80 text-emerald-300 border-emerald-800/60'
+                        }`}>
+                          {isAwaitingAdmin ? 'Aguardando Permissão Admin' : 'Postagem Feita'}
+                        </span>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className="bg-emerald-950 text-emerald-400 border border-emerald-800/60 px-2 py-0.5 rounded text-[10px] font-bold">
-                        ✓ Sucesso Real ({log.intervalWaitedSeconds}s)
-                      </span>
-                      <span className="text-slate-500 font-mono text-[10px]">0 erros</span>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -4646,8 +4743,38 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                 </div>
               </div>
 
-              {/* Bot Control Button */}
-              <div className="pt-2 flex items-center gap-3">
+              {/* Approval Mode & Bot Control Button */}
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                <span className="text-slate-300 font-medium">
+                  Ao disparar, registrar grupo como:
+                </span>
+                <div className="inline-flex bg-slate-900 p-1 rounded-lg border border-slate-800 gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setNewPostApprovalMode('awaiting_admin')}
+                    className={`px-2.5 py-1 rounded text-[11px] font-semibold cursor-pointer transition ${
+                      newPostApprovalMode === 'awaiting_admin'
+                        ? 'bg-amber-500 text-slate-950'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Aguardando Permissão Admin
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewPostApprovalMode('published')}
+                    className={`px-2.5 py-1 rounded text-[11px] font-semibold cursor-pointer transition ${
+                      newPostApprovalMode === 'published'
+                        ? 'bg-emerald-500 text-slate-950'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Postagem Feita Direto
+                  </button>
+                </div>
+              </div>
+
+              <div className="pt-1 flex items-center gap-3">
                 <button
                   onClick={handleToggleBot}
                   className={`flex-1 py-3.5 font-extrabold rounded-xl text-sm flex items-center justify-center gap-2 shadow-xl transition transform hover:-translate-y-0.5 cursor-pointer ${
@@ -4680,7 +4807,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
               </div>
             </div>
 
-            {/* Right: Live Countdown & Detailed Logistics Logs */}
+            {/* Right: Live Countdown & Distinct 3-State Group Status */}
             <div className="lg:col-span-5 space-y-5">
               {/* Countdown Card */}
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 text-center space-y-3">
@@ -4688,7 +4815,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                   Próxima Publicação no Grupo:
                 </span>
 
-                <div className="text-5xl font-black text-white font-mono tracking-tight">
+                <div className="text-5xl font-black text-white font-mono tabular-nums tracking-tight">
                   {isBotRunning ? `${secondsRemaining}s` : 'Pausado'}
                 </div>
 
@@ -4706,6 +4833,61 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                 </div>
               </div>
 
+              {/* Distinct 3-State Display Mini-Panel */}
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+                <div className="flex items-center justify-between text-xs border-b border-slate-800 pb-2.5">
+                  <span className="font-bold text-white">Status Distinto dos Grupos</span>
+                  <button
+                    type="button"
+                    onClick={() => setActiveSubTab('posts_log')}
+                    className="text-[11px] text-indigo-400 hover:underline font-semibold cursor-pointer"
+                  >
+                    Ver Display Completo &rarr;
+                  </button>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-center font-mono tabular-nums">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPostsLogFilter('awaiting_admin');
+                      setActiveSubTab('posts_log');
+                    }}
+                    className="p-2.5 rounded-lg bg-slate-950 border border-amber-700/40 hover:border-amber-500 transition cursor-pointer"
+                  >
+                    <div className="text-lg font-bold text-amber-300">{awaitingAdminLogs.length}</div>
+                    <div className="text-[10px] font-sans text-slate-300 leading-tight mt-0.5">
+                      Aguardando Admin
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPostsLogFilter('published');
+                      setActiveSubTab('posts_log');
+                    }}
+                    className="p-2.5 rounded-lg bg-slate-950 border border-emerald-700/40 hover:border-emerald-500 transition cursor-pointer"
+                  >
+                    <div className="text-lg font-bold text-emerald-400">{publishedLogs.length}</div>
+                    <div className="text-[10px] font-sans text-slate-300 leading-tight mt-0.5">
+                      Postagem Feita
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPostsLogFilter('pending');
+                      setActiveSubTab('posts_log');
+                    }}
+                    className="p-2.5 rounded-lg bg-slate-950 border border-slate-700 hover:border-blue-500 transition cursor-pointer"
+                  >
+                    <div className="text-lg font-bold text-blue-400">{pendingQueueGroups.length}</div>
+                    <div className="text-[10px] font-sans text-slate-300 leading-tight mt-0.5">
+                      Pendente
+                    </div>
+                  </button>
+                </div>
+              </div>
+
               {/* Detailed Logistics Logs Table */}
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
                 <div className="flex items-center justify-between text-xs">
@@ -4713,39 +4895,46 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                     <Activity className="w-4 h-4 text-blue-400" />
                     Logs de Disparos Concluídos
                   </span>
-                  <span className="text-slate-500">{botLogs.length} registros</span>
+                  <span className="text-slate-500 font-mono tabular-nums">{botLogs.length} registros</span>
                 </div>
 
                 <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
-                  {botLogs.map(log => (
-                    <div
-                      key={log.id}
-                      className="bg-slate-950 border border-slate-800/80 rounded-xl p-3 text-xs space-y-1.5"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <span className="font-bold text-white line-clamp-1">{log.groupName}</span>
-                        <span className="text-[10px] text-emerald-400 font-bold bg-emerald-950 px-1.5 py-0.5 rounded border border-emerald-900/50">
-                          {log.postedAt}
-                        </span>
-                      </div>
+                  {botLogs.map(log => {
+                    const isAwaiting = log.status === 'success' && log.approvalStatus === 'awaiting_admin';
+                    return (
+                      <div
+                        key={log.id}
+                        className="bg-slate-950 border border-slate-800/80 rounded-xl p-3 text-xs space-y-1.5"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="font-bold text-white line-clamp-1">{log.groupName}</span>
+                          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border shrink-0 ${
+                            isAwaiting
+                              ? 'text-amber-300 bg-amber-950 border-amber-800/60'
+                              : 'text-emerald-400 bg-emerald-950 border-emerald-900/50'
+                          }`}>
+                            {isAwaiting ? 'Aguardando Admin' : 'Postagem Feita'}
+                          </span>
+                        </div>
 
-                      <p className="text-[11px] text-slate-400 line-clamp-1">
-                        {log.headline}
-                      </p>
+                        <p className="text-[11px] text-slate-400 line-clamp-1">
+                          {log.headline}
+                        </p>
 
-                      <div className="flex items-center justify-between pt-1 text-[10px] text-slate-500">
-                        <span>Pausa cumprida: {log.intervalWaitedSeconds}s</span>
-                        <a
-                          href={log.groupUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-blue-400 hover:text-blue-300 flex items-center gap-0.5"
-                        >
-                          Ver no FB <ExternalLink className="w-2.5 h-2.5" />
-                        </a>
+                        <div className="flex items-center justify-between pt-1 text-[10px] text-slate-500">
+                          <span className="font-mono tabular-nums">{log.postedAt} · {log.intervalWaitedSeconds}s</span>
+                          <a
+                            href={log.groupUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-blue-400 hover:text-blue-300 flex items-center gap-0.5"
+                          >
+                            Ver no FB <ExternalLink className="w-2.5 h-2.5" />
+                          </a>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             </div>
@@ -5256,113 +5445,320 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
         </div>
       )}
 
-      {/* RESULTADOS: LINKS DOS POSTS REALIZADOS (AlcanceX-style clean log table + CSV export) */}
-      {activeSubTab === 'posts_log' && (
-        <div className="bg-[#0d1221] border border-slate-800 rounded-2xl p-5 sm:p-6 space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
-            <div>
-              <h2 className="text-base font-bold text-white flex items-center gap-2">
-                <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                Links dos Posts Realizados
-              </h2>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Registro cronológico dos grupos onde o robô disparou com link oficial ou rastreado.
-              </p>
+      {/* RESULTADOS: DISPLAY DISTINTO DE STATUS DOS GRUPOS (Aguardando Admin | Postagem Feita | Pendente) */}
+      {activeSubTab === 'posts_log' && (() => {
+        const filteredLogs = botLogs.filter((l) => {
+          if (postsLogFilter === 'awaiting_admin') {
+            return l.status === 'success' && l.approvalStatus === 'awaiting_admin';
+          }
+          if (postsLogFilter === 'published') {
+            return l.status === 'success' && l.approvalStatus !== 'awaiting_admin';
+          }
+          if (postsLogFilter === 'error') {
+            return l.status === 'error';
+          }
+          return true;
+        });
+
+        return (
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 sm:p-6 space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+              <div>
+                <h2 className="text-base font-bold text-white flex items-center gap-2">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                  Display de Status dos Grupos &amp; Postagens
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Acompanhe separadamente cada grupo por status: Aguardando Permissão do Administrador, Postagem Feita e Pendente na fila.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const rows = [
+                      ['Data/Hora', 'Grupo', 'URL', 'Estado', 'Intervalo(s)'],
+                      ...botLogs.map(l => [
+                        l.postedAt || '',
+                        (l.groupName || '').replace(/,/g, ' '),
+                        l.groupUrl || '',
+                        l.status === 'error'
+                          ? 'Falha'
+                          : l.approvalStatus === 'awaiting_admin'
+                          ? 'Grupo (Aguardando Permissão do Administrador)'
+                          : 'Postagem Feita',
+                        String(l.intervalWaitedSeconds || 0)
+                      ]),
+                      ...pendingQueueGroups.map(g => [
+                        'Na fila',
+                        (g.name || '').replace(/,/g, ' '),
+                        g.url || '',
+                        'Pendente',
+                        '0'
+                      ])
+                    ];
+                    const csv = rows.map(r => r.join(',')).join('\n');
+                    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `autoviral-grupos-status-${new Date().toISOString().slice(0, 10)}.csv`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                  }}
+                  className="px-3 py-1.5 bg-slate-950 hover:bg-slate-800 text-slate-200 border border-slate-700 rounded-lg font-semibold flex items-center gap-1 cursor-pointer transition"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  CSV
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setBotLogs([])}
+                  className="px-3 py-1.5 bg-slate-950 hover:bg-rose-950 text-slate-300 hover:text-rose-200 border border-slate-700 rounded-lg font-semibold cursor-pointer transition"
+                >
+                  Limpar Logs
+                </button>
+              </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              <select
-                value={postsLogFilter}
-                onChange={(e) => setPostsLogFilter(e.target.value as any)}
-                className="bg-slate-900 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-indigo-500"
-              >
-                <option value="all">Todos os Posts ({botLogs.length})</option>
-                <option value="success">Enviados com Sucesso</option>
-                <option value="error">Falhas / Bloqueios</option>
-              </select>
-
+            {/* Distinct 3-State Interactive Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <button
                 type="button"
-                onClick={() => {
-                  const rows = [
-                    ['Data/Hora', 'Grupo', 'URL', 'Status', 'Intervalo(s)'],
-                    ...botLogs.map(l => [
-                      l.postedAt || '',
-                      (l.groupName || '').replace(/,/g, ' '),
-                      l.groupUrl || '',
-                      l.status === 'success' ? 'Post enviado' : 'Falha',
-                      String(l.intervalWaitedSeconds || 0)
-                    ])
-                  ];
-                  const csv = rows.map(r => r.join(',')).join('\n');
-                  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = url;
-                  a.download = `autoviral-posts-${new Date().toISOString().slice(0, 10)}.csv`;
-                  document.body.appendChild(a);
-                  a.click();
-                  document.body.removeChild(a);
-                  URL.revokeObjectURL(url);
-                }}
-                className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 rounded-lg font-semibold flex items-center gap-1 cursor-pointer transition"
+                onClick={() => setPostsLogFilter(postsLogFilter === 'awaiting_admin' ? 'all' : 'awaiting_admin')}
+                className={`p-4 rounded-xl border text-left transition cursor-pointer ${
+                  postsLogFilter === 'awaiting_admin'
+                    ? 'bg-amber-950/50 border-amber-500'
+                    : 'bg-slate-950 border-slate-800 hover:border-amber-700/70'
+                }`}
               >
-                <Download className="w-3.5 h-3.5" />
-                CSV
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-amber-400">
+                    Grupo (Aguardando Permissão Administrador)
+                  </span>
+                  <Clock className="w-4 h-4 text-amber-400 shrink-0" />
+                </div>
+                <div className="text-2xl font-bold text-white font-mono tabular-nums mt-2">
+                  {awaitingAdminLogs.length}
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Post enviado — esperando o administrador do grupo liberar.
+                </p>
               </button>
 
               <button
                 type="button"
-                onClick={() => setBotLogs([])}
-                className="px-3 py-1.5 bg-slate-900 hover:bg-rose-950 text-slate-300 hover:text-rose-200 border border-slate-700 rounded-lg font-semibold cursor-pointer transition"
+                onClick={() => setPostsLogFilter(postsLogFilter === 'published' ? 'all' : 'published')}
+                className={`p-4 rounded-xl border text-left transition cursor-pointer ${
+                  postsLogFilter === 'published'
+                    ? 'bg-emerald-950/50 border-emerald-500'
+                    : 'bg-slate-950 border-slate-800 hover:border-emerald-700/70'
+                }`}
               >
-                Limpar
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-400">
+                    Postagem Feita
+                  </span>
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                </div>
+                <div className="text-2xl font-bold text-white font-mono tabular-nums mt-2">
+                  {publishedLogs.length}
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Publicada e visível para os membros do grupo.
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setPostsLogFilter(postsLogFilter === 'pending' ? 'all' : 'pending')}
+                className={`p-4 rounded-xl border text-left transition cursor-pointer ${
+                  postsLogFilter === 'pending'
+                    ? 'bg-blue-950/50 border-blue-500'
+                    : 'bg-slate-950 border-slate-800 hover:border-blue-700/70'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-blue-400">
+                    Pendente
+                  </span>
+                  <Layers className="w-4 h-4 text-blue-400 shrink-0" />
+                </div>
+                <div className="text-2xl font-bold text-white font-mono tabular-nums mt-2">
+                  {pendingQueueGroups.length}
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Grupos selecionados na fila aguardando o próximo disparo.
+                </p>
               </button>
             </div>
-          </div>
 
-          {botLogs.filter(l => postsLogFilter === 'all' || l.status === postsLogFilter).length === 0 ? (
-            <div className="bg-slate-950 border border-slate-800 rounded-xl p-8 text-center space-y-2">
-              <p className="text-sm font-semibold text-slate-300">Nenhum post registrado neste filtro.</p>
-              <p className="text-xs text-slate-500">
-                Inicie um disparo em "Disparos FB (Comentador)" para acompanhar cada publicação realizada em tempo real.
-              </p>
-            </div>
-          ) : (
-            <div className="divide-y divide-slate-800/70">
-              {botLogs
-                .filter(l => postsLogFilter === 'all' || l.status === postsLogFilter)
-                .map(log => (
-                  <div key={log.id} className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs hover:bg-slate-900/40 px-2 rounded-lg transition">
-                    <div className="space-y-1 min-w-0">
-                      <div className="text-[11px] font-mono text-slate-400 tabular-nums">
-                        {log.postedAt} · {log.groupName}
-                      </div>
-                      <div className="text-slate-200 font-medium truncate">
-                        {log.groupUrl}
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className={log.status === 'success' ? 'text-emerald-400 font-semibold' : 'text-rose-400 font-semibold'}>
-                          {log.status === 'success'
-                            ? 'Post enviado — aguardando aprovação / publicado'
-                            : 'Falha ao enviar neste grupo'}
-                        </span>
-                        <a
-                          href={log.groupUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-indigo-400 hover:text-indigo-300 inline-flex items-center gap-1 font-semibold"
-                        >
-                          Ver grupo <ExternalLink className="w-3 h-3" />
-                        </a>
-                      </div>
-                    </div>
-                  </div>
+            {/* Segmented Filter Bar */}
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+              <div className="inline-flex flex-wrap bg-slate-950 p-1 rounded-lg border border-slate-800 gap-1 text-xs">
+                {[
+                  { id: 'all', label: `Todos (${botLogs.length + pendingQueueGroups.length})` },
+                  { id: 'awaiting_admin', label: `Aguardando Admin (${awaitingAdminLogs.length})` },
+                  { id: 'published', label: `Postagem Feita (${publishedLogs.length})` },
+                  { id: 'pending', label: `Pendente (${pendingQueueGroups.length})` },
+                  { id: 'error', label: `Falhas (${botLogs.filter(l => l.status === 'error').length})` },
+                ].map(tab => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setPostsLogFilter(tab.id as any)}
+                    className={`px-3 py-1.5 rounded-md font-semibold transition cursor-pointer ${
+                      postsLogFilter === tab.id
+                        ? 'bg-indigo-600 text-white'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
                 ))}
+              </div>
             </div>
-          )}
-        </div>
-      )}
+
+            {/* Pendente View (when filter === 'pending' or shown below on 'all') */}
+            {(postsLogFilter === 'pending' || (postsLogFilter === 'all' && pendingQueueGroups.length > 0)) && (
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                  <div className="text-xs font-bold text-blue-300 flex items-center gap-2">
+                    <Layers className="w-4 h-4" />
+                    <span>Pendente — Grupos na Fila Aguardando Envio ({pendingQueueGroups.length})</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setActiveSubTab('campaign')}
+                    className="text-xs text-emerald-400 hover:underline font-semibold cursor-pointer"
+                  >
+                    Ir para Disparador &rarr;
+                  </button>
+                </div>
+
+                {pendingQueueGroups.length === 0 ? (
+                  <p className="text-xs text-slate-400 py-3 text-center">
+                    Todos os grupos selecionados já foram disparados neste ciclo. Selecione mais grupos em "Grupos Mapeados".
+                  </p>
+                ) : (
+                  <div className="divide-y divide-slate-800/70 max-h-72 overflow-y-auto">
+                    {pendingQueueGroups.map(grp => (
+                      <div key={grp.id} className="py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                        <div className="min-w-0 space-y-0.5">
+                          <div className="font-semibold text-white truncate">
+                            {grp.name} <span className="text-slate-400 font-normal font-mono">({grp.membersCount.toLocaleString('pt-BR')} membros)</span>
+                          </div>
+                          <div className="text-[11px] text-slate-400 truncate">
+                            {grp.niche} · {grp.url}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="px-2 py-0.5 rounded bg-blue-950/70 border border-blue-800/50 text-blue-300 text-[11px] font-semibold">
+                            Pendente
+                          </span>
+                          <a
+                            href={grp.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-indigo-400 hover:text-indigo-300 inline-flex items-center gap-1 font-semibold"
+                          >
+                            Abrir <ExternalLink className="w-3 h-3" />
+                          </a>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Dispatched Logs View (when filter !== 'pending') */}
+            {postsLogFilter !== 'pending' && (
+              filteredLogs.length === 0 ? (
+                <div className="bg-slate-950 border border-slate-800 rounded-xl p-8 text-center space-y-2">
+                  <p className="text-sm font-semibold text-slate-300">Nenhum registro neste status.</p>
+                  <p className="text-xs text-slate-500">
+                    Dispare em "Campanhas &amp; Disparos" ou alterne entre os cartões acima para visualizar todos os grupos.
+                  </p>
+                </div>
+              ) : (
+                <div className="divide-y divide-slate-800/70">
+                  {filteredLogs.map(log => {
+                    const isAwaitingAdmin = log.status === 'success' && log.approvalStatus === 'awaiting_admin';
+                    const isError = log.status === 'error';
+                    return (
+                      <div key={log.id} className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs hover:bg-slate-950/60 px-2 rounded-lg transition">
+                        <div className="space-y-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-[11px] font-mono text-slate-400 tabular-nums">
+                              {log.postedAt}
+                            </span>
+                            <span className="text-slate-600">·</span>
+                            <span className="font-semibold text-white">{log.groupName}</span>
+                          </div>
+                          <div className="text-slate-400 text-[11px] truncate">
+                            {log.groupUrl}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2.5 pt-0.5">
+                            {isError ? (
+                              <span className="px-2 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-800/60 text-[11px] font-semibold">
+                                Falha ao enviar neste grupo
+                              </span>
+                            ) : isAwaitingAdmin ? (
+                              <span className="px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-700/60 text-[11px] font-semibold">
+                                Grupo (Aguardando Permissão do Administrador)
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-700/60 text-[11px] font-semibold">
+                                Postagem Feita
+                              </span>
+                            )}
+
+                            <a
+                              href={log.groupUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-indigo-400 hover:text-indigo-300 inline-flex items-center gap-1 font-semibold"
+                            >
+                              Ver grupo <ExternalLink className="w-3 h-3" />
+                            </a>
+                          </div>
+                        </div>
+
+                        {!isError && (
+                          <div className="flex items-center gap-2 shrink-0">
+                            {isAwaitingAdmin ? (
+                              <button
+                                type="button"
+                                onClick={() => handleToggleLogApprovalStatus(log.id, 'published')}
+                                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold text-[11px] transition cursor-pointer"
+                              >
+                                Confirmar Postagem Feita
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleToggleLogApprovalStatus(log.id, 'awaiting_admin')}
+                                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 font-semibold text-[11px] transition cursor-pointer"
+                              >
+                                Marcar Aguardando Admin
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )
+            )}
+          </div>
+        );
+      })()}
 
       {/* RESULTADOS: ANALYTICS DEDICATED VIEW */}
       {activeSubTab === 'analytics' && (
@@ -5689,11 +6085,16 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
         );
       })()}
 
-      {/* SUBTAB: FUNIL GRUPOS -> WHATSAPP (MANYCHAT + LINK CURTO CONFIÁVEL) */}
+      {/* SUBTAB: FUNIL GRUPOS -> WHATSAPP (MANYCHAT + LINK CURTO CONFIÁVEL + POST ESTILO BOTÃO WHATSAPP) */}
       {activeSubTab === 'whatsapp_cta_funnel' && (() => {
         const origin = typeof window !== 'undefined' ? window.location.origin : '';
         const currentOverride = manyChatOverridesMap[activeCampaign.id] || {};
         const pkg = buildProductManyChatPackage(activeCampaign, origin, currentOverride);
+        const waDirectUrl = `https://wa.me/${pkg.whatsappNumber}?text=${encodeURIComponent(pkg.whatsappPrefillText)}`;
+        const buttonDestinationUrl = fbWaDestMode === 'manychat' ? pkg.shortUrl : waDirectUrl;
+        const effectiveSnippet =
+          fbWaSnippet.trim() ||
+          `Procurando ${activeCampaign.title}? Material completo com benefícios reais e acesso imediato (${pkg.priceFormatted}). Clique no botão WhatsApp para receber!`;
 
         const copyAndMark = (key: string, val: string) => {
           navigator.clipboard.writeText(val);
@@ -5713,25 +6114,27 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
           setTimeout(() => setManyChatSavedBanner(null), 3500);
         };
 
+        const sharePostFullCopy = `${fbWaShareCaption}\n\n${effectiveSnippet}\n\n👉 Clique aqui para falar no WhatsApp e ver os benefícios:\n${pkg.shortUrl}`;
+
         return (
           <div className="space-y-5">
             {/* Header + Product Selector */}
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div className="space-y-1">
                   <h3 className="text-base font-bold text-white flex items-center gap-2">
                     <MessageCircle className="w-5 h-5 text-emerald-400" />
-                    <span>Funil Grupos do Facebook → ManyChat Interno → WhatsApp</span>
+                    <span>Funil Grupos do Facebook → Botão WhatsApp &amp; ManyChat (/z/{pkg.shortSlug})</span>
                   </h3>
                   <p className="text-xs text-slate-400 max-w-2xl">
-                    Em vez de colar links enormes com cara de golpe nos grupos, use o <strong className="text-slate-200">Link Curto Limpo (/z/{pkg.shortSlug})</strong>. Quando a pessoa clicar, ela abre um atendimento estilo ManyChat com os benefícios reais desse produto e botões para comprar ou chamar no seu WhatsApp.
+                    Crie o post estilo <strong className="text-slate-200">Botão WhatsApp</strong> compartilhado da sua Página para os Grupos e use o <strong className="text-slate-200">Link Curto Confiável (/z/{pkg.shortSlug})</strong> com benefícios reais e pré-atendimento automático.
                   </p>
                 </div>
                 <a
                   href={pkg.shortUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shrink-0 transition"
+                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-slate-950 text-xs font-bold flex items-center gap-1.5 shrink-0 transition"
                 >
                   <span>Testar Atendimento (/z/{pkg.shortSlug})</span>
                   <ExternalLink className="w-3.5 h-3.5" />
@@ -5749,7 +6152,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                       const chosen = availableCampaigns.find((c) => c.id === e.target.value);
                       if (chosen) handleSelectCampaign(chosen);
                     }}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500"
                   >
                     {availableCampaigns.map((c) => (
                       <option key={c.id} value={c.id}>
@@ -5759,17 +6162,17 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                   </select>
                 </div>
 
-                <div className="md:col-span-7 bg-slate-950 border border-emerald-800/60 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="md:col-span-7 bg-slate-950 border border-emerald-800/60 rounded-lg p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div className="min-w-0">
                     <span className="text-[11px] font-semibold text-emerald-400 block">
-                      Link Curto Confiável (Cole nos Grupos sem parecer spam):
+                      Link Curto Confiável (Cole nos Grupos ou no Botão WhatsApp):
                     </span>
                     <p className="text-xs font-mono text-white truncate">{pkg.shortUrl}</p>
                   </div>
                   <button
                     type="button"
                     onClick={() => copyAndMark('short-url', pkg.shortUrl)}
-                    className="px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shrink-0 cursor-pointer"
+                    className="px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-slate-950 text-xs font-bold flex items-center gap-1.5 shrink-0 cursor-pointer"
                   >
                     {copiedShortFunnelKey === 'short-url' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                     <span>{copiedShortFunnelKey === 'short-url' ? 'Copiado!' : 'Copiar Link Curto'}</span>
@@ -5778,8 +6181,208 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
               </div>
             </div>
 
+            {/* 0. GERADOR & PRÉVIA DO POST ESTILO FACEBOOK "BOTÃO WHATSAPP" */}
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+                <div>
+                  <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                    <MessageSquare className="w-4 h-4 text-emerald-400" />
+                    <span>0. Prévia &amp; Gerador de Post Facebook Estilo "Botão WhatsApp"</span>
+                  </h4>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Formato igual ao compartilhamento de Página nos Grupos: texto leve de indicação em cima, criativo chamativo no meio e o botão WhatsApp no rodapé.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleApplyPostToBot(fbWaShareCaption, `${effectiveSnippet}\n\n👇 Chame no WhatsApp ou veja os benefícios:\n${pkg.shortUrl}`)}
+                  className="px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-slate-950 text-xs font-bold inline-flex items-center gap-1.5 shrink-0 cursor-pointer"
+                >
+                  <span>Usar no Disparador de Grupos</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                {/* Left: Realistic Facebook Post Card with WhatsApp Button */}
+                <div className="lg:col-span-6 bg-white text-slate-900 rounded-xl border border-slate-200 overflow-hidden shadow-md">
+                  {/* Post Author Header */}
+                  <div className="p-3.5 flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-9 h-9 rounded-full bg-emerald-600 text-white font-bold text-xs flex items-center justify-center shrink-0">
+                        {fbWaPageName.slice(0, 2).toUpperCase()}
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-slate-900 leading-tight">{fbWaPageName}</div>
+                        <div className="text-[11px] text-slate-500">Compartilhado agora · Público</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Intro Share Caption */}
+                  <div className="px-3.5 pb-3 text-[13px] text-slate-800">
+                    {fbWaShareCaption}
+                  </div>
+
+                  {/* Creative Image */}
+                  <div className="bg-slate-100 border-y border-slate-200">
+                    <img
+                      src={activeCampaign.imageUrl || '/assets/aistudio/image_5456885b.png'}
+                      alt={activeCampaign.title}
+                      className="w-full max-h-[340px] object-cover"
+                    />
+                  </div>
+
+                  {/* Footer with Page Name, Category and [WhatsApp] Button */}
+                  <div className="bg-slate-100 px-4 py-3 flex items-center justify-between gap-3 border-b border-slate-200">
+                    <div className="min-w-0">
+                      <div className="text-sm font-bold text-slate-900 truncate">{fbWaPageName}</div>
+                      <div className="text-xs text-slate-500 truncate">{fbWaCategory}</div>
+                    </div>
+                    <a
+                      href={buttonDestinationUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3.5 py-2 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-900 font-semibold text-xs inline-flex items-center gap-1.5 shrink-0 border border-slate-300 transition"
+                    >
+                      <MessageCircle className="w-4 h-4 text-emerald-600 fill-emerald-600/15" />
+                      <span>WhatsApp</span>
+                    </a>
+                  </div>
+
+                  {/* Shared Page Original Snippet */}
+                  <div className="p-3.5 bg-white space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-full bg-emerald-600 text-white font-bold text-[10px] flex items-center justify-center shrink-0">
+                        {fbWaPageName.slice(0, 2).toUpperCase()}
+                      </div>
+                      <div className="text-[11px]">
+                        <span className="font-bold text-slate-900">{fbWaPageName}</span>
+                        <span className="text-slate-500"> · Página Oficial</span>
+                      </div>
+                    </div>
+                    <p className="text-xs text-slate-700 leading-relaxed">
+                      {effectiveSnippet}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Right: Customization & Activation Guide */}
+                <div className="lg:col-span-6 space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div className="space-y-1">
+                      <label className="text-slate-300 font-semibold block">Nome da sua Página no FB:</label>
+                      <input
+                        type="text"
+                        value={fbWaPageName}
+                        onChange={(e) => setFbWaPageName(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-slate-300 font-semibold block">Categoria exibida:</label>
+                      <input
+                        type="text"
+                        value={fbWaCategory}
+                        onChange={(e) => setFbWaCategory(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1 text-xs">
+                    <label className="text-slate-300 font-semibold block">Texto acima da imagem (estilo indicação):</label>
+                    <input
+                      type="text"
+                      value={fbWaShareCaption}
+                      onChange={(e) => setFbWaShareCaption(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+
+                  <div className="space-y-1 text-xs">
+                    <label className="text-slate-300 font-semibold block">Legenda da Página abaixo do botão WhatsApp:</label>
+                    <textarea
+                      rows={3}
+                      value={fbWaSnippet}
+                      onChange={(e) => setFbWaSnippet(e.target.value)}
+                      placeholder={effectiveSnippet}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+
+                  <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 space-y-2 text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-300 font-semibold">Destino do botão [WhatsApp] na prévia:</span>
+                      <div className="inline-flex bg-slate-900 p-0.5 rounded-md border border-slate-800 gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setFbWaDestMode('manychat')}
+                          className={`px-2.5 py-1 rounded text-[11px] font-semibold cursor-pointer ${
+                            fbWaDestMode === 'manychat' ? 'bg-emerald-600 text-slate-950' : 'text-slate-400'
+                          }`}
+                        >
+                          ManyChat (/z/{pkg.shortSlug})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setFbWaDestMode('wa_me')}
+                          className={`px-2.5 py-1 rounded text-[11px] font-semibold cursor-pointer ${
+                            fbWaDestMode === 'wa_me' ? 'bg-emerald-600 text-slate-950' : 'text-slate-400'
+                          }`}
+                        >
+                          Direto (wa.me)
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => copyAndMark('fb-wa-card-copy', sharePostFullCopy)}
+                      className="px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      {copiedShortFunnelKey === 'fb-wa-card-copy' ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>Texto do Post Copiado!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>Copiar Legenda + Link Curto</span>
+                        </>
+                      )}
+                    </button>
+
+                    <a
+                      href={activeCampaign.imageUrl || '/assets/aistudio/image_5456885b.png'}
+                      download={`${pkg.shortSlug}-criativo.png`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-3.5 py-2 rounded-lg bg-slate-950 hover:bg-slate-800 text-slate-200 border border-slate-700 text-xs font-semibold inline-flex items-center gap-1.5"
+                    >
+                      <Download className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>Baixar Imagem do Post</span>
+                    </a>
+                  </div>
+
+                  {/* Step-by-step how to replicate natively in Facebook Pages -> Groups */}
+                  <div className="bg-slate-950 border border-slate-800 rounded-lg p-3.5 text-[11px] text-slate-300 space-y-1.5">
+                    <div className="font-bold text-white">Como ativar o botão nativo do WhatsApp igual à imagem no Facebook:</div>
+                    <ol className="list-decimal list-inside space-y-1 text-slate-400">
+                      <li>Crie uma publicação na sua <strong className="text-slate-200">Página do Facebook</strong> usando a imagem acima e selecione a ação <strong className="text-emerald-400">Receber mensagens pelo WhatsApp</strong>.</li>
+                      <li>No feed da Página, clique em <strong className="text-slate-200">Compartilhar &rarr; Compartilhar em um grupo</strong> usando a frase curta <code className="text-slate-200">"{fbWaShareCaption}"</code>.</li>
+                      <li>Nos grupos que não aceitam post compartilhado de Página, cole o <strong className="text-emerald-400">Link Curto (/z/{pkg.shortSlug})</strong> gerado acima — ele abre seu ManyChat interno com os benefícios e o botão WhatsApp.</li>
+                    </ol>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             {/* 3 Ready Facebook Group Posts + CTAs with Short Link */}
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
               <div className="space-y-1">
                 <h4 className="text-sm font-bold text-white">
                   1. Posts + CTAs Prontos para Grupos do Facebook (Já com o Link Curto)
@@ -5816,7 +6419,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                         <button
                           type="button"
                           onClick={() => handleApplyPostToBot(tpl.headline, tpl.copy)}
-                          className="flex-1 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-bold text-white flex items-center justify-center gap-1 cursor-pointer"
+                          className="flex-1 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-bold text-slate-950 flex items-center justify-center gap-1 cursor-pointer"
                         >
                           <span>Usar no Disparador</span>
                           <ArrowRight className="w-3.5 h-3.5" />
@@ -5829,7 +6432,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
             </div>
 
             {/* Automatic Internal ManyChat Flow & Benefits Editor */}
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <h4 className="text-sm font-bold text-white">
@@ -5842,14 +6445,14 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                 <button
                   type="button"
                   onClick={handleSaveOverride}
-                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shrink-0 cursor-pointer"
+                  className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shrink-0 cursor-pointer"
                 >
                   Salvar Mensagem do Produto
                 </button>
               </div>
 
               {manyChatSavedBanner && (
-                <div className="px-3.5 py-2 rounded-xl bg-emerald-950/60 border border-emerald-700/60 text-xs text-emerald-300 font-medium">
+                <div className="px-3.5 py-2 rounded-lg bg-emerald-950/60 border border-emerald-700/60 text-xs text-emerald-300 font-medium">
                   {manyChatSavedBanner}
                 </div>
               )}
@@ -5869,7 +6472,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                         [activeCampaign.id]: { ...prev[activeCampaign.id], welcomeText: val },
                       }));
                     }}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-100 leading-relaxed focus:outline-none focus:border-emerald-500"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs text-slate-100 leading-relaxed focus:outline-none focus:border-emerald-500"
                   />
                   <p className="text-[11px] text-slate-400">
                     Ao abrir o link curto, o visitante também terá botões prontos de ManyChat: <strong>Ver benefícios reais</strong>, <strong>Como funciona e valor</strong>, <strong>Tem garantia?</strong> e <strong>Falar no WhatsApp</strong>.
@@ -5882,7 +6485,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                   </label>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     {pkg.benefits.map((b, i) => (
-                      <div key={i} className="bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-1">
+                      <div key={i} className="bg-slate-950 border border-slate-800 rounded-lg p-3 space-y-1">
                         <div className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
                           <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
                           <span className="truncate">{b.title}</span>

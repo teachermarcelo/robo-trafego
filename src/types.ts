@@ -180,6 +180,7 @@ export interface FacebookPostLog {
   postedAt: string;
   headline: string;
   status: 'success' | 'cooling_down' | 'error';
+  approvalStatus?: 'awaiting_admin' | 'published' | 'error';
   intervalWaitedSeconds: number;
   checkoutUrl: string;
   trackedToken?: string;

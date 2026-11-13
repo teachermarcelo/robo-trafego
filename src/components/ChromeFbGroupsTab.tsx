@@ -2485,13 +2485,13 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       zip.file('README.md', readmeText);
       zip.file(
         'COMO-INSTALAR.txt',
-        `INSTRUÇÕES DE INSTALAÇÃO NO GOOGLE CHROME (AutoViral AI v1.3.3):\n\n1. Extraia este arquivo ZIP em uma pasta nova.\n2. No Chrome, abra chrome://extensions e REMOVA extensões AutoViral antigas (deixe APENAS UMA v1.3.3).\n3. Ative a chave "Modo do desenvolvedor" (topo direito).\n4. Clique em "Carregar sem compactação" (topo esquerdo) e escolha a pasta extraída.\n5. Abra o Facebook (grupos), role a busca, clique em "Mapear Grupos" e depois em "Enviar para o Painel".`
+        `INSTRUÇÕES DE INSTALAÇÃO NO GOOGLE CHROME (AutoViral AI v1.3.4):\n\n1. Extraia este arquivo ZIP em uma pasta nova.\n2. No Chrome, abra chrome://extensions e REMOVA extensões AutoViral antigas (deixe APENAS UMA v1.3.4).\n3. Ative a chave "Modo do desenvolvedor" (topo direito).\n4. Clique em "Carregar sem compactação" (topo esquerdo) e escolha a pasta extraída.\n5. Abra o Facebook (grupos), role a busca, clique em "Mapear Grupos" e depois em "Enviar para o Painel".`
       );
 
       const blob = await zip.generateAsync({ type: 'blob' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = 'extensao-autoviral-v1.3.3.zip';
+      link.download = 'extensao-autoviral-v1.3.4.zip';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -2499,7 +2499,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       console.error('Error generating extension zip:', err);
       const fallbackLink = document.createElement('a');
       fallbackLink.href = '/api/extension/download';
-      fallbackLink.download = 'extensao-autoviral-v1.3.3.zip';
+      fallbackLink.download = 'extensao-autoviral-v1.3.4.zip';
       document.body.appendChild(fallbackLink);
       fallbackLink.click();
       document.body.removeChild(fallbackLink);
@@ -2995,7 +2995,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
             >
               <span className="flex items-center gap-2.5 truncate">
                 <HelpCircle className="w-4 h-4 text-slate-400 shrink-0" />
-                <span className="truncate">Tutorial Chrome (v1.3.3)</span>
+                <span className="truncate">Tutorial Chrome (v1.3.4)</span>
               </span>
             </button>
           </div>
@@ -3043,7 +3043,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                   <span>🗺️ Passo a Passo Simples: Onde Estão Seus Grupos e Como Divulgar</span>
                 </h2>
                 <p className="text-xs text-slate-300 mt-0.5">
-                  Dica importante: deixe apenas <strong>1 extensão AutoViral (v1.3.3)</strong> ativa no Chrome e use sempre este painel oficial (feche o site antigo <code className="text-amber-300">vercel.app</code> se estiver aberto).
+                  Dica importante: deixe apenas <strong>1 extensão AutoViral (v1.3.4)</strong> ativa no Chrome e use sempre este painel oficial (feche o site antigo <code className="text-amber-300">vercel.app</code> se estiver aberto).
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -3076,7 +3076,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                 <p className="text-[11px] text-slate-400 leading-relaxed">Pesquise grupos no Facebook (ex: pedagogia, renda extra) e role a lista para carregar os cards.</p>
               </div>
               <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3">
-                <div className="font-black text-emerald-300 mb-1">2. Mapeie &amp; Envie (v1.3.3)</div>
+                <div className="font-black text-emerald-300 mb-1">2. Mapeie &amp; Envie (v1.3.4)</div>
                 <p className="text-[11px] text-slate-400 leading-relaxed">Clique em <strong>Mapear Grupos</strong> e depois em <strong>Enviar Grupos para o Painel</strong> na extensão.</p>
               </div>
               <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3">
@@ -5136,7 +5136,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
             {/* HOW TO MAP YOUTUBE URLS GUIDE */}
             <div className="bg-red-950/20 border border-red-800/40 rounded-xl p-3.5 grid grid-cols-1 md:grid-cols-3 gap-2.5 text-xs">
               <div className="bg-slate-950/80 border border-slate-800 rounded-lg p-2.5">
-                <div className="font-black text-red-300 mb-0.5">Opção 1: Pela Extensão Chrome (v1.3.3)</div>
+                <div className="font-black text-red-300 mb-0.5">Opção 1: Pela Extensão Chrome (v1.3.4)</div>
                 <p className="text-[11px] text-slate-300 leading-relaxed">Abra a busca ou um vídeo no YouTube, clique em <strong>▶️ Mapear Vídeos / URLs do YouTube</strong> na extensão e depois em <strong>📡 Enviar Tudo</strong>.</p>
               </div>
               <div className="bg-slate-950/80 border border-slate-800 rounded-lg p-2.5">

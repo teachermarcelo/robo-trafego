@@ -15,7 +15,8 @@ import {
   Bot,
   Mail,
   Share2,
-  Smartphone
+  Smartphone,
+  MessageCircle
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -60,6 +61,7 @@ export const Header: React.FC<HeaderProps> = ({
     { id: 'chrome_fb_groups', label: '🤖 Grupos no Chrome • Disparos & Campanhas', icon: Share2, badge: '🔥 Disparar FB & Stories' },
     { id: 'campaigns', label: 'Minhas Campanhas', icon: DollarSign },
     { id: 'robo_cidades', label: 'Robô Divulgador & Cidades', icon: Bot, badge: 'Destravar 1ª Venda' },
+    { id: 'whatsapp_x1', label: 'Robô WhatsApp X1', icon: MessageCircle, badge: 'Funil X1' },
     { id: 'brevo_disparador', label: 'Disparador E-mail & WhatsApp', icon: Mail, badge: 'Brevo 579 Contatos' },
     { id: 'meta_ads', label: 'Alavanca Meta Ads', icon: Zap, badge: '🚀 10x Vendas' },
     { id: 'landing_builder', label: 'Criar / Editar Landing Page', icon: LayoutTemplate, badge: 'Editar R$' },

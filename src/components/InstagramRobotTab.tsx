@@ -528,14 +528,19 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
     };
   }, [deletedInstaCampIds]);
 
+  const hasInitializedInstaSyncRef = React.useRef(false);
   useEffect(() => {
+    if (!hasInitializedInstaSyncRef.current) {
+      hasInitializedInstaSyncRef.current = true;
+      return;
+    }
     const timer = setTimeout(() => {
       saveWorkspaceSyncToFirebase({
         instaCampaigns,
         storyQueue,
         mappedInstaTargets: mappedTargets,
       });
-    }, 1500);
+    }, 2200);
     return () => clearTimeout(timer);
   }, [instaCampaigns, storyQueue, mappedTargets]);
 

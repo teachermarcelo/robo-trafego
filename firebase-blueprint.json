@@ -50,6 +50,7 @@
         "storyQueue": { "type": "array" },
         "mappedInstaTargets": { "type": "array" },
         "mappedGroups": { "type": "array" },
+        "whatsappX1Flows": { "type": "object" },
         "updatedAt": { "type": "string", "maxLength": 100 }
       }
     },

@@ -86,6 +86,88 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   throw new Error(JSON.stringify(errInfo));
 }
 
+/**
+ * Recursively strips any `undefined` properties (or undefined array items) so
+ * Firestore setDoc() never throws "Unsupported field value: undefined".
+ */
+export function stripUndefinedDeep<T>(value: T): T {
+  if (value === null || value === undefined) return value;
+  if (Array.isArray(value)) {
+    return value
+      .filter((item) => item !== undefined)
+      .map((item) => stripUndefinedDeep(item)) as unknown as T;
+  }
+  if (typeof value === 'object') {
+    // Preserve Date or Firestore special objects if any
+    if (value instanceof Date) return value;
+    const out: Record<string, any> = {};
+    for (const [k, v] of Object.entries(value as Record<string, any>)) {
+      if (v !== undefined) {
+        out[k] = stripUndefinedDeep(v);
+      }
+    }
+    return out as T;
+  }
+  return value;
+}
+
+// ---------------------------------------------------------------------------
+// Quota Exhaustion Circuit Breaker & Write Deduplication
+// ---------------------------------------------------------------------------
+
+let firestoreWritesPausedUntil = 0;
+let lastQuotaNoticeAt = 0;
+
+export function isQuotaExceededError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error || '');
+  const code = (error as any)?.code || '';
+  return (
+    code === 'resource-exhausted' ||
+    msg.includes('resource-exhausted') ||
+    msg.includes('Quota exceeded') ||
+    msg.includes('Quota limit exceeded')
+  );
+}
+
+export function isFirestoreWritesPaused(): boolean {
+  return Date.now() < firestoreWritesPausedUntil;
+}
+
+export function resetFirebaseQuotaPause(): void {
+  firestoreWritesPausedUntil = 0;
+}
+
+function handleWriteError(error: unknown, operationType: OperationType, path: string | null): void {
+  if (isQuotaExceededError(error)) {
+    // Pause client write attempts for 15 minutes so SDK backoff/retry doesn't flood quota
+    firestoreWritesPausedUntil = Date.now() + 15 * 60 * 1000;
+    const now = Date.now();
+    if (now - lastQuotaNoticeAt > 30000) {
+      lastQuotaNoticeAt = now;
+      console.warn(
+        '[Firebase Quota] Cota diária gratuita de gravações do Firestore atingida. Modo offline/local ativado automaticamente até o reset diário.'
+      );
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('autoviral_firebase_quota_exceeded'));
+      }
+    }
+    return;
+  }
+  handleFirestoreError(error, operationType, path);
+}
+
+const workspaceFieldHashes: Record<string, string> = {};
+
+function recordCloudWorkspaceHashes(data: Record<string, any> | null | undefined) {
+  if (!data || typeof data !== 'object') return;
+  for (const [k, v] of Object.entries(data)) {
+    if (k === 'updatedAt' || v === undefined) continue;
+    try {
+      workspaceFieldHashes[k] = JSON.stringify(v);
+    } catch {}
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Cloud Sync Operations for Multi-Browser Cross-Device Synchronization
 // ---------------------------------------------------------------------------
@@ -142,23 +224,21 @@ export function subscribeFirebaseCampaigns(
  * Save or update campaign in Firestore (ensures both title and name are populated)
  */
 export async function saveCampaignToFirebase(campaign: Campaign): Promise<void> {
+  if (isFirestoreWritesPaused()) return;
   const path = `${CAMPAIGNS_COLLECTION}/${campaign.id}`;
   try {
     const docRef = doc(db, CAMPAIGNS_COLLECTION, campaign.id);
     const titleVal = campaign.title || (campaign as any).name || 'Campanha';
-    await setDoc(
-      docRef,
-      {
-        ...campaign,
-        id: campaign.id,
-        title: titleVal,
-        name: titleVal,
-        updatedAt: new Date().toISOString(),
-      },
-      { merge: true }
-    );
+    const payload = stripUndefinedDeep({
+      ...campaign,
+      id: campaign.id,
+      title: titleVal,
+      name: titleVal,
+      updatedAt: new Date().toISOString(),
+    });
+    await setDoc(docRef, payload, { merge: true });
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+    handleWriteError(error, OperationType.WRITE, path);
   }
 }
 
@@ -166,6 +246,7 @@ export async function saveCampaignToFirebase(campaign: Campaign): Promise<void> 
  * Permanently delete campaign and record in blacklist
  */
 export async function deleteCampaignFromFirebase(campaignId: string): Promise<void> {
+  if (isFirestoreWritesPaused()) return;
   const path = `${CAMPAIGNS_COLLECTION}/${campaignId}`;
   try {
     await deleteDoc(doc(db, CAMPAIGNS_COLLECTION, campaignId));
@@ -183,7 +264,7 @@ export async function deleteCampaignFromFirebase(campaignId: string): Promise<vo
       }, { merge: true });
     }
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, path);
+    handleWriteError(error, OperationType.DELETE, path);
   }
 }
 
@@ -214,12 +295,13 @@ export function subscribeDeletedCampaignIds(onUpdate: (ids: string[]) => void): 
  * Record a tracking event to Firestore (for cross-browser analytics)
  */
 export async function saveTrackingEventToFirebase(event: TrackingEvent): Promise<void> {
+  if (isFirestoreWritesPaused()) return;
   const path = `${TRACKING_COLLECTION}/${event.id}`;
   try {
     const docRef = doc(db, TRACKING_COLLECTION, event.id);
-    await setDoc(docRef, event);
+    await setDoc(docRef, stripUndefinedDeep(event));
   } catch (error) {
-    handleFirestoreError(error, OperationType.CREATE, path);
+    handleWriteError(error, OperationType.CREATE, path);
   }
 }
 
@@ -252,23 +334,22 @@ export async function saveLandingPageSettingsToFirebase(
   settings: Record<string, any>,
   campaignId?: string
 ): Promise<void> {
+  if (isFirestoreWritesPaused()) return;
   const docKey = campaignId ? `landing_page_${campaignId}` : 'landing_page_tarefinhas';
   const path = `${SETTINGS_COLLECTION}/${docKey}`;
   try {
-    await setDoc(doc(db, SETTINGS_COLLECTION, docKey), {
+    const clean = stripUndefinedDeep({
       ...settings,
       updatedAt: new Date().toISOString(),
-    }, { merge: true });
+    });
+    await setDoc(doc(db, SETTINGS_COLLECTION, docKey), clean, { merge: true });
 
     // Also update generic fallback if tarefinhas
     if (!campaignId || campaignId === 'camp-tarefinhas-autismo') {
-      await setDoc(doc(db, SETTINGS_COLLECTION, 'landing_page_tarefinhas'), {
-        ...settings,
-        updatedAt: new Date().toISOString(),
-      }, { merge: true });
+      await setDoc(doc(db, SETTINGS_COLLECTION, 'landing_page_tarefinhas'), clean, { merge: true });
     }
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+    handleWriteError(error, OperationType.WRITE, path);
   }
 }
 
@@ -306,14 +387,19 @@ export interface DispatchTemplateSettings {
 }
 
 export async function saveDispatchTemplateToFirebase(template: DispatchTemplateSettings): Promise<void> {
+  if (isFirestoreWritesPaused()) return;
   const path = `${SETTINGS_COLLECTION}/dispatch_${template.nicheId}`;
   try {
-    await setDoc(doc(db, SETTINGS_COLLECTION, `dispatch_${template.nicheId}`), {
-      ...template,
-      updatedAt: new Date().toISOString(),
-    }, { merge: true });
+    await setDoc(
+      doc(db, SETTINGS_COLLECTION, `dispatch_${template.nicheId}`),
+      stripUndefinedDeep({
+        ...template,
+        updatedAt: new Date().toISOString(),
+      }),
+      { merge: true }
+    );
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+    handleWriteError(error, OperationType.WRITE, path);
   }
 }
 
@@ -354,26 +440,31 @@ export interface CustomLeadProfile {
 }
 
 export async function saveCustomProfileToFirebase(profile: CustomLeadProfile): Promise<void> {
+  if (isFirestoreWritesPaused()) return;
   const cleanId = profile.handle.replace(/[^a-zA-Z0-9_-]/g, '_');
   const path = `${PROFILES_COLLECTION}/${cleanId}`;
   try {
-    await setDoc(doc(db, PROFILES_COLLECTION, cleanId), {
-      ...profile,
-      id: cleanId,
-      updatedAt: new Date().toISOString(),
-    });
+    await setDoc(
+      doc(db, PROFILES_COLLECTION, cleanId),
+      stripUndefinedDeep({
+        ...profile,
+        id: cleanId,
+        updatedAt: new Date().toISOString(),
+      })
+    );
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+    handleWriteError(error, OperationType.WRITE, path);
   }
 }
 
 export async function deleteCustomProfileFromFirebase(handle: string): Promise<void> {
+  if (isFirestoreWritesPaused()) return;
   const cleanId = handle.replace(/[^a-zA-Z0-9_-]/g, '_');
   const path = `${PROFILES_COLLECTION}/${cleanId}`;
   try {
     await deleteDoc(doc(db, PROFILES_COLLECTION, cleanId));
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, path);
+    handleWriteError(error, OperationType.DELETE, path);
   }
 }
 
@@ -414,14 +505,19 @@ export interface InstagramOriginAccount {
 }
 
 export async function saveInstagramOriginAccountToFirebase(account: InstagramOriginAccount): Promise<void> {
+  if (isFirestoreWritesPaused()) return;
   const path = `${SETTINGS_COLLECTION}/instagram_origin_profile`;
   try {
-    await setDoc(doc(db, SETTINGS_COLLECTION, 'instagram_origin_profile'), {
-      ...account,
-      updatedAt: new Date().toISOString(),
-    }, { merge: true });
+    await setDoc(
+      doc(db, SETTINGS_COLLECTION, 'instagram_origin_profile'),
+      stripUndefinedDeep({
+        ...account,
+        updatedAt: new Date().toISOString(),
+      }),
+      { merge: true }
+    );
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+    handleWriteError(error, OperationType.WRITE, path);
   }
 }
 
@@ -448,26 +544,32 @@ export function subscribeInstagramOriginAccount(onUpdate: (account: InstagramOri
 const CUSTOMERS_COLLECTION = 'autoviral_customers';
 
 export async function saveCustomerLeadToFirebase(customer: CustomerLead): Promise<void> {
+  if (isFirestoreWritesPaused()) return;
   const cleanId = (customer.id || `lead-${Date.now()}`).replace(/\//g, '_');
   const path = `${CUSTOMERS_COLLECTION}/${cleanId}`;
   try {
-    await setDoc(doc(db, CUSTOMERS_COLLECTION, cleanId), {
-      ...customer,
-      id: cleanId,
-      updatedAt: new Date().toISOString(),
-    }, { merge: true });
+    await setDoc(
+      doc(db, CUSTOMERS_COLLECTION, cleanId),
+      stripUndefinedDeep({
+        ...customer,
+        id: cleanId,
+        updatedAt: new Date().toISOString(),
+      }),
+      { merge: true }
+    );
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+    handleWriteError(error, OperationType.WRITE, path);
   }
 }
 
 export async function deleteCustomerLeadFromFirebase(customerId: string): Promise<void> {
+  if (isFirestoreWritesPaused()) return;
   const cleanId = customerId.replace(/\//g, '_');
   const path = `${CUSTOMERS_COLLECTION}/${cleanId}`;
   try {
     await deleteDoc(doc(db, CUSTOMERS_COLLECTION, cleanId));
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, path);
+    handleWriteError(error, OperationType.DELETE, path);
   }
 }
 
@@ -509,14 +611,19 @@ export interface MetaAdsApiConfig {
 }
 
 export async function saveMetaAdsConfigToFirebase(config: MetaAdsApiConfig): Promise<void> {
+  if (isFirestoreWritesPaused()) return;
   const path = `${SETTINGS_COLLECTION}/meta_ads_config`;
   try {
-    await setDoc(doc(db, SETTINGS_COLLECTION, 'meta_ads_config'), {
-      ...config,
-      updatedAt: new Date().toISOString(),
-    }, { merge: true });
+    await setDoc(
+      doc(db, SETTINGS_COLLECTION, 'meta_ads_config'),
+      stripUndefinedDeep({
+        ...config,
+        updatedAt: new Date().toISOString(),
+      }),
+      { merge: true }
+    );
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+    handleWriteError(error, OperationType.WRITE, path);
   }
 }
 
@@ -551,29 +658,44 @@ export interface WorkspaceSyncData {
   storyQueue?: any[];
   mappedInstaTargets?: any[];
   mappedGroups?: any[];
+  whatsappX1Flows?: Record<string, any>;
   updatedAt?: string;
 }
 
 export async function saveWorkspaceSyncToFirebase(
-  partial: Partial<WorkspaceSyncData>
-): Promise<{ ok: boolean; error?: string }> {
+  partial: Partial<WorkspaceSyncData>,
+  options?: { force?: boolean }
+): Promise<{ ok: boolean; skipped?: boolean; quotaExceeded?: boolean; error?: string }> {
+  if (isFirestoreWritesPaused() && !options?.force) {
+    return { ok: false, quotaExceeded: true, error: 'quota-paused' };
+  }
   try {
-    const safePayload: Record<string, any> = {
-      updatedAt: new Date().toISOString(),
-    };
+    const safePayload: Record<string, any> = {};
+    let hasChanges = Boolean(options?.force);
 
     Object.entries(partial).forEach(([key, value]) => {
       if (value === undefined) return;
-      if (key === 'mappedGroups' && Array.isArray(value)) {
-        safePayload[key] = value.slice(0, 450);
-      } else if (key === 'mappedInstaTargets' && Array.isArray(value)) {
-        safePayload[key] = value.slice(0, 300);
-      } else if (Array.isArray(value)) {
-        safePayload[key] = value.slice(0, 250);
-      } else {
-        safePayload[key] = value;
+      let normalizedValue = stripUndefinedDeep(value);
+      if (key === 'mappedGroups' && Array.isArray(normalizedValue)) {
+        normalizedValue = normalizedValue.slice(0, 450);
+      } else if (key === 'mappedInstaTargets' && Array.isArray(normalizedValue)) {
+        normalizedValue = normalizedValue.slice(0, 300);
+      } else if (Array.isArray(normalizedValue)) {
+        normalizedValue = normalizedValue.slice(0, 250);
+      }
+
+      const serialized = JSON.stringify(normalizedValue);
+      if (workspaceFieldHashes[key] !== serialized) {
+        hasChanges = true;
+        safePayload[key] = normalizedValue;
       }
     });
+
+    if (!hasChanges || Object.keys(safePayload).length === 0) {
+      return { ok: true, skipped: true };
+    }
+
+    safePayload.updatedAt = new Date().toISOString();
 
     // Guard against Firestore 1MB document limit
     const serializedSize = JSON.stringify(safePayload).length;
@@ -585,8 +707,21 @@ export async function saveWorkspaceSyncToFirebase(
     }
 
     await setDoc(doc(db, SETTINGS_COLLECTION, 'workspace_sync_v1'), safePayload, { merge: true });
+    recordCloudWorkspaceHashes(safePayload);
     return { ok: true };
   } catch (error: any) {
+    if (isQuotaExceededError(error)) {
+      firestoreWritesPausedUntil = Date.now() + 15 * 60 * 1000;
+      const now = Date.now();
+      if (now - lastQuotaNoticeAt > 30000) {
+        lastQuotaNoticeAt = now;
+        console.warn('[Firebase Quota] Cota diária de gravações atingida ao sincronizar workspace.');
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('autoviral_firebase_quota_exceeded'));
+        }
+      }
+      return { ok: false, quotaExceeded: true, error: error?.message || String(error) };
+    }
     console.warn('Workspace sync write notice:', error);
     return { ok: false, error: error?.message || String(error) };
   }
@@ -601,7 +736,9 @@ export function subscribeWorkspaceSync(
     docRef,
     (snap) => {
       if (snap.exists()) {
-        onUpdate(snap.data() as WorkspaceSyncData);
+        const data = snap.data() as WorkspaceSyncData;
+        recordCloudWorkspaceHashes(data as Record<string, any>);
+        onUpdate(data);
       }
     },
     (err) => {

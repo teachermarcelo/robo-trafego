@@ -25,6 +25,7 @@ import { MetaAdsBoosterTab } from './components/MetaAdsBoosterTab';
 import { RoboDivulgadorCidades } from './components/RoboDivulgadorCidades';
 import { BrevoEmailWhatsAppTab } from './components/BrevoEmailWhatsAppTab';
 import { ChromeFbGroupsTab } from './components/ChromeFbGroupsTab';
+import { WhatsAppFunnelX1Tab } from './components/WhatsAppFunnelX1Tab';
 import { PWAInstallModal } from './components/PWAInstallModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { getCampaignSlug } from './utils/campaignSlug';
@@ -51,12 +52,14 @@ import {
   pullFullCloudSnapshotFromFirebase,
   fetchRecoverableArchivedCampaigns,
   restoreArchivedCampaignToFirebase,
+  resetFirebaseQuotaPause,
   WorkspaceSyncData,
 } from './lib/firebase';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [selectedCampaignForDispatches, setSelectedCampaignForDispatches] = useState<string | null>(null);
+  const pushedUnsyncedCampaignIdsRef = React.useRef<Set<string>>(new Set());
   const [deletedCampaignIds, setDeletedCampaignIds] = useState<Set<string>>(() => {
     try {
       const saved = localStorage.getItem('autoviral_deleted_campaign_ids');
@@ -131,6 +134,7 @@ export default function App() {
   const [isPWAInstallModalOpen, setIsPWAInstallModalOpen] = useState(false);
   const [bridgeModalCampaign, setBridgeModalCampaign] = useState<Campaign | null>(null);
   const [firebaseSyncStatus, setFirebaseSyncStatus] = useState<'connecting' | 'synced' | 'error'>('connecting');
+  const [firebaseQuotaExceeded, setFirebaseQuotaExceeded] = useState<boolean>(false);
   const [cloudCampaignsCount, setCloudCampaignsCount] = useState<number>(0);
   const [isSyncingCloud, setIsSyncingCloud] = useState<boolean>(false);
   const [recoverableCampaigns, setRecoverableCampaigns] = useState<Campaign[]>([]);
@@ -212,18 +216,24 @@ export default function App() {
           } catch {}
           const valid = cloudCampaigns.filter((c) => !delSet.has(c.id));
           if (valid.length > 0) {
+            const cloudIds = new Set(valid.map((c) => c.id));
+            const toPushOnce: Campaign[] = [];
             setCampaigns((prev) => {
-              const cloudIds = new Set(valid.map((c) => c.id));
-              // Preserve any newly created local campaigns not yet in cloud and push them up
               const localUnsynced = prev.filter((p) => !cloudIds.has(p.id) && !delSet.has(p.id));
               localUnsynced.forEach((lu) => {
-                saveCampaignToFirebase(lu).catch(console.warn);
+                if (!pushedUnsyncedCampaignIdsRef.current.has(lu.id)) {
+                  toPushOnce.push(lu);
+                }
               });
               const merged = [...valid, ...localUnsynced];
               try {
                 localStorage.setItem('autoviral_campaigns', JSON.stringify(merged));
               } catch {}
               return merged;
+            });
+            toPushOnce.forEach((lu) => {
+              pushedUnsyncedCampaignIdsRef.current.add(lu.id);
+              saveCampaignToFirebase(lu).catch(console.warn);
             });
           }
         }
@@ -233,7 +243,16 @@ export default function App() {
         setFirebaseSyncStatus('error');
       }
     );
-    return () => unsubCampaigns();
+
+    const onQuotaExceeded = () => {
+      setFirebaseQuotaExceeded(true);
+    };
+    window.addEventListener('autoviral_firebase_quota_exceeded', onQuotaExceeded);
+
+    return () => {
+      unsubCampaigns();
+      window.removeEventListener('autoviral_firebase_quota_exceeded', onQuotaExceeded);
+    };
   }, [deletedCampaignIds]);
 
   // 2b. Root-level Firebase Workspace Sync listener (guarantees mobile PWA receives groups/audiences/stories even on Dashboard)
@@ -290,6 +309,18 @@ export default function App() {
       mergeArrayByKey(['autoviral_insta_story_queue', 'autoviral_insta_story_queue_v2'], cloud.storyQueue, 'id');
       mergeArrayByKey(['autoviral_insta_mapped_targets_v2'], cloud.mappedInstaTargets, 'handle');
       mergeArrayByKey(['autoviral_custom_copy_presets_v1'], cloud.customCopyPresets, 'id');
+
+      if (cloud.whatsappX1Flows && typeof cloud.whatsappX1Flows === 'object') {
+        const prevFlows = safeRead('autoviral_whatsapp_x1_flows_v1') || {};
+        const nextFlows = { ...prevFlows };
+        Object.entries(cloud.whatsappX1Flows).forEach(([campId, flow]: [string, any]) => {
+          if (!flow) return;
+          if (!nextFlows[campId] || (flow.updatedAt && (!nextFlows[campId].updatedAt || flow.updatedAt > nextFlows[campId].updatedAt))) {
+            nextFlows[campId] = flow;
+          }
+        });
+        safeWrite('autoviral_whatsapp_x1_flows_v1', nextFlows);
+      }
 
       window.dispatchEvent(new CustomEvent('autoviral_workspace_synced', { detail: cloud }));
     };
@@ -454,7 +485,7 @@ export default function App() {
       device: eventData.device || (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ? 'mobile' : 'desktop'),
       ageBracket: eventData.ageBracket || '25-34',
       source: eventData.source || 'instagram',
-      amount: eventData.amount,
+      ...(typeof eventData.amount === 'number' ? { amount: eventData.amount } : {}),
       leadScore: eventData.leadScore || 85,
       durationSeconds: eventData.durationSeconds || 18,
       isSimulation: eventData.isSimulation ?? false,
@@ -1034,6 +1065,7 @@ export default function App() {
         instaCampaigns: safeParse('autoviral_insta_campaigns_v1'),
         storyQueue: safeParse('autoviral_insta_story_queue') || safeParse('autoviral_insta_story_queue_v2'),
         mappedInstaTargets: safeParse('autoviral_insta_mapped_targets_v2'),
+        whatsappX1Flows: safeParse('autoviral_whatsapp_x1_flows_v1'),
       },
     };
     const blob = new Blob([JSON.stringify(backupData, null, 2)], {
@@ -1096,6 +1128,7 @@ export default function App() {
           putJson('autoviral_insta_story_queue_v2', w.storyQueue);
         }
         if (w.mappedInstaTargets) putJson('autoviral_insta_mapped_targets_v2', w.mappedInstaTargets);
+        if (w.whatsappX1Flows) putJson('autoviral_whatsapp_x1_flows_v1', w.whatsappX1Flows);
 
         saveWorkspaceSyncToFirebase({
           savedCopiesMap: w.savedCopiesMap || undefined,
@@ -1107,6 +1140,7 @@ export default function App() {
           storyQueue: w.storyQueue || undefined,
           mappedInstaTargets: w.mappedInstaTargets || undefined,
           mappedGroups: w.mappedGroups || undefined,
+          whatsappX1Flows: w.whatsappX1Flows || undefined,
         }).catch(console.warn);
       }
 
@@ -1122,6 +1156,8 @@ export default function App() {
   // Manual 2-way Cloud Sync (Desktop <-> Mobile)
   const handleForceCloudSync = async () => {
     setIsSyncingCloud(true);
+    resetFirebaseQuotaPause();
+    setFirebaseQuotaExceeded(false);
     try {
       const safeParse = (k: string) => {
         try {
@@ -1132,15 +1168,8 @@ export default function App() {
         }
       };
 
-      // 1. Push all local non-deleted campaigns to Firebase
-      for (const camp of campaigns) {
-        if (!deletedCampaignIds.has(camp.id)) {
-          await saveCampaignToFirebase(camp).catch(console.warn);
-        }
-      }
-
-      // 2. Push local workspace state to Firebase
-      await saveWorkspaceSyncToFirebase({
+      // 1. Push local workspace state to Firebase (deduplicated)
+      const wsRes = await saveWorkspaceSyncToFirebase({
         savedCopiesMap: safeParse('autoviral_saved_copies_v1'),
         customCopyPresets: safeParse('autoviral_custom_copy_presets_v1'),
         audiences: safeParse('autoviral_fb_audiences_v4') || safeParse('autoviral_fb_audiences_v3'),
@@ -1150,9 +1179,13 @@ export default function App() {
         storyQueue: safeParse('autoviral_insta_story_queue') || safeParse('autoviral_insta_story_queue_v2'),
         mappedInstaTargets: safeParse('autoviral_insta_mapped_targets_v2'),
         mappedGroups: safeParse('autoviral_fb_mapped_groups_v5_real') || safeParse('autoviral_fb_mapped_groups_v3'),
+        whatsappX1Flows: safeParse('autoviral_whatsapp_x1_flows_v1'),
       });
+      if (wsRes.quotaExceeded) {
+        setFirebaseQuotaExceeded(true);
+      }
 
-      // 3. Pull fresh snapshot directly from Firestore server
+      // 2. Pull fresh snapshot directly from Firestore server
       const snap = await pullFullCloudSnapshotFromFirebase();
       const cloudDelSet = new Set(snap.deletedIds);
       setDeletedCampaignIds(cloudDelSet);
@@ -1328,6 +1361,25 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6">
+        {firebaseQuotaExceeded && (
+          <div className="mb-5 rounded-2xl border border-amber-700/60 bg-amber-950/60 px-4 py-3 text-xs text-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="space-y-1">
+              <p className="font-bold text-amber-300">
+                Limite diário gratuito de gravações do Firestore atingido (Cota Spark)
+              </p>
+              <p className="text-amber-100/90">
+                Suas campanhas e alterações continuam sendo salvas localmente sem perda de dados. A cota gratuita do Firebase reinicia automaticamente amanhã (ou você pode ampliar o plano no console do Firebase).
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setFirebaseQuotaExceeded(false)}
+              className="px-3 py-1.5 rounded-lg bg-amber-900/80 hover:bg-amber-800 text-amber-100 font-semibold whitespace-nowrap self-start sm:self-center cursor-pointer"
+            >
+              Entendi
+            </button>
+          </div>
+        )}
         {activeTab === 'dashboard' && (
           <DashboardOverview
             campaigns={campaigns}
@@ -1378,6 +1430,16 @@ export default function App() {
               };
               setNotifications((prev) => [notif, ...prev]);
             }}
+            onNavigateTab={(tab) => setActiveTab(tab)}
+          />
+        )}
+
+        {activeTab === 'whatsapp_x1' && (
+          <WhatsAppFunnelX1Tab
+            campaigns={campaigns}
+            customers={customerLeads}
+            trackingEvents={trackingEvents}
+            onAddTrackingEvent={handleAddTrackingEvent}
             onNavigateTab={(tab) => setActiveTab(tab)}
           />
         )}

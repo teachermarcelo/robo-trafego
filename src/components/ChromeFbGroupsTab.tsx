@@ -1681,8 +1681,13 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
     };
   }, []);
 
-  // Push workspace state to Firebase Cloud debounced
+  const hasInitializedWorkspaceSyncRef = React.useRef(false);
+  // Push workspace state to Firebase Cloud debounced (only on actual local edits)
   useEffect(() => {
+    if (!hasInitializedWorkspaceSyncRef.current) {
+      hasInitializedWorkspaceSyncRef.current = true;
+      return;
+    }
     const timer = setTimeout(() => {
       saveWorkspaceSyncToFirebase({
         savedCopiesMap,
@@ -1692,7 +1697,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
         pinterestPins,
         mappedGroups,
       });
-    }, 1800);
+    }, 2200);
     return () => clearTimeout(timer);
   }, [savedCopiesMap, customCopyPresets, audiences, youtubeVideos, pinterestPins, mappedGroups]);
 

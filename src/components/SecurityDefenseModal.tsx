@@ -7,6 +7,7 @@ interface SecurityDefenseModalProps {
   onResumeAnyway: () => void;
   platformName?: 'Facebook' | 'Instagram' | 'Multi-Canais';
   initialCooldownSeconds?: number;
+  triggerReason?: string;
 }
 
 export const SecurityDefenseModal: React.FC<SecurityDefenseModalProps> = ({
@@ -15,6 +16,7 @@ export const SecurityDefenseModal: React.FC<SecurityDefenseModalProps> = ({
   onResumeAnyway,
   platformName = 'Facebook',
   initialCooldownSeconds = 3590, // 59m 50s as seen in user's image
+  triggerReason,
 }) => {
   const [remainingSeconds, setRemainingSeconds] = useState<number>(initialCooldownSeconds);
 
@@ -58,6 +60,11 @@ export const SecurityDefenseModal: React.FC<SecurityDefenseModalProps> = ({
           <h2 className="text-xl font-bold text-white tracking-tight">
             Campanhas pausadas por segurança
           </h2>
+          {triggerReason && (
+            <div className="text-[11px] font-semibold text-red-200 bg-red-950/60 border border-red-700/60 rounded-xl px-3 py-2 text-left">
+              {triggerReason}
+            </div>
+          )}
           <p className="text-xs text-slate-300 leading-relaxed max-w-sm mx-auto">
             O <strong className="text-white">{platformName}</strong> detectou{' '}
             <strong className="text-amber-400">frequência alta de publicações</strong> e emitiu um aviso.

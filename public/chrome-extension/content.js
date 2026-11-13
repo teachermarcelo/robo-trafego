@@ -604,6 +604,27 @@
       return false;
     }
 
+    function isFacebookRateLimited() {
+      try {
+        const dialogs = Array.from(document.querySelectorAll('div[role="dialog"]'));
+        const dialogText = dialogs.map((d) => (d.innerText || '')).join(' ').toLowerCase();
+        const bodyText = (document.body ? document.body.innerText : '').toLowerCase();
+        const haystack = dialogText + ' ' + bodyText;
+        return (
+          haystack.includes('você não pode usar este recurso no momento') ||
+          haystack.includes('voce nao pode usar este recurso no momento') ||
+          haystack.includes('limitamos a frequência') ||
+          haystack.includes('limitamos a frequencia') ||
+          haystack.includes("you can't use this feature right now") ||
+          haystack.includes('we limit how often you can post') ||
+          haystack.includes('ação bloqueada') ||
+          haystack.includes('action blocked') ||
+          haystack.includes('temporarily blocked')
+        );
+      } catch (e) {}
+      return false;
+    }
+
     function findComposerTrigger() {
       const composerTriggers = Array.from(document.querySelectorAll('div[role="button"], span'));
       return composerTriggers.find((el) => {
@@ -705,6 +726,24 @@
         ticks++;
         const bodyTxt = (document.body ? document.body.innerText : '').toLowerCase();
 
+        if (isFacebookRateLimited()) {
+          finished = true;
+          clearInterval(checkInterval);
+          sendRealPostResultToPlatform({
+            logId: pending.logId,
+            groupId: pending.groupId,
+            groupUrl: window.location.href,
+            groupName: pending.groupName,
+            approvalStatus: 'rate_limited',
+            note: 'Facebook exibiu: Você não pode usar este recurso no momento'
+          });
+          if (msgEl) {
+            msgEl.textContent = '🛡️ FREIO ANTI-BLOQUEIO: Facebook limitou ações agora! Robô pausado — aguarde 15–30 min antes de continuar.';
+            msgEl.style.color = '#fb7185';
+          }
+          return;
+        }
+
         if (
           bodyTxt.includes('aguardando aprovação de um administrador') ||
           bodyTxt.includes('pendente de aprovação do administrador') ||
@@ -757,6 +796,21 @@
 
     function executeAutoPostFlow(pending, currentSlug, msgEl, cancelAutoBtn, autoSubmit) {
       if (!pending || !pending.fullText) return;
+      if (isFacebookRateLimited()) {
+        sendRealPostResultToPlatform({
+          logId: pending.logId,
+          groupId: pending.groupId,
+          groupUrl: window.location.href,
+          groupName: pending.groupName,
+          approvalStatus: 'rate_limited',
+          note: 'Facebook exibiu: Você não pode usar este recurso no momento'
+        });
+        if (msgEl) {
+          msgEl.textContent = '🛡️ FREIO ANTI-BLOQUEIO: Limite temporário detectado no Facebook! Aguarde 15–30 min antes de postar.';
+          msgEl.style.color = '#fb7185';
+        }
+        return;
+      }
       try {
         navigator.clipboard.writeText(pending.fullText).catch(() => {});
       } catch (e) {}
@@ -926,6 +980,24 @@
         const btnAdm = document.getElementById('autoviral-btn-confirm-admin');
 
         const triggerJoinThenPost = (autoSubmitPost) => {
+          if (isFacebookRateLimited()) {
+            if (pending) {
+              sendRealPostResultToPlatform({
+                logId: pending.logId,
+                groupId: pending.groupId,
+                groupUrl: window.location.href,
+                groupName: pending.groupName,
+                approvalStatus: 'rate_limited',
+                note: 'Facebook exibiu: Você não pode usar este recurso no momento'
+              });
+            }
+            if (msgEl) {
+              msgEl.textContent = '🛡️ FREIO ANTI-BLOQUEIO: Facebook limitou temporariamente ("Você não pode usar este recurso no momento"). Painel pausado — aguarde 15–30 min!';
+              msgEl.style.color = '#fb7185';
+            }
+            return;
+          }
+
           if (isMembershipPendingApproval()) {
             if (pending) {
               sendRealPostResultToPlatform({
@@ -952,6 +1024,24 @@
             currentJoinBtn.click();
 
             setTimeout(() => {
+              if (isFacebookRateLimited()) {
+                if (pending) {
+                  sendRealPostResultToPlatform({
+                    logId: pending.logId,
+                    groupId: pending.groupId,
+                    groupUrl: window.location.href,
+                    groupName: pending.groupName,
+                    approvalStatus: 'rate_limited',
+                    note: 'Facebook limitou entradas/ações temporariamente'
+                  });
+                }
+                if (msgEl) {
+                  msgEl.textContent = '🛡️ FREIO ANTI-BLOQUEIO: Facebook exibiu "Você não pode usar este recurso no momento". Robô pausado para proteger sua conta — aguarde 15–30 min!';
+                  msgEl.style.color = '#fb7185';
+                }
+                return;
+              }
+
               if (hasMembershipQuestionsModalOpen()) {
                 if (pending) {
                   sendRealPostResultToPlatform({
@@ -986,15 +1076,15 @@
                 return;
               }
 
-              // Joined public group instantly! Proceed to post!
+              // Joined public group instantly! Wait 4.5s humanized delay before posting!
               if (msgEl) {
-                msgEl.textContent = '✅ Entrada confirmada no grupo! Preparando postagem automática...';
+                msgEl.textContent = '✅ Entrada confirmada! Aguardando 4.5s (proteção anti-spam) antes de postar...';
                 msgEl.style.color = '#34d399';
               }
               if (pending && pending.fullText) {
-                setTimeout(() => executeAutoPostFlow(pending, currentSlug, msgEl, cancelAutoBtn, autoSubmitPost), 1000);
+                setTimeout(() => executeAutoPostFlow(pending, currentSlug, msgEl, cancelAutoBtn, autoSubmitPost), 4500);
               }
-            }, 2600);
+            }, 3200);
             return;
           }
 

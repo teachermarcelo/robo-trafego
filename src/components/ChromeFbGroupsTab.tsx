@@ -442,7 +442,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
   const [realRadarSourceFilter, setRealRadarSourceFilter] = useState<string>('all');
   const [smartLinkChannel, setSmartLinkChannel] = useState<'facebook_groups' | 'instagram_story' | 'youtube_comments' | 'pinterest' | 'whatsapp'>('facebook_groups');
   const [copiedSmartUrlFeedback, setCopiedSmartUrlFeedback] = useState<boolean>(false);
-  const [postsLogFilter, setPostsLogFilter] = useState<'all' | 'published' | 'awaiting_admin' | 'join_requested' | 'not_member' | 'pending_verification' | 'pending' | 'legacy_unverified' | 'error'>('all');
+  const [postsLogFilter, setPostsLogFilter] = useState<'all' | 'published' | 'awaiting_admin' | 'join_requested' | 'rate_limited' | 'not_member' | 'pending_verification' | 'pending' | 'legacy_unverified' | 'error'>('all');
   const [autoJoinAndPostEnabled, setAutoJoinAndPostEnabled] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem('autoviral_fb_auto_join_post');
@@ -1095,6 +1095,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
   // Security Defense Modal State (Requested by user: "crie uma defessa interna com aviso", image_031f9bdf.png)
   const [isDefenseModalOpen, setIsDefenseModalOpen] = useState<boolean>(false);
   const [defensePlatform, setDefensePlatform] = useState<'Facebook' | 'Instagram' | 'Multi-Canais'>('Facebook');
+  const [defenseTriggerReason, setDefenseTriggerReason] = useState<string>('');
 
   // Automatic Cooldown Pauses (Requested by user: "limite de 500 por dia podendo ser mais com pausa automaticas")
   const [isCyclePauseActive, setIsCyclePauseActive] = useState<boolean>(true);
@@ -1883,7 +1884,8 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
         approvalStatus === 'published' ||
         approvalStatus === 'awaiting_admin' ||
         approvalStatus === 'not_member' ||
-        approvalStatus === 'join_requested'
+        approvalStatus === 'join_requested' ||
+        approvalStatus === 'rate_limited'
           ? approvalStatus
           : 'pending_verification';
 
@@ -1896,7 +1898,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
           updated[matchIdx] = {
             ...updated[matchIdx],
             postedAt: formattedNow,
-            status: normalizedStatus === 'not_member' ? 'error' : 'success',
+            status: normalizedStatus === 'not_member' || normalizedStatus === 'rate_limited' ? 'error' : 'success',
             approvalStatus: normalizedStatus,
             isVerifiedReal: true
           };
@@ -1909,7 +1911,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
           groupUrl: groupUrl || 'https://www.facebook.com/groups',
           postedAt: formattedNow,
           headline: note || 'Publicação verificada pela extensão Chrome',
-          status: normalizedStatus === 'not_member' ? 'error' : 'success',
+          status: normalizedStatus === 'not_member' || normalizedStatus === 'rate_limited' ? 'error' : 'success',
           approvalStatus: normalizedStatus,
           isVerifiedReal: true,
           intervalWaitedSeconds: 0,
@@ -1918,14 +1920,24 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
         return [created, ...prev];
       });
 
-      if (normalizedStatus === 'join_requested') {
+      if (normalizedStatus === 'rate_limited') {
+        globalBotRunner.stop();
+        setIsBotRunning(false);
+        setDefensePlatform('Facebook');
+        setDefenseTriggerReason('Facebook exibiu: "Você não pode usar este recurso no momento" (Limite temporário de frequência)');
+        setIsDefenseModalOpen(true);
         setExtensionSyncBanner({
-          message: `🚪 Entrada solicitada automaticamente em "${groupName || 'grupo'}"! A postagem ficou salva — quando o administrador aprovar, clique em "🔄 Tentar Postar" no histórico.`,
+          message: `🛡️ FREIO ANTI-BLOQUEIO ATIVADO! O Facebook limitou ações temporariamente em "${groupName || 'grupo'}". A fila foi pausada — aguarde 15–30 min e priorize grupos onde você já é membro.`,
+          tone: 'warning'
+        });
+      } else if (normalizedStatus === 'join_requested') {
+        setExtensionSyncBanner({
+          message: `🚪 Entrada solicitada automaticamente em "${groupName || 'grupo'}"! A postagem ficou salva — quando o administrador aprovar, clique em "🔄 Entrar / Postar Agora" no histórico.`,
           tone: 'warning'
         });
       } else if (normalizedStatus === 'not_member') {
         setExtensionSyncBanner({
-          message: `⚠️ Grupo "${groupName || 'Facebook'}" ainda precisa de entrada. Clique em "🔄 Tentar Postar" para a extensão v1.3.6 solicitar entrada e postar automaticamente.`,
+          message: `⚠️ Grupo "${groupName || 'Facebook'}" ainda precisa de entrada. Clique em "🔄 Entrar / Postar Agora" para a extensão v1.3.7 solicitar entrada e postar automaticamente.`,
           tone: 'warning'
         });
       } else if (normalizedStatus === 'awaiting_admin') {
@@ -2061,7 +2073,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
 
     setExtensionSyncBanner({
       message: autoJoinAndPostEnabled
-        ? `🤖 Grupo "${currentGroup.name}" aberto! A Extensão v1.3.6 vai solicitar entrada (se precisar) e postar automaticamente.`
+        ? `🤖 Grupo "${currentGroup.name}" aberto! A Extensão v1.3.7 vai solicitar entrada (se precisar) e postar automaticamente.`
         : `📋 Texto copiado! Grupo "${currentGroup.name}" aberto para postagem manual assistida.`,
       tone: 'success'
     });
@@ -2549,13 +2561,13 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       zip.file('README.md', readmeText);
       zip.file(
         'COMO-INSTALAR.txt',
-        `INSTRUÇÕES DE INSTALAÇÃO NO GOOGLE CHROME (AutoViral AI v1.3.6):\n\n1. Extraia este arquivo ZIP em uma pasta nova.\n2. No Chrome, abra chrome://extensions e REMOVA extensões AutoViral antigas (deixe APENAS UMA v1.3.6).\n3. Ative a chave "Modo do desenvolvedor" (topo direito).\n4. Clique em "Carregar sem compactação" (topo esquerdo) e escolha a pasta extraída.\n5. Abra o Facebook (grupos), role a busca, clique em "Mapear Grupos" e depois em "Enviar para o Painel".`
+        `INSTRUÇÕES DE INSTALAÇÃO NO GOOGLE CHROME (AutoViral AI v1.3.7):\n\n1. Extraia este arquivo ZIP em uma pasta nova.\n2. No Chrome, abra chrome://extensions e REMOVA extensões AutoViral antigas (deixe APENAS UMA v1.3.7).\n3. Ative a chave "Modo do desenvolvedor" (topo direito).\n4. Clique em "Carregar sem compactação" (topo esquerdo) e escolha a pasta extraída.\n5. Abra o Facebook (grupos), role a busca, clique em "Mapear Grupos" e depois em "Enviar para o Painel".`
       );
 
       const blob = await zip.generateAsync({ type: 'blob' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = 'extensao-autoviral-v1.3.6.zip';
+      link.download = 'extensao-autoviral-v1.3.7.zip';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -2563,7 +2575,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       console.error('Error generating extension zip:', err);
       const fallbackLink = document.createElement('a');
       fallbackLink.href = '/api/extension/download';
-      fallbackLink.download = 'extensao-autoviral-v1.3.6.zip';
+      fallbackLink.download = 'extensao-autoviral-v1.3.7.zip';
       document.body.appendChild(fallbackLink);
       fallbackLink.click();
       document.body.removeChild(fallbackLink);
@@ -2582,6 +2594,9 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
   const joinRequestedLogs = botLogs.filter(
     l => l.approvalStatus === 'join_requested'
   );
+  const rateLimitedLogs = botLogs.filter(
+    l => l.approvalStatus === 'rate_limited'
+  );
   const notMemberLogs = botLogs.filter(
     l => l.approvalStatus === 'not_member'
   );
@@ -2594,6 +2609,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       l.approvalStatus !== 'pending_verification' &&
       l.approvalStatus !== 'not_member' &&
       l.approvalStatus !== 'join_requested' &&
+      l.approvalStatus !== 'rate_limited' &&
       l.status === 'success'
   );
   const dispatchedGroupIds = new Set(
@@ -2603,7 +2619,8 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
           l.isVerifiedReal === true ||
           l.approvalStatus === 'pending_verification' ||
           l.approvalStatus === 'not_member' ||
-          l.approvalStatus === 'join_requested'
+          l.approvalStatus === 'join_requested' ||
+          l.approvalStatus === 'rate_limited'
       )
       .map(l => l.groupId)
   );
@@ -2613,7 +2630,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
 
   const handleToggleLogApprovalStatus = (
     logId: string,
-    nextApproval: 'awaiting_admin' | 'published' | 'not_member' | 'join_requested'
+    nextApproval: 'awaiting_admin' | 'published' | 'not_member' | 'join_requested' | 'rate_limited'
   ) => {
     setBotLogs(prev =>
       prev.map(l =>
@@ -2621,7 +2638,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
           ? {
               ...l,
               approvalStatus: nextApproval,
-              status: nextApproval === 'not_member' ? 'error' : 'success',
+              status: nextApproval === 'not_member' || nextApproval === 'rate_limited' ? 'error' : 'success',
               isVerifiedReal: true
             }
           : l
@@ -2636,7 +2653,8 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
           l.isVerifiedReal === true ||
           l.approvalStatus === 'pending_verification' ||
           l.approvalStatus === 'not_member' ||
-          l.approvalStatus === 'join_requested'
+          l.approvalStatus === 'join_requested' ||
+          l.approvalStatus === 'rate_limited'
       )
     );
     setPostsLogFilter('all');
@@ -3065,7 +3083,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
             >
               <span className="flex items-center gap-2.5 truncate">
                 <HelpCircle className="w-4 h-4 text-slate-400 shrink-0" />
-                <span className="truncate">Tutorial Chrome (v1.3.6)</span>
+                <span className="truncate">Tutorial Chrome (v1.3.7)</span>
               </span>
             </button>
           </div>
@@ -3113,7 +3131,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                   <span>🗺️ Passo a Passo Simples: Onde Estão Seus Grupos e Como Divulgar</span>
                 </h2>
                 <p className="text-xs text-slate-300 mt-0.5">
-                  Dica importante: deixe apenas <strong>1 extensão AutoViral (v1.3.6)</strong> ativa no Chrome e use sempre este painel oficial (feche o site antigo <code className="text-amber-300">vercel.app</code> se estiver aberto).
+                  Dica importante: deixe apenas <strong>1 extensão AutoViral (v1.3.7)</strong> ativa no Chrome e use sempre este painel oficial (feche o site antigo <code className="text-amber-300">vercel.app</code> se estiver aberto).
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -3146,7 +3164,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                 <p className="text-[11px] text-slate-400 leading-relaxed">Pesquise grupos no Facebook (ex: pedagogia, renda extra) e role a lista para carregar os cards.</p>
               </div>
               <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3">
-                <div className="font-black text-emerald-300 mb-1">2. Mapeie &amp; Envie (v1.3.6)</div>
+                <div className="font-black text-emerald-300 mb-1">2. Mapeie &amp; Envie (v1.3.7)</div>
                 <p className="text-[11px] text-slate-400 leading-relaxed">Clique em <strong>Mapear Grupos</strong> e depois em <strong>Enviar Grupos para o Painel</strong> na extensão.</p>
               </div>
               <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3">
@@ -3861,6 +3879,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                 {botLogs.slice(0, 4).map((log, idx) => {
                   const isAwaitingAdmin = log.approvalStatus === 'awaiting_admin';
                   const isJoinReq = log.approvalStatus === 'join_requested';
+                  const isRateLimited = log.approvalStatus === 'rate_limited';
                   const isNotMember = log.approvalStatus === 'not_member';
                   const isPendingVerify = log.approvalStatus === 'pending_verification';
                   const isVerifiedPub = log.isVerifiedReal === true && log.approvalStatus === 'published';
@@ -3868,14 +3887,16 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                     <div key={log.id || idx} className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1 text-[11px] py-1 border-b border-slate-900">
                       <div className="flex items-center gap-2 min-w-0">
                         <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                          isNotMember ? 'bg-rose-400' : isJoinReq ? 'bg-purple-400' : isAwaitingAdmin ? 'bg-amber-400' : isVerifiedPub ? 'bg-emerald-400' : 'bg-blue-400'
+                          isNotMember || isRateLimited ? 'bg-rose-400' : isJoinReq ? 'bg-purple-400' : isAwaitingAdmin ? 'bg-amber-400' : isVerifiedPub ? 'bg-emerald-400' : 'bg-blue-400'
                         }`} />
                         <strong className="text-white font-mono tabular-nums shrink-0">{log.postedAt}</strong>
                         <span className="text-slate-300 truncate max-w-[260px]">{log.groupName}</span>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         <span className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${
-                          isNotMember
+                          isRateLimited
+                            ? 'bg-rose-950/90 text-rose-200 border-rose-700'
+                            : isNotMember
                             ? 'bg-rose-950/80 text-rose-300 border-rose-800/60'
                             : isJoinReq
                             ? 'bg-purple-950/80 text-purple-300 border-purple-800/60'
@@ -3887,7 +3908,9 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                             ? 'bg-blue-950/80 text-blue-300 border-blue-800/60'
                             : 'bg-slate-900 text-slate-400 border-slate-700'
                         }`}>
-                          {isNotMember
+                          {isRateLimited
+                            ? 'Limite Temp. FB'
+                            : isNotMember
                             ? 'Precisa Participar'
                             : isJoinReq
                             ? 'Entrada Solicitada'
@@ -3915,6 +3938,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
             averageIntervalSeconds={intervalSeconds}
             onTriggerDefenseModal={() => {
               setDefensePlatform('Facebook');
+              setDefenseTriggerReason('');
               setIsDefenseModalOpen(true);
             }}
           />
@@ -4932,7 +4956,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
               <div className="bg-slate-950 border border-emerald-800/50 rounded-xl p-3.5 space-y-2.5 text-xs">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <span className="font-bold text-white flex items-center gap-1.5">
-                    🤖 Fluxo Automático: Solicitar Entrada + Postagem (Extensão v1.3.6)
+                    🤖 Fluxo Automático: Solicitar Entrada + Postagem (Extensão v1.3.7)
                   </span>
                   <label className="inline-flex items-center gap-2 cursor-pointer select-none">
                     <input
@@ -4942,14 +4966,14 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                       className="w-4 h-4 accent-emerald-500 rounded cursor-pointer"
                     />
                     <span className={`text-[11px] font-bold ${autoJoinAndPostEnabled ? 'text-emerald-400' : 'text-slate-400'}`}>
-                      {autoJoinAndPostEnabled ? 'Ativo (Entra &amp; Posta)' : 'Apenas Assistido'}
+                      {autoJoinAndPostEnabled ? 'Ativo (Entra & Posta)' : 'Apenas Assistido'}
                     </span>
                   </label>
                 </div>
                 <p className="text-[11px] text-slate-300 leading-relaxed">
-                  <strong>1.</strong> Se ainda aparecer <strong>"Participar do grupo"</strong>, a Extensão v1.3.6 clica automaticamente para solicitar sua entrada.
+                  <strong>1.</strong> Se ainda aparecer <strong>"Participar do grupo"</strong>, a Extensão v1.3.7 clica automaticamente para solicitar sua entrada (e pausa imediatamente se o Facebook mostrar limite de frequência).
                   <br />
-                  <strong>2.</strong> Em grupos públicos (entrada imediata), ela já abre <em>"Escreva algo..."</em>, cola a copy e publica na sequência. Em grupos que exigem aprovação do admin, ela registra <strong className="text-purple-300">Entrada Solicitada</strong> e guarda o post para você clicar em <strong>🔄 Tentar Postar</strong> quando aprovar!
+                  <strong>2.</strong> Em grupos públicos (entrada imediata), ela aguarda 4.5s anti-spam, abre <em>"Escreva algo..."</em>, cola a copy e publica. Em grupos moderados, registra <strong className="text-purple-300">Entrada Solicitada</strong> e guarda o post para você clicar em <strong>🔄 Entrar / Postar Agora</strong> quando aprovar!
                 </p>
 
                 {lastOpenedPostLog && (
@@ -5123,6 +5147,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                     const isAwaiting = log.approvalStatus === 'awaiting_admin';
                     const isJoinReq = log.approvalStatus === 'join_requested';
                     const isNotMem = log.approvalStatus === 'not_member';
+                    const isRateLim = log.approvalStatus === 'rate_limited';
                     const isPendingVer = log.approvalStatus === 'pending_verification';
                     const isVerifiedPub = log.isVerifiedReal === true && log.approvalStatus === 'published';
                     return (
@@ -5133,7 +5158,9 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                         <div className="flex items-start justify-between gap-2">
                           <span className="font-bold text-white line-clamp-1">{log.groupName}</span>
                           <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border shrink-0 ${
-                            isNotMem
+                            isRateLim
+                              ? 'text-red-300 bg-red-950 border-red-800/70'
+                              : isNotMem
                               ? 'text-rose-300 bg-rose-950 border-rose-800/60'
                               : isJoinReq
                               ? 'text-purple-300 bg-purple-950 border-purple-800/60'
@@ -5145,7 +5172,9 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                               ? 'text-blue-300 bg-blue-950 border-blue-800/60'
                               : 'text-slate-400 bg-slate-900 border-slate-700'
                           }`}>
-                            {isNotMem
+                            {isRateLim
+                              ? 'Limite Temp. FB'
+                              : isNotMem
                               ? 'Precisa Participar'
                               : isJoinReq
                               ? 'Entrada Solicitada'
@@ -5166,7 +5195,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                         <div className="flex items-center justify-between pt-1 text-[10px] text-slate-500 gap-2">
                           <span className="font-mono tabular-nums">{log.postedAt} · {log.intervalWaitedSeconds}s</span>
                           <div className="flex items-center gap-2 shrink-0">
-                            {(isJoinReq || isNotMem) && (
+                            {(isJoinReq || isNotMem || isRateLim) && (
                               <button
                                 type="button"
                                 onClick={() => handleRetryJoinOrPost(log)}
@@ -5237,7 +5266,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
             {/* HOW TO MAP YOUTUBE URLS GUIDE */}
             <div className="bg-red-950/20 border border-red-800/40 rounded-xl p-3.5 grid grid-cols-1 md:grid-cols-3 gap-2.5 text-xs">
               <div className="bg-slate-950/80 border border-slate-800 rounded-lg p-2.5">
-                <div className="font-black text-red-300 mb-0.5">Opção 1: Pela Extensão Chrome (v1.3.6)</div>
+                <div className="font-black text-red-300 mb-0.5">Opção 1: Pela Extensão Chrome (v1.3.7)</div>
                 <p className="text-[11px] text-slate-300 leading-relaxed">Abra a busca ou um vídeo no YouTube, clique em <strong>▶️ Mapear Vídeos / URLs do YouTube</strong> na extensão e depois em <strong>📡 Enviar Tudo</strong>.</p>
               </div>
               <div className="bg-slate-950/80 border border-slate-800 rounded-lg p-2.5">
@@ -5710,6 +5739,9 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
           if (postsLogFilter === 'join_requested') {
             return l.approvalStatus === 'join_requested';
           }
+          if (postsLogFilter === 'rate_limited') {
+            return l.approvalStatus === 'rate_limited';
+          }
           if (postsLogFilter === 'not_member') {
             return l.approvalStatus === 'not_member';
           }
@@ -5717,10 +5749,10 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
             return l.approvalStatus === 'pending_verification';
           }
           if (postsLogFilter === 'legacy_unverified') {
-            return l.isVerifiedReal !== true && l.approvalStatus !== 'pending_verification' && l.approvalStatus !== 'not_member' && l.approvalStatus !== 'join_requested' && l.status === 'success';
+            return l.isVerifiedReal !== true && l.approvalStatus !== 'pending_verification' && l.approvalStatus !== 'not_member' && l.approvalStatus !== 'join_requested' && l.approvalStatus !== 'rate_limited' && l.status === 'success';
           }
           if (postsLogFilter === 'error') {
-            return l.status === 'error' && l.approvalStatus !== 'not_member';
+            return l.status === 'error' && l.approvalStatus !== 'not_member' && l.approvalStatus !== 'rate_limited';
           }
           return true;
         });
@@ -5748,7 +5780,9 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                         l.postedAt || '',
                         (l.groupName || '').replace(/,/g, ' '),
                         l.groupUrl || '',
-                        l.approvalStatus === 'join_requested'
+                        l.approvalStatus === 'rate_limited'
+                          ? 'Limite Temporário FB (Pausado)'
+                          : l.approvalStatus === 'join_requested'
                           ? 'Entrada Solicitada (Aguard. Admin Aprovar)'
                           : l.approvalStatus === 'not_member'
                           ? 'Precisa Participar (Não é Membro)'
@@ -5922,6 +5956,9 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                   { id: 'awaiting_admin', label: `Aguardando Admin (${awaitingAdminLogs.length})` },
                   { id: 'published', label: `Postagem Feita (${verifiedPublishedLogs.length})` },
                   { id: 'join_requested', label: `Entrada Solicitada (${joinRequestedLogs.length})` },
+                  ...(rateLimitedLogs.length > 0
+                    ? [{ id: 'rate_limited', label: `Limite Temp. FB (${rateLimitedLogs.length})` }]
+                    : []),
                   { id: 'not_member', label: `Precisa Participar (${notMemberLogs.length})` },
                   { id: 'pending_verification', label: `Aguard. Confirmação (${pendingVerificationLogs.length})` },
                   { id: 'pending', label: `Pendente na Fila (${pendingQueueGroups.length})` },
@@ -6012,10 +6049,11 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                   {filteredLogs.map(log => {
                     const isAwaitingAdmin = log.approvalStatus === 'awaiting_admin';
                     const isJoinRequested = log.approvalStatus === 'join_requested';
+                    const isRateLimited = log.approvalStatus === 'rate_limited';
                     const isNotMember = log.approvalStatus === 'not_member';
                     const isPendingVerification = log.approvalStatus === 'pending_verification';
                     const isVerifiedPublished = log.isVerifiedReal === true && log.approvalStatus === 'published';
-                    const isLegacyUnverified = log.isVerifiedReal !== true && !isPendingVerification && !isNotMember && !isJoinRequested;
+                    const isLegacyUnverified = log.isVerifiedReal !== true && !isPendingVerification && !isNotMember && !isJoinRequested && !isRateLimited;
                     return (
                       <div key={log.id} className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs hover:bg-slate-950/60 px-2 rounded-lg transition">
                         <div className="space-y-1 min-w-0">
@@ -6030,7 +6068,11 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                             {log.groupUrl}
                           </div>
                           <div className="flex flex-wrap items-center gap-2.5 pt-0.5">
-                            {isNotMember ? (
+                            {isRateLimited ? (
+                              <span className="px-2 py-0.5 rounded bg-rose-950 text-rose-200 border border-rose-700 text-[11px] font-semibold">
+                                Limite Temporário FB (Aguarde 15–30 min)
+                              </span>
+                            ) : isNotMember ? (
                               <span className="px-2 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-800/60 text-[11px] font-semibold">
                                 Precisa Participar (Não é Membro)
                               </span>
@@ -6072,7 +6114,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                         </div>
 
                         <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-                          {(isJoinRequested || isNotMember) && (
+                          {(isJoinRequested || isNotMember || isRateLimited) && (
                             <button
                               type="button"
                               onClick={() => handleRetryJoinOrPost(log)}
@@ -6129,6 +6171,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
             averageIntervalSeconds={intervalSeconds}
             onTriggerDefenseModal={() => {
               setDefensePlatform('Facebook');
+              setDefenseTriggerReason('');
               setIsDefenseModalOpen(true);
             }}
           />
@@ -7313,12 +7356,17 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       {/* Internal Security Defense Modal (Matching image_031f9bdf.png) */}
       <SecurityDefenseModal
         isOpen={isDefenseModalOpen}
-        onClose={() => setIsDefenseModalOpen(false)}
+        onClose={() => {
+          setIsDefenseModalOpen(false);
+          setDefenseTriggerReason('');
+        }}
         onResumeAnyway={() => {
           setIsDefenseModalOpen(false);
+          setDefenseTriggerReason('');
           setIsBotRunning(true);
         }}
         platformName={defensePlatform}
+        triggerReason={defenseTriggerReason || undefined}
       />
 
       {/* EDIT GROUP MODAL (User requested: "exluir editar e selecionar quantos grupos quer divulgar") */}

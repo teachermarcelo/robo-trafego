@@ -45,7 +45,8 @@ import {
   Link2,
   Sliders,
   Flame,
-  Radio
+  Radio,
+  MessageCircle
 } from 'lucide-react';
 import JSZip from 'jszip';
 import { PWAInstallModal } from './PWAInstallModal';
@@ -77,6 +78,11 @@ import {
 } from '../data/facebookGroupsData';
 import { globalBotRunner } from '../utils/backgroundBotRunner';
 import { saveWorkspaceSyncToFirebase, subscribeWorkspaceSync } from '../lib/firebase';
+import {
+  buildProductManyChatPackage,
+  loadManyChatOverrides,
+  saveManyChatOverride,
+} from '../data/productBenefitsEngine';
 
 export interface CopyTemplateItem {
   id: string;
@@ -396,12 +402,14 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
     | 'posts_log'
     | 'analytics'
     | 'extension_guide'
-    | 'tracked_links';
+    | 'tracked_links'
+    | 'whatsapp_cta_funnel';
 
   const validSubTabs: WorkspaceSubTab[] = [
     'groups',
     'audiences',
     'campaign',
+    'whatsapp_cta_funnel',
     'youtube',
     'pinterest',
     'instagram',
@@ -435,6 +443,9 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
   const [smartLinkChannel, setSmartLinkChannel] = useState<'facebook_groups' | 'instagram_story' | 'youtube_comments' | 'pinterest' | 'whatsapp'>('facebook_groups');
   const [copiedSmartUrlFeedback, setCopiedSmartUrlFeedback] = useState<boolean>(false);
   const [postsLogFilter, setPostsLogFilter] = useState<'all' | 'success' | 'error'>('all');
+  const [manyChatOverridesMap, setManyChatOverridesMap] = useState<Record<string, any>>(() => loadManyChatOverrides());
+  const [manyChatSavedBanner, setManyChatSavedBanner] = useState<string | null>(null);
+  const [copiedShortFunnelKey, setCopiedShortFunnelKey] = useState<string | null>(null);
 
   const fetchRealTrackingEvents = async () => {
     setIsLoadingRealEvents(true);
@@ -2597,7 +2608,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
 
       {/* ALCANCEX-STYLE CLEAN VERTICAL SIDEBAR + WORKSPACE */}
       <div className="flex flex-col lg:flex-row gap-6 items-start">
-        <aside className="w-full lg:w-64 shrink-0 bg-[#0c111e] border border-slate-800 rounded-2xl p-3 space-y-5 lg:sticky lg:top-4">
+        <aside className="w-full lg:w-64 shrink-0 bg-[#0c111e] border border-slate-800 rounded-2xl p-3 space-y-5 lg:sticky lg:top-24 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto overscroll-contain pr-2">
           {/* Section 1: CAMPANHAS & PÚBLICOS */}
           <div className="space-y-1">
             <div className="px-3 py-1 text-[10px] font-bold tracking-wider uppercase text-slate-500">
@@ -2651,6 +2662,22 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
               <span className={`text-[11px] tabular-nums shrink-0 ${isBotRunning ? 'text-emerald-300 font-bold' : 'text-slate-400'}`}>
                 {isBotRunning ? 'Ativo' : managedCampaigns.length}
               </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('whatsapp_cta_funnel')}
+              className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer whitespace-nowrap ${
+                activeSubTab === 'whatsapp_cta_funnel'
+                  ? 'bg-emerald-600/20 text-white border border-emerald-500/40'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-900/80 border border-transparent'
+              }`}
+            >
+              <span className="flex items-center gap-2.5 truncate">
+                <MessageCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span className="truncate">Funil Zap + Link Curto</span>
+              </span>
+              <span className="text-[10px] text-emerald-300 font-semibold shrink-0">ManyChat</span>
             </button>
 
             <button
@@ -5657,6 +5684,215 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                   </table>
                 </div>
               )}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* SUBTAB: FUNIL GRUPOS -> WHATSAPP (MANYCHAT + LINK CURTO CONFIÁVEL) */}
+      {activeSubTab === 'whatsapp_cta_funnel' && (() => {
+        const origin = typeof window !== 'undefined' ? window.location.origin : '';
+        const currentOverride = manyChatOverridesMap[activeCampaign.id] || {};
+        const pkg = buildProductManyChatPackage(activeCampaign, origin, currentOverride);
+
+        const copyAndMark = (key: string, val: string) => {
+          navigator.clipboard.writeText(val);
+          setCopiedShortFunnelKey(key);
+          setTimeout(() => setCopiedShortFunnelKey(null), 2000);
+        };
+
+        const handleApplyPostToBot = (headline: string, copy: string) => {
+          setPostHeadline(headline);
+          setPostCopy(copy);
+          setActiveSubTab('campaign');
+        };
+
+        const handleSaveOverride = () => {
+          saveManyChatOverride(activeCampaign.id, currentOverride);
+          setManyChatSavedBanner('Fluxo ManyChat e benefícios salvos para este produto.');
+          setTimeout(() => setManyChatSavedBanner(null), 3500);
+        };
+
+        return (
+          <div className="space-y-5">
+            {/* Header + Product Selector */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    <MessageCircle className="w-5 h-5 text-emerald-400" />
+                    <span>Funil Grupos do Facebook → ManyChat Interno → WhatsApp</span>
+                  </h3>
+                  <p className="text-xs text-slate-400 max-w-2xl">
+                    Em vez de colar links enormes com cara de golpe nos grupos, use o <strong className="text-slate-200">Link Curto Limpo (/z/{pkg.shortSlug})</strong>. Quando a pessoa clicar, ela abre um atendimento estilo ManyChat com os benefícios reais desse produto e botões para comprar ou chamar no seu WhatsApp.
+                  </p>
+                </div>
+                <a
+                  href={pkg.shortUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shrink-0 transition"
+                >
+                  <span>Testar Atendimento (/z/{pkg.shortSlug})</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-4 pt-3 border-t border-slate-800 items-end">
+                <div className="md:col-span-5 space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-300 block">
+                    Escolha o Produto (Todos já têm Benefícios + ManyChat automático):
+                  </label>
+                  <select
+                    value={activeCampaign.id}
+                    onChange={(e) => {
+                      const chosen = availableCampaigns.find((c) => c.id === e.target.value);
+                      if (chosen) handleSelectCampaign(chosen);
+                    }}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500"
+                  >
+                    {availableCampaigns.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.title} (R$ {Number(c.price || 0).toFixed(2).replace('.', ',')})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="md:col-span-7 bg-slate-950 border border-emerald-800/60 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <span className="text-[11px] font-semibold text-emerald-400 block">
+                      Link Curto Confiável (Cole nos Grupos sem parecer spam):
+                    </span>
+                    <p className="text-xs font-mono text-white truncate">{pkg.shortUrl}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => copyAndMark('short-url', pkg.shortUrl)}
+                    className="px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shrink-0 cursor-pointer"
+                  >
+                    {copiedShortFunnelKey === 'short-url' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedShortFunnelKey === 'short-url' ? 'Copiado!' : 'Copiar Link Curto'}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* 3 Ready Facebook Group Posts + CTAs with Short Link */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+              <div className="space-y-1">
+                <h4 className="text-sm font-bold text-white">
+                  1. Posts + CTAs Prontos para Grupos do Facebook (Já com o Link Curto)
+                </h4>
+                <p className="text-xs text-slate-400">
+                  Clique em <strong className="text-slate-200">Usar no Disparador de Grupos</strong> para enviar o texto direto para a fila automática do robô de 300s–400s.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                {pkg.facebookGroupPosts.map((tpl) => {
+                  const fullPost = `${tpl.headline}\n\n${tpl.copy}`;
+                  return (
+                    <div
+                      key={tpl.id}
+                      className="bg-slate-950 border border-slate-800 rounded-xl p-4 flex flex-col justify-between gap-3"
+                    >
+                      <div className="space-y-2">
+                        <div className="text-xs font-bold text-emerald-400">{tpl.label}</div>
+                        <div className="text-xs font-semibold text-white">{tpl.headline}</div>
+                        <p className="text-[11px] text-slate-300 whitespace-pre-line leading-relaxed">
+                          {tpl.copy}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-800/80">
+                        <button
+                          type="button"
+                          onClick={() => copyAndMark(tpl.id, fullPost)}
+                          className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 flex items-center gap-1 cursor-pointer"
+                        >
+                          {copiedShortFunnelKey === tpl.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                          <span>{copiedShortFunnelKey === tpl.id ? 'Copiado' : 'Copiar'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleApplyPostToBot(tpl.headline, tpl.copy)}
+                          className="flex-1 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-bold text-white flex items-center justify-center gap-1 cursor-pointer"
+                        >
+                          <span>Usar no Disparador</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Automatic Internal ManyChat Flow & Benefits Editor */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h4 className="text-sm font-bold text-white">
+                    2. O que a pessoa vê ao clicar no Link Curto (ManyChat Interno + Benefícios Reais)
+                  </h4>
+                  <p className="text-xs text-slate-400">
+                    Gerado automaticamente pelo motor interno para qualquer produto. Você também pode personalizar a saudação abaixo.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSaveOverride}
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shrink-0 cursor-pointer"
+                >
+                  Salvar Mensagem do Produto
+                </button>
+              </div>
+
+              {manyChatSavedBanner && (
+                <div className="px-3.5 py-2 rounded-xl bg-emerald-950/60 border border-emerald-700/60 text-xs text-emerald-300 font-medium">
+                  {manyChatSavedBanner}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-slate-300 block">
+                    Mensagem Automática de Boas-Vindas ao Clicar:
+                  </label>
+                  <textarea
+                    rows={5}
+                    value={currentOverride.welcomeText ?? pkg.welcomeText}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setManyChatOverridesMap((prev) => ({
+                        ...prev,
+                        [activeCampaign.id]: { ...prev[activeCampaign.id], welcomeText: val },
+                      }));
+                    }}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-100 leading-relaxed focus:outline-none focus:border-emerald-500"
+                  />
+                  <p className="text-[11px] text-slate-400">
+                    Ao abrir o link curto, o visitante também terá botões prontos de ManyChat: <strong>Ver benefícios reais</strong>, <strong>Como funciona e valor</strong>, <strong>Tem garantia?</strong> e <strong>Falar no WhatsApp</strong>.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-slate-300 block">
+                    4 Benefícios Reais Entregues Automaticamente Para {activeCampaign.title}:
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {pkg.benefits.map((b, i) => (
+                      <div key={i} className="bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-1">
+                        <div className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                          <span className="truncate">{b.title}</span>
+                        </div>
+                        <p className="text-[11px] text-slate-300 leading-relaxed">{b.description}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         );

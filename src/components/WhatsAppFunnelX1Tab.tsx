@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { Campaign, CustomerLead, TrackingEvent } from '../types';
 import { saveWorkspaceSyncToFirebase, subscribeWorkspaceSync } from '../lib/firebase';
+import { getShortFunnelUrl } from '../utils/campaignSlug';
 
 interface WhatsAppFunnelX1TabProps {
   campaigns: Campaign[];
@@ -289,16 +290,15 @@ export const WhatsAppFunnelX1Tab: React.FC<WhatsAppFunnelX1TabProps> = ({
     return `https://wa.me/${cleanPhone}?text=${encodeURIComponent(currentFlow.entryKeyword)}`;
   }, [cleanPhone, currentFlow]);
 
-  const trackedCheckoutLink = useMemo(() => {
+  const shortManyChatUrl = useMemo(() => {
     if (!selectedCampaign) return '';
-    const checkoutRaw = selectedCampaign.checkoutUrl || 'https://pay.kiwify.com.br/HE5xbnp';
-    return `${origin}/api/r?to=${encodeURIComponent(checkoutRaw)}&src=whatsapp&city=Brasil&state=BR&camp=${encodeURIComponent(selectedCampaign.id)}&title=${encodeURIComponent(selectedCampaign.title)}`;
+    return getShortFunnelUrl(selectedCampaign, origin);
   }, [origin, selectedCampaign]);
 
-  const trackedEntryRedirect = useMemo(() => {
-    if (!selectedCampaign || !waEntryLink) return '';
-    return `${origin}/api/r?to=${encodeURIComponent(waEntryLink)}&src=whatsapp&city=Brasil&state=BR&camp=${encodeURIComponent(selectedCampaign.id)}&title=${encodeURIComponent(selectedCampaign.title)}`;
-  }, [origin, selectedCampaign, waEntryLink]);
+  const trackedCheckoutLink = useMemo(() => {
+    if (!selectedCampaign) return '';
+    return selectedCampaign.checkoutUrl || 'https://pay.kiwify.com.br/HE5xbnp';
+  }, [selectedCampaign]);
 
   // Real metrics filtered for WhatsApp channel (!isSimulation)
   const whatsappRealStats = useMemo(() => {
@@ -504,18 +504,44 @@ export const WhatsAppFunnelX1Tab: React.FC<WhatsAppFunnelX1TabProps> = ({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-2">
-              <span className="text-[11px] font-semibold text-slate-400 block">
-                1. Link Rastreado do Funil (Colar nos Anúncios/Bio)
+              <span className="text-[11px] font-semibold text-emerald-400 block">
+                1. Link Curto Confiável ManyChat (Sem cara de spam)
               </span>
-              <p className="text-[11px] font-mono text-emerald-300 truncate">{trackedEntryRedirect}</p>
+              <p className="text-[11px] font-mono text-emerald-300 truncate">{shortManyChatUrl}</p>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => copyText('entry', trackedEntryRedirect)}
+                  onClick={() => copyText('entry', shortManyChatUrl)}
                   className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white flex items-center gap-1.5 cursor-pointer"
                 >
                   {copiedKey === 'entry' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copiedKey === 'entry' ? 'Copiado' : 'Copiar Link'}</span>
+                  <span>{copiedKey === 'entry' ? 'Copiado' : 'Copiar Link Curto'}</span>
+                </button>
+                <a
+                  href={shortManyChatUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-700/50 text-xs font-semibold text-emerald-300 flex items-center gap-1"
+                >
+                  <span>Abrir ManyChat</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+            </div>
+
+            <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-2">
+              <span className="text-[11px] font-semibold text-slate-400 block">
+                2. Link Direto WhatsApp / Checkout (Etapa 3)
+              </span>
+              <p className="text-[11px] font-mono text-indigo-300 truncate">{trackedCheckoutLink}</p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => copyText('checkout', trackedCheckoutLink)}
+                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white flex items-center gap-1.5 cursor-pointer"
+                >
+                  {copiedKey === 'checkout' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedKey === 'checkout' ? 'Copiado' : 'Copiar Checkout'}</span>
                 </button>
                 <a
                   href={waEntryLink}
@@ -531,28 +557,11 @@ export const WhatsAppFunnelX1Tab: React.FC<WhatsAppFunnelX1TabProps> = ({
                       isSimulation: false,
                     })
                   }
-                  className="px-3 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-700/50 text-xs font-semibold text-emerald-300 flex items-center gap-1"
+                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-emerald-300 flex items-center gap-1"
                 >
-                  <span>Testar</span>
+                  <span>wa.me</span>
                   <ExternalLink className="w-3 h-3" />
                 </a>
-              </div>
-            </div>
-
-            <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-2">
-              <span className="text-[11px] font-semibold text-slate-400 block">
-                2. Link Rastreado de Checkout (Enviar na Etapa 3)
-              </span>
-              <p className="text-[11px] font-mono text-indigo-300 truncate">{trackedCheckoutLink}</p>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => copyText('checkout', trackedCheckoutLink)}
-                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white flex items-center gap-1.5 cursor-pointer"
-                >
-                  {copiedKey === 'checkout' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copiedKey === 'checkout' ? 'Copiado' : 'Copiar Checkout'}</span>
-                </button>
               </div>
             </div>
           </div>

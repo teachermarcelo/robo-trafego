@@ -26,9 +26,10 @@ import { RoboDivulgadorCidades } from './components/RoboDivulgadorCidades';
 import { BrevoEmailWhatsAppTab } from './components/BrevoEmailWhatsAppTab';
 import { ChromeFbGroupsTab } from './components/ChromeFbGroupsTab';
 import { WhatsAppFunnelX1Tab } from './components/WhatsAppFunnelX1Tab';
+import { ManyChatPreChatPage } from './components/ManyChatPreChatPage';
 import { PWAInstallModal } from './components/PWAInstallModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
-import { getCampaignSlug } from './utils/campaignSlug';
+import { getCampaignSlug, getShortFunnelSlug } from './utils/campaignSlug';
 import { INITIAL_CAMPAIGNS } from './data/defaultCampaigns';
 import { Campaign, TrackingEvent, PainPointData, PushNotification, CustomerLead } from './types';
 import {
@@ -142,6 +143,13 @@ export default function App() {
     try {
       const search = window.location.search;
       return search.includes('p=') || search.includes('lead=') || search.includes('camp=');
+    } catch {
+      return false;
+    }
+  });
+  const [isShortManyChatMode, setIsShortManyChatMode] = useState<boolean>(() => {
+    try {
+      return window.location.pathname.startsWith('/z/');
     } catch {
       return false;
     }
@@ -1246,6 +1254,72 @@ export default function App() {
   };
 
   const unreadNotificationsCount = notifications.filter((n) => !n.read).length;
+
+  if (isShortManyChatMode && campaigns.length > 0) {
+    const rawPath = typeof window !== 'undefined' ? window.location.pathname : '/z/';
+    const shortSlugParam = decodeURIComponent(rawPath.replace(/^\/z\//, '').split('/')[0] || '')
+      .trim()
+      .toLowerCase();
+
+    let matchedCamp =
+      campaigns.find((c) => getShortFunnelSlug(c).toLowerCase() === shortSlugParam) ||
+      campaigns.find((c) => getCampaignSlug(c).toLowerCase() === shortSlugParam) ||
+      campaigns.find((c) => c.id.toLowerCase() === shortSlugParam || c.id.toLowerCase().replace('camp-', '') === shortSlugParam) ||
+      campaigns.find((c) => c.title.toLowerCase().includes(shortSlugParam.replace(/-/g, ' '))) ||
+      campaigns[0];
+
+    return (
+      <ManyChatPreChatPage
+        campaign={matchedCamp}
+        onTrackAction={(type, amount) => {
+          handleAddTrackingEvent({
+            campaignId: matchedCamp.id,
+            campaignTitle: matchedCamp.title,
+            niche: matchedCamp.niche,
+            type,
+            source: 'facebook_groups',
+            adCreativeName: `Link Curto /z/${shortSlugParam || getShortFunnelSlug(matchedCamp)}`,
+            geo: { city: 'Brasil', state: 'BR', country: 'Brasil' },
+            isSimulation: false,
+            ...(typeof amount === 'number'
+              ? { amount }
+              : type === 'conversion'
+              ? { amount: matchedCamp.price }
+              : {}),
+          });
+        }}
+        onCaptureLead={async (leadData) => {
+          const newLead: CustomerLead = {
+            id: `lead-${Date.now()}`,
+            campaignId: matchedCamp.id,
+            campaignTitle: matchedCamp.title,
+            name: leadData.name || 'Visitante ManyChat',
+            phone: (leadData.phone || '5541998778348').replace(/\D/g, ''),
+            status: leadData.status || 'duvida_whatsapp',
+            source: 'landing_page_whatsapp',
+            createdAt: new Date().toISOString(),
+            isReal: true,
+            notes: leadData.notes || `Link Curto /z/${shortSlugParam}`,
+          };
+          setCustomerLeads((prev) => [newLead, ...prev]);
+          saveCustomerLeadToFirebase(newLead).catch(console.warn);
+          try {
+            await fetch('/api/customers', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(newLead),
+            });
+          } catch {}
+        }}
+        onGoToDashboard={() => {
+          try {
+            window.history.replaceState({}, '', '/');
+          } catch {}
+          setIsShortManyChatMode(false);
+        }}
+      />
+    );
+  }
 
   if (isPublicLeadMode) {
     const params = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');

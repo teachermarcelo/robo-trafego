@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AutoViral AI - Mapeador FB, Instagram, YouTube & Pinterest",
-  "version": "1.3.4",
+  "version": "1.3.5",
   "description": "Mapeia grupos do Facebook e contas do Instagram sem limite, sincroniza conta conectada para Stories Próprio e integra FB, YouTube e Pinterest ao AutoViral AI.",
   "action": {
     "default_popup": "popup.html",
@@ -21,7 +21,8 @@
     "*://*.kiwify.com.br/*",
     "*://localhost/*",
     "*://*.vercel.app/*",
-    "*://*.run.app/*"
+    "*://*.run.app/*",
+    "*://aistudio.google.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -32,11 +33,18 @@
         "*://*.facebook.com/*",
         "*://*.youtube.com/*",
         "*://*.pinterest.com/*",
-        "*://*.instagram.com/*",
+        "*://*.instagram.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
         "*://*.run.app/*",
         "*://*.vercel.app/*",
         "*://localhost/*"
       ],
+      "all_frames": true,
       "js": ["content.js"],
       "run_at": "document_idle"
     }

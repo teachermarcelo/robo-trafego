@@ -2394,12 +2394,12 @@ app.get('/api/extension/download', async (req, res) => {
 
     zip.file(
       'COMO-INSTALAR.txt',
-      `INSTRUÇÕES DE INSTALAÇÃO NO GOOGLE CHROME (AutoViral AI v1.3.4):\n\n1. Extraia este arquivo ZIP em uma pasta nova no seu computador.\n2. No Chrome, acesse chrome://extensions e REMOVA extensões AutoViral antigas (deixe APENAS UMA v1.3.4 para não dar conflito!).\n3. Ative a chave "Modo do desenvolvedor" (canto superior direito).\n4. Clique em "Carregar sem compactação" e selecione a pasta extraída.\n5. Abra Facebook (grupos), Instagram (busca/seguidores) ou YouTube (busca/vídeo), clique no botão Mapear do canal e depois em Enviar Tudo para o Painel.\n6. Use sempre o painel atual (.run.app) e NÃO o site antigo vercel.app.`
+      `INSTRUÇÕES DE INSTALAÇÃO NO GOOGLE CHROME (AutoViral AI v1.3.5):\n\n1. Extraia este arquivo ZIP em uma pasta nova no seu computador.\n2. No Chrome, acesse chrome://extensions e REMOVA extensões AutoViral antigas (deixe APENAS UMA v1.3.5 para não dar conflito!).\n3. Ative a chave "Modo do desenvolvedor" (canto superior direito).\n4. Clique em "Carregar sem compactação" e selecione a pasta extraída.\n5. Abra Facebook (grupos), Instagram (busca/seguidores) ou YouTube (busca/vídeo), clique no botão Mapear do canal e depois em Enviar Tudo para o Painel.\n6. Use sempre o painel atual (.run.app) e NÃO o site antigo vercel.app.`
     );
 
     const buffer = await zip.generateAsync({ type: 'nodebuffer' });
     res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', 'attachment; filename="extensao-autoviral-v1.3.4.zip"');
+    res.setHeader('Content-Disposition', 'attachment; filename="extensao-autoviral-v1.3.5.zip"');
     res.setHeader('Cache-Control', 'no-store');
     return res.send(buffer);
   } catch (err: any) {

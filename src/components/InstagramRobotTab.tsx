@@ -132,16 +132,47 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
     return () => clearInterval(timer);
   }, []);
 
-  // Follower Growth Engine State (Zeroed real baseline)
+  // Follower Growth Engine State (Persisted real user-executed engagement counters)
   const [isGrowthBotRunning, setIsGrowthBotRunning] = useState<boolean>(false);
-  const [growthLikesCount, setGrowthLikesCount] = useState<number>(0);
-  const [growthCommentsCount, setGrowthCommentsCount] = useState<number>(0);
-  const [growthFollowsCount, setGrowthFollowsCount] = useState<number>(0);
-  const [growthFollowersGained, setGrowthFollowersGained] = useState<number>(0);
+  const [growthLikesCount, setGrowthLikesCount] = useState<number>(() => {
+    try {
+      const raw = localStorage.getItem('autoviral_insta_growth_stats_v1');
+      if (raw) return Number(JSON.parse(raw)?.likes) || 0;
+    } catch {}
+    return 0;
+  });
+  const [growthCommentsCount, setGrowthCommentsCount] = useState<number>(() => {
+    try {
+      const raw = localStorage.getItem('autoviral_insta_growth_stats_v1');
+      if (raw) return Number(JSON.parse(raw)?.comments) || 0;
+    } catch {}
+    return 0;
+  });
+  const [growthFollowsCount, setGrowthFollowsCount] = useState<number>(() => {
+    try {
+      const raw = localStorage.getItem('autoviral_insta_growth_stats_v1');
+      if (raw) return Number(JSON.parse(raw)?.follows) || 0;
+    } catch {}
+    return 0;
+  });
+  const [copiedGrowthTargetId, setCopiedGrowthTargetId] = useState<string | null>(null);
   const [growthAutoFollow, setGrowthAutoFollow] = useState<boolean>(true);
   const [growthLikeRecentPosts, setGrowthLikeRecentPosts] = useState<boolean>(true);
   const [growthAutoComment, setGrowthAutoComment] = useState<boolean>(true);
   const [growthCustomCommentText, setGrowthCustomCommentText] = useState<string>('');
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        'autoviral_insta_growth_stats_v1',
+        JSON.stringify({
+          likes: growthLikesCount,
+          comments: growthCommentsCount,
+          follows: growthFollowsCount,
+        })
+      );
+    } catch {}
+  }, [growthLikesCount, growthCommentsCount, growthFollowsCount]);
   const [growthRotatingComments, setGrowthRotatingComments] = useState<string[]>([
     'Trabalho lindo e muito necessário para tantas mães e professoras! Parabéns! 👏❤️',
     'Conteúdo maravilhoso! A dedicação com essas crianças faz toda a diferença! 🌟',
@@ -581,15 +612,17 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
 
   // Sync confirmed handle & unlimited mapped accounts from Extension or LeadFinderTab
   useEffect(() => {
-    const syncHandle = (rawHandle?: string) => {
+    const syncHandle = (rawHandle?: string, silent = false) => {
       if (!rawHandle || rawHandle === '@conectado') return;
       const clean = '@' + String(rawHandle).trim().replace(/^@+/, '').toLowerCase();
       setAccountHandle(clean);
       try {
         localStorage.setItem('autoviral_insta_handle', clean);
       } catch {}
-      setInstaSyncNotice(`✅ Conta ${clean} confirmada para Stories Próprio!`);
-      setTimeout(() => setInstaSyncNotice(null), 4000);
+      if (!silent) {
+        setInstaSyncNotice(`✅ Conta ${clean} confirmada para Stories Próprio!`);
+        setTimeout(() => setInstaSyncNotice(null), 4000);
+      }
     };
 
     const appendMappedAccounts = (accounts: Array<{ handle?: string; username?: string; name?: string }>) => {
@@ -619,18 +652,46 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
       });
     };
 
+    const syncFromLocalStorage = () => {
+      try {
+        const savedHandle = localStorage.getItem('autoviral_insta_handle');
+        if (savedHandle && savedHandle !== '@conectado') {
+          setAccountHandle(savedHandle);
+        }
+        const savedTargets = localStorage.getItem('autoviral_insta_mapped_targets_v2');
+        if (savedTargets) {
+          const parsed = JSON.parse(savedTargets);
+          if (Array.isArray(parsed)) {
+            setMappedTargets((prev) => {
+              const prevHandles = new Set(prev.map((t) => t.handle.toLowerCase()));
+              const fresh = parsed.filter((t: any) => t?.handle && !prevHandles.has(t.handle.toLowerCase()));
+              return fresh.length > 0 ? [...fresh, ...prev] : prev;
+            });
+          }
+        }
+      } catch {}
+    };
+
     const onHandleSyncEvent = (ev: Event) => {
       const detail = (ev as CustomEvent).detail;
       if (detail?.handle) syncHandle(detail.handle);
     };
     const onAccountsEvent = (ev: Event) => {
       const detail = (ev as CustomEvent).detail;
-      if (detail?.connectedHandle) syncHandle(detail.connectedHandle);
+      if (detail?.connectedHandle) syncHandle(detail.connectedHandle, true);
       if (Array.isArray(detail?.accounts)) appendMappedAccounts(detail.accounts);
+    };
+    const onSyncComplete = (ev: Event) => {
+      const detail = (ev as CustomEvent).detail;
+      syncFromLocalStorage();
+      if (detail?.connectedHandle) syncHandle(detail.connectedHandle, true);
     };
     const onStorageEvent = (ev: StorageEvent) => {
       if (ev.key === 'autoviral_insta_handle' && ev.newValue) {
         setAccountHandle(ev.newValue);
+      }
+      if (ev.key === 'autoviral_insta_mapped_targets_v2' && ev.newValue) {
+        syncFromLocalStorage();
       }
       if (ev.key === 'autoviral_insta_story_queue' && ev.newValue) {
         try {
@@ -642,17 +703,12 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
 
     const onOpenMapperSubtab = () => {
       setActiveSubTab('mapper');
-      try {
-        const saved = localStorage.getItem('autoviral_insta_mapped_targets_v2');
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed)) setMappedTargets(parsed);
-        }
-      } catch {}
+      syncFromLocalStorage();
     };
 
     window.addEventListener('autoviral_extension_insta_account_synced', onHandleSyncEvent);
     window.addEventListener('autoviral_extension_instagram_accounts_received', onAccountsEvent);
+    window.addEventListener('autoviral_insta_sync_complete', onSyncComplete);
     window.addEventListener('autoviral_open_insta_mapper_subtab', onOpenMapperSubtab);
     window.addEventListener('storage', onStorageEvent);
 
@@ -665,15 +721,22 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
         if (data.action === 'AUTOVIRAL_INSTA_ACCOUNT_SYNC' && data.handle) {
           syncHandle(data.handle);
         } else if (data.action === 'AUTOVIRAL_IMPORT_INSTAGRAM_ACCOUNTS') {
-          if (data.connectedHandle) syncHandle(data.connectedHandle);
+          if (data.connectedHandle) syncHandle(data.connectedHandle, true);
           if (Array.isArray(data.accounts)) appendMappedAccounts(data.accounts);
         }
       };
     } catch {}
 
+    // Pull any Instagram accounts/handle captured while user was in another tab
+    syncFromLocalStorage();
+    try {
+      window.postMessage({ type: 'AUTOVIRAL_REQUEST_INSTA_SYNC' }, '*');
+    } catch {}
+
     return () => {
       window.removeEventListener('autoviral_extension_insta_account_synced', onHandleSyncEvent);
       window.removeEventListener('autoviral_extension_instagram_accounts_received', onAccountsEvent);
+      window.removeEventListener('autoviral_insta_sync_complete', onSyncComplete);
       window.removeEventListener('autoviral_open_insta_mapper_subtab', onOpenMapperSubtab);
       window.removeEventListener('storage', onStorageEvent);
       if (bc) bc.close();
@@ -800,54 +863,51 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
     setTimeout(() => setInstaSyncNotice(null), 6000);
   };
 
-  // Simulate Mapping from Open Instagram Web Tab
+  // Request real accounts from Open Instagram Web Tab via Chrome Extension v1.3.5
   const handleMapInstagramOpenTab = () => {
     setIsMappingActive(true);
-    setTimeout(() => {
-      const newItems: InstagramMappedTarget[] = [
-        {
-          id: `tgt-${Date.now()}-1`,
-          handle: '@espacopedagogico_cwb',
-          name: 'Espaço Pedagógico Criativo',
-          followers: '15.7k',
-          bio: 'Coordenação motora fina e jogos pedagógicos inclusivos em Curitiba 🎨',
-          category: 'influencer',
-          sourceQuery: 'pedagogia curitiba',
-          score: 93,
-          city: 'Curitiba, PR',
-          selected: true,
-          status: 'pending'
-        },
-        {
-          id: `tgt-${Date.now()}-2`,
-          handle: '@prof.alessandra_pedagoga',
-          name: 'Prof. Alessandra',
-          followers: '8.4k',
-          bio: 'Professora de educação infantil compartilhando ideias práticas para a sala de aula.',
-          category: 'profile_follower',
-          sourceQuery: 'educacao infantil',
-          score: 90,
-          city: 'Curitiba, PR',
-          selected: true,
-          status: 'pending'
-        },
-        {
-          id: `tgt-${Date.now()}-3`,
-          handle: '#alfabetizacaocriativa',
-          name: 'Hashtag Alfabetização Criativa',
-          followers: '310k posts',
-          bio: 'Milhares de famílias e pedagogas ativas buscando cadernos de atividades',
-          category: 'hashtag',
-          sourceQuery: '#alfabetizacaocriativa',
-          score: 96,
-          selected: true,
-          status: 'pending'
-        }
-      ];
+    let finished = false;
 
-      setMappedTargets(prev => [...newItems, ...prev]);
+    const cleanup = () => {
+      window.removeEventListener('autoviral_insta_sync_complete', handleResult);
+    };
+
+    const handleResult = (ev: Event) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(fallbackTimer);
+      cleanup();
       setIsMappingActive(false);
-    }, 1200);
+
+      const detail = (ev as CustomEvent).detail || {};
+      const count = Number(detail.count || 0);
+      const handle = detail.connectedHandle ? ` (${detail.connectedHandle})` : '';
+
+      if (count > 0) {
+        setInstaSyncNotice(`✅ ${count} perfis reais sincronizados da sua aba do Instagram${handle}!`);
+      } else {
+        setInstaSyncNotice(`ℹ️ Extensão conectada${handle}, mas 0 perfis novos na aba atual do Instagram. Abra a Busca ou Seguidores no Instagram, role a tela e clique em "Mapear Visíveis" no widget flutuante.`);
+      }
+      setTimeout(() => setInstaSyncNotice(null), 6000);
+    };
+
+    const fallbackTimer = setTimeout(() => {
+      if (finished) return;
+      finished = true;
+      cleanup();
+      setIsMappingActive(false);
+      setInstaSyncNotice('⚠️ Extensão Chrome v1.3.5 não respondeu. Instale/atualize a Extensão v1.3.5 em chrome://extensions, recarregue o Instagram (F5) e este painel.');
+      setTimeout(() => setInstaSyncNotice(null), 7000);
+    }, 2800);
+
+    window.addEventListener('autoviral_insta_sync_complete', handleResult);
+    try {
+      window.postMessage({ type: 'AUTOVIRAL_REQUEST_INSTA_SYNC' }, '*');
+    } catch {
+      clearTimeout(fallbackTimer);
+      cleanup();
+      setIsMappingActive(false);
+    }
   };
 
   // Filter mapped targets
@@ -1827,49 +1887,65 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
                     <Heart className="w-5 h-5 fill-white" />
                   </span>
                   <h3 className="text-base font-bold text-white tracking-tight">
-                    Robô de Engajamento: Curtir + Comentar para Ganhar Seguidores Reais
+                    Engajamento Assistido: Curtir + Comentar para Atrair Seguidores Reais
                   </h3>
                   <span className="bg-amber-950 text-amber-300 border border-amber-800 text-[10px] font-black px-2 py-0.5 rounded-full">
-                    Gatilho de Reciprocidade
+                    100% Seguro (Sem Spam)
                   </span>
                 </div>
                 <p className="text-xs text-slate-300 mt-2 max-w-3xl leading-relaxed">
-                  O algoritmo do Instagram notifica os perfis do nicho (mães, pedagogas, professores de TEA) toda vez que seu perfil curte as últimas postagens e deixa um comentário atencioso. Essa interação gera visitas no seu perfil e seguidores altamente qualificados que compram pelo link na bio e nos stories!
+                  Abra o perfil real capturado abaixo, curta as 3 últimas postagens, cole o comentário humanizado rotativo (pronto para copiar em 1 clique) e marque como concluído. Isso gera notificações reais no celular do lead sem risco de bloqueio do Instagram.
                 </p>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setIsGrowthBotRunning(!isGrowthBotRunning)}
-                className={`px-5 py-3 rounded-xl text-xs font-black transition flex items-center gap-2 cursor-pointer shadow-xl shrink-0 ${
-                  isGrowthBotRunning
-                    ? 'bg-amber-600 hover:bg-amber-500 text-white animate-pulse'
-                    : 'bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-white shadow-amber-900/50'
-                }`}
-              >
-                {isGrowthBotRunning ? (
-                  <>
-                    <Pause className="w-4 h-4" />
-                    Pausar Engajamento Ativo
-                  </>
-                ) : (
-                  <>
-                    <Play className="w-4 h-4 fill-white" />
-                    Iniciar Robô Curtir &amp; Comentar
-                  </>
-                )}
-              </button>
+              {(() => {
+                const nextPending = mappedTargets.find(t => t.selected && t.status !== 'messaged') || mappedTargets.find(t => t.status !== 'messaged');
+                if (!nextPending) {
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => setIsGrowthBotRunning(!isGrowthBotRunning)}
+                      className="px-5 py-3 rounded-xl text-xs font-black bg-emerald-950 text-emerald-300 border border-emerald-700/60 flex items-center gap-2 shrink-0 cursor-pointer"
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      Todos os Perfis Engajados!
+                    </button>
+                  );
+                }
+                const cleanHandle = nextPending.handle.replace(/^[@#]/, '');
+                const profileHref = nextPending.handle.startsWith('#')
+                  ? `https://www.instagram.com/explore/tags/${encodeURIComponent(cleanHandle)}/`
+                  : `https://www.instagram.com/${encodeURIComponent(cleanHandle)}/`;
+                const nextComment = growthRotatingComments[0] || '';
+                return (
+                  <a
+                    href={profileHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => {
+                      try { navigator.clipboard?.writeText(nextComment); } catch {}
+                      setCopiedGrowthTargetId(nextPending.id);
+                      setInstaSyncNotice(`📋 Comentário copiado! Abrindo ${nextPending.handle} — cole no post e depois clique em "✓ Marcar Interagido".`);
+                      setTimeout(() => setCopiedGrowthTargetId(null), 3000);
+                    }}
+                    className="px-5 py-3 rounded-xl text-xs font-black transition flex items-center gap-2 cursor-pointer shadow-xl shrink-0 bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-white shadow-amber-900/50"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    Copiar Comentário &amp; Abrir {nextPending.handle}
+                  </a>
+                );
+              })()}
             </div>
 
-            {/* Growth KPI counters */}
+            {/* Growth KPI counters (100% real user-confirmed actions) */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5 pt-5 border-t border-slate-800/80">
               <div className="bg-slate-950/80 p-3.5 rounded-xl border border-slate-800">
                 <span className="text-[10px] text-slate-400 uppercase font-bold flex items-center gap-1">
                   <Heart className="w-3.5 h-3.5 text-rose-400" />
-                  Curtidas em Posts
+                  Curtidas Registradas
                 </span>
                 <div className="text-xl font-black text-rose-400 mt-1">{growthLikesCount}</div>
-                <span className="text-[10px] text-slate-400">3 curtidas por perfil</span>
+                <span className="text-[10px] text-slate-400">3 curtidas por perfil marcado</span>
               </div>
 
               <div className="bg-slate-950/80 p-3.5 rounded-xl border border-slate-800">
@@ -1878,7 +1954,7 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
                   Comentários Feitos
                 </span>
                 <div className="text-xl font-black text-blue-400 mt-1">{growthCommentsCount}</div>
-                <span className="text-[10px] text-slate-400">Humanizados e rotativos</span>
+                <span className="text-[10px] text-slate-400">Rotativos e humanizados</span>
               </div>
 
               <div className="bg-slate-950/80 p-3.5 rounded-xl border border-slate-800">
@@ -1893,10 +1969,14 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
               <div className="bg-slate-950/80 p-3.5 rounded-xl border border-amber-900/60 bg-amber-950/20">
                 <span className="text-[10px] text-amber-300 uppercase font-bold flex items-center gap-1">
                   <TrendingUp className="w-3.5 h-3.5 text-amber-400" />
-                  Seguidores Ganhos
+                  Perfis Interagidos
                 </span>
-                <div className="text-xl font-black text-amber-400 mt-1">+{growthFollowersGained}</div>
-                <span className="text-[10px] text-amber-300/80">+28% taxa de retorno</span>
+                <div className="text-xl font-black text-amber-400 mt-1">
+                  {mappedTargets.filter(t => t.status === 'messaged').length}
+                </div>
+                <span className="text-[10px] text-amber-300/80">
+                  de {mappedTargets.length} na fila real
+                </span>
               </div>
             </div>
           </div>
@@ -1907,14 +1987,14 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
             <div className="lg:col-span-5 bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
               <h4 className="text-sm font-bold text-white flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-amber-400" />
-                Gatilhos de Ação do Robô
+                Checklist de Ação por Perfil
               </h4>
 
               <div className="space-y-3 text-xs">
                 <label className="flex items-center justify-between p-3 bg-slate-950 rounded-xl border border-slate-800/80 cursor-pointer hover:border-slate-700">
                   <div className="space-y-0.5">
-                    <span className="font-bold text-white block">Auto-Curtir 3 Últimos Posts</span>
-                    <span className="text-[11px] text-slate-400 block">Distribui 3 curtidas espaçadas para chamar atenção do perfil</span>
+                    <span className="font-bold text-white block">Curtir 3 Últimos Posts (+3 curtidas)</span>
+                    <span className="text-[11px] text-slate-400 block">Chama atenção no feed de notificações do lead</span>
                   </div>
                   <input
                     type="checkbox"
@@ -1926,8 +2006,8 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
 
                 <label className="flex items-center justify-between p-3 bg-slate-950 rounded-xl border border-slate-800/80 cursor-pointer hover:border-slate-700">
                   <div className="space-y-0.5">
-                    <span className="font-bold text-white block">Auto-Comentar no Post Mais Recente</span>
-                    <span className="text-[11px] text-slate-400 block">Publica elogio contextualizado e humanizado da lista rotativa</span>
+                    <span className="font-bold text-white block">Colar Comentário Rotativo (+1 comentário)</span>
+                    <span className="text-[11px] text-slate-400 block">Usa uma variação diferente da lista ao lado</span>
                   </div>
                   <input
                     type="checkbox"
@@ -1940,7 +2020,7 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
                 <label className="flex items-center justify-between p-3 bg-slate-950 rounded-xl border border-slate-800/80 cursor-pointer hover:border-slate-700">
                   <div className="space-y-0.5">
                     <span className="font-bold text-white block">Seguir Perfil (Follow Recíproco)</span>
-                    <span className="text-[11px] text-slate-400 block">Gera notificação dupla no celular do alvo para acelerar o follow</span>
+                    <span className="text-[11px] text-slate-400 block">Acelera visita de volta para o link da sua Bio</span>
                   </div>
                   <input
                     type="checkbox"
@@ -1950,14 +2030,26 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
                   />
                 </label>
 
-                <div className="p-3 bg-slate-950 rounded-xl border border-slate-800/80">
-                  <span className="text-[11px] font-bold text-slate-300 block mb-1">
-                    Intervalo Seguro Anti-Bloqueio do Instagram:
-                  </span>
-                  <div className="flex items-center justify-between text-xs text-slate-400 font-mono">
-                    <span>180s a 280s entre perfis</span>
-                    <span className="text-emerald-400 font-bold">100% Protegido</span>
+                <div className="p-3 bg-slate-950 rounded-xl border border-slate-800/80 flex items-center justify-between">
+                  <div>
+                    <span className="text-[11px] font-bold text-slate-300 block">
+                      Ritmo Recomendado: 5 a 10 perfis/hora
+                    </span>
+                    <span className="text-[10px] text-emerald-400 font-semibold">
+                      Protege {accountHandle} contra bloqueios da Meta
+                    </span>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setGrowthLikesCount(0);
+                      setGrowthCommentsCount(0);
+                      setGrowthFollowsCount(0);
+                    }}
+                    className="text-[10px] text-slate-400 hover:text-white underline cursor-pointer"
+                  >
+                    Zerar Contadores
+                  </button>
                 </div>
               </div>
             </div>
@@ -1971,7 +2063,7 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
                     Banco de Comentários Rotativos Humanizados
                   </h4>
                   <p className="text-[11px] text-slate-400 mt-0.5">
-                    O robô sorteia um comentário diferente para cada perfil para não cair no filtro de spam
+                    Cada card abaixo sorteia um comentário diferente para copiar em 1 clique
                   </p>
                 </div>
                 <span className="text-xs bg-slate-950 text-blue-300 border border-slate-800 px-2.5 py-1 rounded-lg font-bold">
@@ -2031,7 +2123,7 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
             </div>
           </div>
 
-          {/* Target Profiles Queue (Unlimited, Scrollable) */}
+          {/* Target Profiles Queue (Unlimited, Scrollable, Actionable) */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
             <div className="flex items-center justify-between">
               <div>
@@ -2040,7 +2132,7 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
                   Fila de Perfis Segmentados Prontos para Interação (Ilimitado)
                 </h4>
                 <p className="text-[11px] text-slate-400 mt-0.5">
-                  Todos os perfis mapeados via extensão Chrome ou nicho exibidos sem limite
+                  Todos os perfis capturados pela Extensão Chrome v1.3.5 com botões diretos para agir
                 </p>
               </div>
               <span className="text-xs text-emerald-400 font-bold bg-emerald-950/80 border border-emerald-800/60 px-3 py-1 rounded-xl">
@@ -2048,27 +2140,84 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
               </span>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 max-h-96 overflow-y-auto pr-1">
-              {mappedTargets.map((target) => (
-                <div
-                  key={target.id}
-                  className="bg-slate-950 p-4 rounded-xl border border-slate-800/80 space-y-2 hover:border-slate-700 transition"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-white font-mono">{target.handle}</span>
-                    <span className="text-[10px] text-purple-400 bg-purple-950/70 border border-purple-800/60 px-2 py-0.5 rounded font-bold">
-                      {target.followers}
-                    </span>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[480px] overflow-y-auto pr-1">
+              {mappedTargets.map((target, idx) => {
+                const suggestedComment = growthRotatingComments[idx % growthRotatingComments.length] || '';
+                const cleanHandle = target.handle.replace(/^[@#]/, '');
+                const instaHref = target.handle.startsWith('#')
+                  ? `https://www.instagram.com/explore/tags/${encodeURIComponent(cleanHandle)}/`
+                  : `https://www.instagram.com/${encodeURIComponent(cleanHandle)}/`;
+                const isDone = target.status === 'messaged';
+
+                return (
+                  <div
+                    key={target.id}
+                    className={`bg-slate-950 p-4 rounded-xl border space-y-2.5 transition flex flex-col justify-between ${
+                      isDone ? 'border-emerald-700/60 bg-emerald-950/10' : 'border-slate-800/80 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-white font-mono truncate">{target.handle}</span>
+                        <span className="text-[10px] text-purple-400 bg-purple-950/70 border border-purple-800/60 px-2 py-0.5 rounded font-bold shrink-0">
+                          {target.followers}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 line-clamp-2 leading-relaxed">{target.bio}</p>
+                      <div className="bg-slate-900/90 border border-slate-800 rounded-lg p-2 text-[10px] text-slate-300 italic line-clamp-2">
+                        "{suggestedComment}"
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          try { navigator.clipboard?.writeText(suggestedComment); } catch {}
+                          setCopiedGrowthTargetId(target.id);
+                          setTimeout(() => setCopiedGrowthTargetId(null), 2000);
+                        }}
+                        className="flex-1 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer transition"
+                      >
+                        {copiedGrowthTargetId === target.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                        <span>{copiedGrowthTargetId === target.id ? 'Copiado!' : 'Copiar Comentário'}</span>
+                      </button>
+
+                      <a
+                        href={instaHref}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-2.5 py-1.5 bg-purple-950 hover:bg-purple-900 text-purple-200 border border-purple-700/70 rounded-lg text-[10px] font-bold flex items-center gap-1 transition"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        <span>Abrir</span>
+                      </a>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!isDone) {
+                            setMappedTargets(prev =>
+                              prev.map(t => (t.id === target.id ? { ...t, status: 'messaged' } : t))
+                            );
+                            if (growthLikeRecentPosts) setGrowthLikesCount(prev => prev + 3);
+                            if (growthAutoComment) setGrowthCommentsCount(prev => prev + 1);
+                            if (growthAutoFollow) setGrowthFollowsCount(prev => prev + 1);
+                          }
+                        }}
+                        className={`w-full px-2.5 py-1.5 rounded-lg text-[10px] font-black flex items-center justify-center gap-1 transition cursor-pointer ${
+                          isDone
+                            ? 'bg-emerald-950 text-emerald-300 border border-emerald-700/60'
+                            : 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                        }`}
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>{isDone ? '✓ Interação Concluída' : '✓ Marcar Interagido (+Likes/Comentário)'}</span>
+                      </button>
+                    </div>
                   </div>
-                  <p className="text-[11px] text-slate-400 line-clamp-2 leading-relaxed">{target.bio}</p>
-                  <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[10px]">
-                    <span className="text-emerald-400 font-semibold flex items-center gap-1">
-                      <CheckCircle2 className="w-3 h-3" /> Fila Pronta
-                    </span>
-                    <span className="text-slate-400">3 Likes + 1 Comentário</span>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>

@@ -15,6 +15,123 @@
                       currentHost.includes('run.app') ||
                       document.title.includes('AutoViral');
 
+  // Shared helper to make any floating AutoViral popup draggable, minimizable, and closable
+  function makeWidgetInteractive(badge, opts) {
+    const {
+      headerEl,
+      bodyEl,
+      minBtn,
+      closeBtn,
+      storageKey,
+      defaultRight = '24px',
+      defaultBottom = '24px',
+      expandedWidth = '276px'
+    } = opts;
+
+    badge.style.position = 'fixed';
+    badge.style.zIndex = '9999999';
+
+    try {
+      const savedPos = localStorage.getItem(storageKey);
+      if (savedPos) {
+        const parsed = JSON.parse(savedPos);
+        if (typeof parsed.left === 'number' && typeof parsed.top === 'number') {
+          const maxLeft = Math.max(8, window.innerWidth - 290);
+          const maxTop = Math.max(8, window.innerHeight - 60);
+          badge.style.left = Math.min(Math.max(8, parsed.left), maxLeft) + 'px';
+          badge.style.top = Math.min(Math.max(8, parsed.top), maxTop) + 'px';
+          badge.style.right = 'auto';
+          badge.style.bottom = 'auto';
+        } else {
+          badge.style.right = defaultRight;
+          badge.style.bottom = defaultBottom;
+        }
+      } else {
+        badge.style.right = defaultRight;
+        badge.style.bottom = defaultBottom;
+      }
+    } catch (e) {
+      badge.style.right = defaultRight;
+      badge.style.bottom = defaultBottom;
+    }
+
+    if (headerEl) {
+      headerEl.style.cursor = 'move';
+      headerEl.style.userSelect = 'none';
+      let isDragging = false;
+      let startX = 0;
+      let startY = 0;
+      let originLeft = 0;
+      let originTop = 0;
+
+      const onMouseDown = (e) => {
+        if (e.target && e.target.closest('button')) return;
+        isDragging = true;
+        const rect = badge.getBoundingClientRect();
+        originLeft = rect.left;
+        originTop = rect.top;
+        startX = e.clientX;
+        startY = e.clientY;
+        badge.style.left = originLeft + 'px';
+        badge.style.top = originTop + 'px';
+        badge.style.right = 'auto';
+        badge.style.bottom = 'auto';
+        e.preventDefault();
+      };
+
+      const onMouseMove = (e) => {
+        if (!isDragging) return;
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+        const nextLeft = Math.min(Math.max(8, originLeft + dx), Math.max(8, window.innerWidth - badge.offsetWidth - 8));
+        const nextTop = Math.min(Math.max(8, originTop + dy), Math.max(8, window.innerHeight - 44));
+        badge.style.left = nextLeft + 'px';
+        badge.style.top = nextTop + 'px';
+      };
+
+      const onMouseUp = () => {
+        if (!isDragging) return;
+        isDragging = false;
+        try {
+          const rect = badge.getBoundingClientRect();
+          localStorage.setItem(storageKey, JSON.stringify({ left: rect.left, top: rect.top }));
+        } catch (e) {}
+      };
+
+      headerEl.addEventListener('mousedown', onMouseDown);
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('mouseup', onMouseUp);
+    }
+
+    if (minBtn && bodyEl) {
+      let minimized = false;
+      minBtn.onclick = (e) => {
+        e.stopPropagation();
+        minimized = !minimized;
+        if (minimized) {
+          bodyEl.style.display = 'none';
+          badge.style.width = 'auto';
+          badge.style.minWidth = '185px';
+          minBtn.textContent = '▢';
+          minBtn.title = 'Restaurar janela';
+        } else {
+          bodyEl.style.display = 'flex';
+          badge.style.width = expandedWidth;
+          badge.style.minWidth = expandedWidth;
+          minBtn.textContent = '–';
+          minBtn.title = 'Minimizar janela';
+        }
+      };
+    }
+
+    if (closeBtn) {
+      closeBtn.onclick = (e) => {
+        e.stopPropagation();
+        badge.style.display = 'none';
+      };
+    }
+  }
+
   // =========================================================================
   // 1. FACEBOOK AUTO-SCROLL MAPPER & FLOATING WIDGET
   // =========================================================================
@@ -297,7 +414,7 @@
         background: linear-gradient(135deg, #090d16 0%, #0f172a 100%);
         border: 2px solid #10b981;
         border-radius: 16px;
-        padding: 12px 16px;
+        padding: 10px 14px;
         box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.8), 0 0 15px rgba(16, 185, 129, 0.3);
         color: #f8fafc;
         font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -305,45 +422,59 @@
         display: flex;
         flex-direction: column;
         gap: 8px;
-        min-width: 250px;
-        transition: transform 0.2s ease;
+        width: 276px;
       `;
 
       badge.innerHTML = `
-        <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #1e293b; padding-bottom: 6px;">
-          <div style="display: flex; align-items: center; gap: 6px; font-weight: 800; color: #10b981;">
+        <div id="autoviral-fb-header" style="display: flex; align-items: center; justify-content: space-between; gap: 6px; padding-bottom: 4px; border-bottom: 1px solid #1e293b;">
+          <div style="display: flex; align-items: center; gap: 6px; font-weight: 800; color: #10b981; font-size: 11px;">
+            <span style="color: #64748b; font-size: 11px;">⋮⋮</span>
             <span>🚀 AutoViral AI</span>
-            <span style="background: #064e3b; color: #34d399; font-size: 10px; padding: 1px 6px; border-radius: 999px; font-weight: 600;">Mapeador Ativo</span>
+            <span style="background: #064e3b; color: #34d399; font-size: 9px; padding: 1px 6px; border-radius: 999px; font-weight: 600;">FB</span>
           </div>
-          <button id="autoviral-badge-close" style="background: transparent; border: none; color: #94a3b8; cursor: pointer; font-size: 12px;">✕</button>
+          <div style="display: flex; align-items: center; gap: 4px;">
+            <button id="autoviral-badge-min" title="Minimizar" style="background: #1e293b; border: 1px solid #334155; color: #cbd5e1; border-radius: 6px; width: 22px; height: 22px; cursor: pointer; font-size: 12px; font-weight: 800; line-height: 1;">–</button>
+            <button id="autoviral-badge-close" title="Fechar" style="background: #1e293b; border: 1px solid #334155; color: #f87171; border-radius: 6px; width: 22px; height: 22px; cursor: pointer; font-size: 11px; font-weight: 800; line-height: 1;">✕</button>
+          </div>
         </div>
-        <div style="display: flex; align-items: center; justify-content: space-between;">
-          <span style="color: #cbd5e1;">Grupos Mapeados nesta tela:</span>
-          <strong id="autoviral-badge-count" style="color: #fbbf24; font-size: 14px; font-weight: 900;">0</strong>
+        <div id="autoviral-fb-body" style="display: flex; flex-direction: column; gap: 8px;">
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <span style="color: #cbd5e1;">Grupos Mapeados nesta tela:</span>
+            <strong id="autoviral-badge-count" style="color: #fbbf24; font-size: 13px; font-weight: 900;">0</strong>
+          </div>
+          <div id="autoviral-badge-hint" style="font-size: 10px; color: #94a3b8; line-height: 1.3;">
+            Role a página para baixo para mapear mais grupos automaticamente!
+          </div>
+          <button id="autoviral-badge-sync" style="
+            background: #10b981;
+            color: #022c22;
+            border: none;
+            border-radius: 8px;
+            padding: 8px 10px;
+            font-weight: 700;
+            font-size: 11px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            transition: background 0.2s;
+          ">
+            📡 Sincronizar com Painel AutoViral
+          </button>
         </div>
-        <div id="autoviral-badge-hint" style="font-size: 10px; color: #94a3b8; line-height: 1.3;">
-          Role a página para baixo para mapear mais grupos automaticamente!
-        </div>
-        <button id="autoviral-badge-sync" style="
-          background: #10b981;
-          color: #022c22;
-          border: none;
-          border-radius: 8px;
-          padding: 8px 10px;
-          font-weight: 700;
-          font-size: 11px;
-          cursor: pointer;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 6px;
-          transition: background 0.2s;
-        ">
-          📡 Sincronizar com Painel AutoViral
-        </button>
       `;
 
       document.body.appendChild(badge);
+
+      makeWidgetInteractive(badge, {
+        headerEl: document.getElementById('autoviral-fb-header'),
+        bodyEl: document.getElementById('autoviral-fb-body'),
+        minBtn: document.getElementById('autoviral-badge-min'),
+        closeBtn: document.getElementById('autoviral-badge-close'),
+        storageKey: 'autoviral_fb_widget_pos',
+        expandedWidth: '276px'
+      });
 
       document.getElementById('autoviral-badge-close').onclick = () => {
         badge.style.display = 'none';
@@ -453,7 +584,7 @@
         const pending = res.autoviral_pending_fb_post;
         const notMember = isUserNotMemberOfCurrentGroup();
         createFloatingWidget();
-        const badge = document.getElementById('autoviral-floating-badge');
+        const badge = document.getElementById('autoviral-fb-body') || document.getElementById('autoviral-floating-badge');
         if (!badge || document.getElementById('autoviral-post-assistant')) return;
 
         const box = document.createElement('div');
@@ -766,7 +897,7 @@
         background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
         border: 2px solid #ef4444;
         border-radius: 16px;
-        padding: 12px 16px;
+        padding: 10px 14px;
         box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.8), 0 0 15px rgba(239, 68, 68, 0.3);
         color: #f8fafc;
         font-family: system-ui, -apple-system, sans-serif;
@@ -774,43 +905,58 @@
         display: flex;
         flex-direction: column;
         gap: 8px;
-        min-width: 250px;
+        width: 276px;
       `;
 
       badge.innerHTML = `
-        <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #334155; padding-bottom: 6px;">
-          <div style="display: flex; align-items: center; gap: 6px; font-weight: 800; color: #ef4444;">
+        <div id="autoviral-yt-header" style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #334155; padding-bottom: 4px; gap: 6px;">
+          <div style="display: flex; align-items: center; gap: 6px; font-weight: 800; color: #ef4444; font-size: 11px;">
+            <span style="color: #64748b;">⋮⋮</span>
             <span>▶️ AutoViral AI</span>
-            <span style="background: #450a0a; color: #fca5a5; font-size: 10px; padding: 1px 6px; border-radius: 999px; font-weight: 600;">YouTube Mapeador</span>
+            <span style="background: #450a0a; color: #fca5a5; font-size: 9px; padding: 1px 6px; border-radius: 999px; font-weight: 600;">YouTube</span>
           </div>
-          <button id="autoviral-yt-badge-close" style="background: transparent; border: none; color: #94a3b8; cursor: pointer; font-size: 12px;">✕</button>
+          <div style="display: flex; align-items: center; gap: 4px;">
+            <button id="autoviral-yt-badge-min" title="Minimizar" style="background: #1e293b; border: 1px solid #334155; color: #cbd5e1; border-radius: 6px; width: 22px; height: 22px; cursor: pointer; font-size: 12px; font-weight: 800; line-height: 1;">–</button>
+            <button id="autoviral-yt-badge-close" title="Fechar" style="background: #1e293b; border: 1px solid #334155; color: #f87171; border-radius: 6px; width: 22px; height: 22px; cursor: pointer; font-size: 11px; font-weight: 800; line-height: 1;">✕</button>
+          </div>
         </div>
-        <div style="display: flex; align-items: center; justify-content: space-between;">
-          <span style="color: #cbd5e1;">Vídeos da Busca Mapeados:</span>
-          <strong id="autoviral-yt-badge-count" style="color: #f59e0b; font-size: 14px; font-weight: 900;">0</strong>
+        <div id="autoviral-yt-body" style="display: flex; flex-direction: column; gap: 8px;">
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <span style="color: #cbd5e1;">Vídeos da Busca Mapeados:</span>
+            <strong id="autoviral-yt-badge-count" style="color: #f59e0b; font-size: 13px; font-weight: 900;">0</strong>
+          </div>
+          <div style="font-size: 10px; color: #94a3b8; line-height: 1.3;">
+            Os vídeos desta pesquisa no YouTube foram lidos e preparados para divulgação!
+          </div>
+          <button id="autoviral-yt-badge-sync" style="
+            background: #ef4444;
+            color: #ffffff;
+            border: none;
+            border-radius: 8px;
+            padding: 8px 10px;
+            font-weight: 700;
+            font-size: 11px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+          ">
+            📡 Sincronizar Vídeos com Painel AutoViral
+          </button>
         </div>
-        <div style="font-size: 10px; color: #94a3b8; line-height: 1.3;">
-          Os vídeos desta pesquisa no YouTube foram lidos e preparados para divulgação!
-        </div>
-        <button id="autoviral-yt-badge-sync" style="
-          background: #ef4444;
-          color: #ffffff;
-          border: none;
-          border-radius: 8px;
-          padding: 8px 10px;
-          font-weight: 700;
-          font-size: 11px;
-          cursor: pointer;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 6px;
-        ">
-          📡 Sincronizar Vídeos com Painel AutoViral
-        </button>
       `;
 
       document.body.appendChild(badge);
+
+      makeWidgetInteractive(badge, {
+        headerEl: document.getElementById('autoviral-yt-header'),
+        bodyEl: document.getElementById('autoviral-yt-body'),
+        minBtn: document.getElementById('autoviral-yt-badge-min'),
+        closeBtn: document.getElementById('autoviral-yt-badge-close'),
+        storageKey: 'autoviral_yt_widget_pos',
+        expandedWidth: '276px'
+      });
 
       document.getElementById('autoviral-yt-badge-close').onclick = () => {
         badge.style.display = 'none';
@@ -1125,29 +1271,41 @@
       } catch (e) {}
 
       if (chrome.runtime && chrome.runtime.sendMessage) {
-        chrome.runtime.sendMessage(payload);
+        chrome.runtime.sendMessage(payload, (res) => {
+          void chrome.runtime.lastError;
+          if (res && res.forwardedCount > 0) {
+            setInstaWidgetStatus(`✅ ${list.length} contas enviadas direto ao AutoViral!`, '#34d399');
+          } else {
+            setInstaWidgetStatus(`💾 ${list.length} contas salvas! Clique em "Abrir Painel" para ver.`, '#38bdf8');
+          }
+        });
         chrome.runtime.sendMessage({
           action: 'AUTOVIRAL_INSTA_ACCOUNT_SYNC',
           handle: connectedHandle
-        });
+        }, () => { void chrome.runtime.lastError; });
+      } else {
+        setInstaWidgetStatus(`✅ ${list.length} contas salvas!`, '#34d399');
       }
-      setInstaWidgetStatus(`✅ ${list.length} contas enviadas para AutoViral!`, '#34d399');
     }
 
-    // Inject Floating Instagram Defense & Unlimited Mapper Widget
+    // Inject Movable, Minimizable, Closable Instagram Defense & Unlimited Mapper Widget
     const badge = document.createElement('div');
     badge.id = 'autoviral-insta-defense-badge';
+    badge.style.cssText = 'position: fixed; bottom: 20px; right: 20px; z-index: 9999999; background: #090d16; color: #fff; padding: 10px 14px; border-radius: 16px; font-family: system-ui, -apple-system, sans-serif; font-size: 11px; font-weight: 700; border: 1.5px solid #a855f7; box-shadow: 0 10px 25px rgba(0,0,0,0.75), 0 0 15px rgba(168, 85, 247, 0.3); display: flex; flex-direction: column; gap: 7px; width: 280px;';
     badge.innerHTML = `
-      <div style="position: fixed; bottom: 20px; left: 20px; z-index: 999999; background: #090d16; color: #fff; padding: 12px 16px; border-radius: 16px; font-family: system-ui, -apple-system, sans-serif; font-size: 11px; font-weight: 700; border: 1px solid #a855f7; box-shadow: 0 10px 25px rgba(0,0,0,0.7), 0 0 15px rgba(168, 85, 247, 0.3); display: flex; flex-direction: column; gap: 7px; width: 280px;">
-        <div style="display: flex; align-items: center; justify-content: space-between;">
-          <div style="display: flex; align-items: center; gap: 6px;">
-            <span style="display: inline-block; width: 8px; height: 8px; background: #10b981; border-radius: 50%; box-shadow: 0 0 8px #10b981;"></span>
-            <span style="color: #c084fc; font-weight: 900;">AutoViral AI • Instagram</span>
-          </div>
-          <span style="font-size: 9px; background: rgba(16, 185, 129, 0.15); color: #34d399; padding: 2px 6px; border-radius: 6px; border: 1px solid rgba(16, 185, 129, 0.4);">
-            ILIMITADO
-          </span>
+      <div id="autoviral-insta-header" style="display: flex; align-items: center; justify-content: space-between; gap: 6px; padding-bottom: 5px; border-bottom: 1px solid #1e293b;">
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span style="color: #64748b; font-size: 11px;">⋮⋮</span>
+          <span style="display: inline-block; width: 7px; height: 7px; background: #10b981; border-radius: 50%; box-shadow: 0 0 8px #10b981;"></span>
+          <span style="color: #c084fc; font-weight: 900; font-size: 11px;">AutoViral • Instagram</span>
         </div>
+        <div style="display: flex; align-items: center; gap: 4px;">
+          <span style="font-size: 8px; background: rgba(16, 185, 129, 0.15); color: #34d399; padding: 1px 5px; border-radius: 5px; border: 1px solid rgba(16, 185, 129, 0.4);">MOVER</span>
+          <button id="autoviral-insta-min" title="Minimizar" style="background: #1e293b; border: 1px solid #334155; color: #cbd5e1; border-radius: 6px; width: 22px; height: 22px; cursor: pointer; font-size: 12px; font-weight: 800; line-height: 1;">–</button>
+          <button id="autoviral-insta-close" title="Fechar" style="background: #1e293b; border: 1px solid #334155; color: #f87171; border-radius: 6px; width: 22px; height: 22px; cursor: pointer; font-size: 11px; font-weight: 800; line-height: 1;">✕</button>
+        </div>
+      </div>
+      <div id="autoviral-insta-body" style="display: flex; flex-direction: column; gap: 7px;">
         <div style="font-size: 10px; color: #94a3b8; display: flex; justify-content: space-between;">
           <span>Conta Stories: <strong id="autoviral-insta-connected-handle" style="color: #f1f5f9;">${connectedHandle}</strong></span>
         </div>
@@ -1159,21 +1317,40 @@
             🔍 Mapear Visíveis
           </button>
           <button id="btn-sync-insta-to-platform" style="flex: 1; background: linear-gradient(135deg, #10b981, #059669); color: #022c22; border: none; padding: 6px 8px; border-radius: 8px; font-size: 10px; font-weight: 900; cursor: pointer;">
-            📡 Enviar p/ Grupo
+            📡 Enviar p/ Painel
           </button>
         </div>
-        <button id="btn-sync-only-handle" style="background: linear-gradient(135deg, #9333ea, #c026d3); color: #fff; border: none; padding: 6px 10px; border-radius: 8px; font-size: 10px; font-weight: 800; cursor: pointer;">
-          🛡️ Confirmar Conta Conectada para Stories
-        </button>
+        <div style="display: flex; gap: 6px;">
+          <button id="btn-sync-only-handle" style="flex: 1; background: linear-gradient(135deg, #9333ea, #c026d3); color: #fff; border: none; padding: 6px 8px; border-radius: 8px; font-size: 10px; font-weight: 800; cursor: pointer;">
+            🛡️ Confirmar Conta
+          </button>
+          <button id="btn-open-autoviral-from-insta" style="background: #1e1b4b; color: #c7d2fe; border: 1px solid #4338ca; padding: 6px 8px; border-radius: 8px; font-size: 10px; font-weight: 800; cursor: pointer;">
+            💻 Abrir Painel
+          </button>
+        </div>
         <div id="autoviral-insta-widget-status" style="font-size: 9px; color: #94a3b8; line-height: 1.3;">
-          Role a busca, seguidores ou comentários para capturar contas sem limite.
+          Arraste pelo topo para mover • Role busca ou seguidores para capturar contas.
         </div>
       </div>
     `;
-    if (document.body) {
+    const mountInstaBadge = () => {
+      if (document.getElementById('autoviral-insta-defense-badge')) return;
       document.body.appendChild(badge);
+      makeWidgetInteractive(badge, {
+        headerEl: document.getElementById('autoviral-insta-header'),
+        bodyEl: document.getElementById('autoviral-insta-body'),
+        minBtn: document.getElementById('autoviral-insta-min'),
+        closeBtn: document.getElementById('autoviral-insta-close'),
+        storageKey: 'autoviral_insta_widget_pos',
+        defaultRight: '20px',
+        defaultBottom: '20px',
+        expandedWidth: '280px'
+      });
+    };
+    if (document.body) {
+      mountInstaBadge();
     } else {
-      window.addEventListener('DOMContentLoaded', () => document.body.appendChild(badge));
+      window.addEventListener('DOMContentLoaded', mountInstaBadge);
     }
 
     setTimeout(() => {
@@ -1183,7 +1360,7 @@
       if (btnScanInsta) {
         btnScanInsta.onclick = () => {
           const { list, newFound } = scanVisibleInstagramAccounts();
-          setInstaWidgetStatus(`🔍 Capturadas +${newFound} novas (${list.length} total no grupo)!`, '#38bdf8');
+          setInstaWidgetStatus(`🔍 Capturadas +${newFound} novas (${list.length} total)!`, '#38bdf8');
         };
       }
 
@@ -1191,6 +1368,18 @@
       if (btnSendGroup) {
         btnSendGroup.onclick = () => {
           sendInstagramAccountsToAutoViral();
+        };
+      }
+
+      const btnOpenFromInsta = document.getElementById('btn-open-autoviral-from-insta');
+      if (btnOpenFromInsta) {
+        btnOpenFromInsta.onclick = () => {
+          sendInstagramAccountsToAutoViral();
+          if (chrome.runtime && chrome.runtime.sendMessage) {
+            chrome.runtime.sendMessage({ action: 'AUTOVIRAL_FOCUS_OR_OPEN_PLATFORM' }, () => {
+              void chrome.runtime.lastError;
+            });
+          }
         };
       }
 
@@ -1213,9 +1402,17 @@
             chrome.runtime.sendMessage({
               action: 'AUTOVIRAL_INSTA_ACCOUNT_SYNC',
               handle: connectedHandle
+            }, (res) => {
+              void chrome.runtime.lastError;
+              if (res && res.forwardedCount > 0) {
+                setInstaWidgetStatus(`✅ Conta ${connectedHandle} sincronizada no Painel!`, '#34d399');
+              } else {
+                setInstaWidgetStatus(`💾 Conta ${connectedHandle} salva! Abra o Painel para usar.`, '#38bdf8');
+              }
             });
+          } else {
+            setInstaWidgetStatus(`✅ Conta ${connectedHandle} confirmada!`, '#34d399');
           }
-          setInstaWidgetStatus(`✅ Conta ${connectedHandle} confirmada nos Stories & Direct!`, '#34d399');
         };
       }
     }, 1000);
@@ -1296,9 +1493,55 @@
     window.__AUTOVIRAL_CHROME_EXTENSION_INSTALLED__ = true;
     document.documentElement.setAttribute('data-autoviral-extension-installed', 'true');
 
+    // Persist Instagram handle + accounts directly into AutoViral's localStorage so data arrives even if tab isn't open yet
+    const persistInstagramDataToLocalStorage = (accounts, connectedHandle) => {
+      try {
+        if (connectedHandle && connectedHandle !== '@conectado') {
+          const cleanHandle = '@' + String(connectedHandle).trim().replace(/^@+/, '').toLowerCase();
+          localStorage.setItem('autoviral_insta_handle', cleanHandle);
+        }
+        if (Array.isArray(accounts) && accounts.length > 0) {
+          let existing = [];
+          try {
+            const raw = localStorage.getItem('autoviral_insta_mapped_targets_v2');
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              if (Array.isArray(parsed)) existing = parsed;
+            }
+          } catch (e) {}
+          const existingSet = new Set(existing.map((t) => (t.handle || '').toLowerCase()));
+          const freshItems = accounts
+            .filter((a) => a && (a.handle || a.username))
+            .map((a, idx) => {
+              const h = '@' + String(a.handle || a.username).replace(/^@+/, '').toLowerCase();
+              return {
+                id: `tgt-ext-${Date.now()}-${idx}-${h.slice(1, 8)}`,
+                handle: h,
+                name: a.name || h,
+                followers: 'Mapeado Chrome',
+                bio: 'Perfil real capturado via rolagem da Extensão Chrome AutoViral AI (ilimitado).',
+                category: 'profile_follower',
+                sourceQuery: 'chrome_extension_instagram',
+                score: 95,
+                selected: true,
+                status: 'pending'
+              };
+            })
+            .filter((item) => !existingSet.has(item.handle.toLowerCase()));
+          if (freshItems.length > 0) {
+            localStorage.setItem(
+              'autoviral_insta_mapped_targets_v2',
+              JSON.stringify([...freshItems, ...existing])
+            );
+          }
+        }
+      } catch (e) {}
+    };
+
     const forwardExtensionEvent = (data) => {
       if (!data || !data.action) return;
       if (data.action === 'AUTOVIRAL_IMPORT_GROUPS_FROM_EXTENSION') {
+        persistInstagramDataToLocalStorage(data.instaAccounts, data.connectedHandle);
         window.dispatchEvent(new CustomEvent('autoviral_extension_groups_received', {
           detail: {
             groups: data.groups,
@@ -1339,6 +1582,7 @@
           }
         }));
       } else if (data.action === 'AUTOVIRAL_IMPORT_INSTAGRAM_ACCOUNTS') {
+        persistInstagramDataToLocalStorage(data.accounts, data.connectedHandle);
         window.dispatchEvent(new CustomEvent('autoviral_extension_instagram_accounts_received', {
           detail: {
             accounts: data.accounts || [],
@@ -1348,6 +1592,7 @@
           }
         }));
       } else if (data.action === 'AUTOVIRAL_INSTA_ACCOUNT_SYNC') {
+        persistInstagramDataToLocalStorage(null, data.handle);
         window.dispatchEvent(new CustomEvent('autoviral_extension_insta_account_synced', {
           detail: {
             handle: data.handle,
@@ -1361,6 +1606,39 @@
         }));
       }
     };
+
+    const pullExtensionCacheIntoAutoViral = () => {
+      if (!chrome || !chrome.runtime || !chrome.runtime.sendMessage) return;
+      chrome.runtime.sendMessage({ action: 'AUTOVIRAL_PULL_EXTENSION_CACHE' }, (res) => {
+        void chrome.runtime.lastError;
+        if (res && res.success) {
+          persistInstagramDataToLocalStorage(res.accounts, res.connectedHandle);
+          if (res.connectedHandle) {
+            window.dispatchEvent(new CustomEvent('autoviral_extension_insta_account_synced', {
+              detail: { handle: res.connectedHandle, timestamp: new Date().toISOString() }
+            }));
+          }
+          if (Array.isArray(res.accounts) && res.accounts.length > 0) {
+            window.dispatchEvent(new CustomEvent('autoviral_extension_instagram_accounts_received', {
+              detail: {
+                accounts: res.accounts,
+                connectedHandle: res.connectedHandle,
+                timestamp: new Date().toISOString()
+              }
+            }));
+          }
+          window.dispatchEvent(new CustomEvent('autoviral_insta_sync_complete', {
+            detail: {
+              count: Array.isArray(res.accounts) ? res.accounts.length : 0,
+              connectedHandle: res.connectedHandle || ''
+            }
+          }));
+        }
+      });
+    };
+
+    // Pull cached extension data on load
+    setTimeout(pullExtensionCacheIntoAutoViral, 800);
 
     // Listen for outgoing commands from the AutoViral web app to the Chrome Extension
     window.addEventListener('message', (ev) => {
@@ -1376,6 +1654,8 @@
             fullText: ev.data.fullText
           }, () => { void chrome.runtime.lastError; });
         }
+      } else if (ev.data.type === 'AUTOVIRAL_REQUEST_INSTA_SYNC') {
+        pullExtensionCacheIntoAutoViral();
       }
     });
 

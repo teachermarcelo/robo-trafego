@@ -442,8 +442,8 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
   const [realRadarSourceFilter, setRealRadarSourceFilter] = useState<string>('all');
   const [smartLinkChannel, setSmartLinkChannel] = useState<'facebook_groups' | 'instagram_story' | 'youtube_comments' | 'pinterest' | 'whatsapp'>('facebook_groups');
   const [copiedSmartUrlFeedback, setCopiedSmartUrlFeedback] = useState<boolean>(false);
-  const [postsLogFilter, setPostsLogFilter] = useState<'all' | 'awaiting_admin' | 'published' | 'pending' | 'error'>('all');
-  const [newPostApprovalMode, setNewPostApprovalMode] = useState<'awaiting_admin' | 'published'>('awaiting_admin');
+  const [postsLogFilter, setPostsLogFilter] = useState<'all' | 'published' | 'awaiting_admin' | 'not_member' | 'pending_verification' | 'pending' | 'legacy_unverified' | 'error'>('all');
+  const [lastOpenedPostLog, setLastOpenedPostLog] = useState<{ logId: string; groupName: string; groupUrl: string } | null>(null);
   const [manyChatOverridesMap, setManyChatOverridesMap] = useState<Record<string, any>>(() => loadManyChatOverrides());
   const [manyChatSavedBanner, setManyChatSavedBanner] = useState<string | null>(null);
   const [copiedShortFunnelKey, setCopiedShortFunnelKey] = useState<string | null>(null);
@@ -1286,44 +1286,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       const saved = localStorage.getItem('autoviral_fb_bot_logs_v3');
       if (saved) return JSON.parse(saved);
     } catch {}
-    return [
-      {
-        id: 'log-cwb-1',
-        groupId: 'fb-cwb-1',
-        groupName: 'ANUNCIE AQUI CURITIBA PR (5,9 mil membros)',
-        groupUrl: 'https://facebook.com/groups/anuncieaquicuritibapr',
-        postedAt: '10/11/2026 15:52',
-        headline: '🌸 Meninas e colegas de Curitiba, achei esse material...',
-        status: 'success',
-        approvalStatus: 'published',
-        intervalWaitedSeconds: 345,
-        checkoutUrl: 'https://pay.kiwify.com.br/HE5xbnp'
-      },
-      {
-        id: 'log-cwb-2',
-        groupId: 'fb-cwb-2',
-        groupName: 'Anuncie e Venda, Curitiba e Região (21 mil membros)',
-        groupUrl: 'https://facebook.com/groups/anuncieevendacuritibaeregiao',
-        postedAt: '10/11/2026 15:46',
-        headline: '🌸 Meninas e colegas de Curitiba, achei esse material...',
-        status: 'success',
-        approvalStatus: 'awaiting_admin',
-        intervalWaitedSeconds: 372,
-        checkoutUrl: 'https://pay.kiwify.com.br/HE5xbnp'
-      },
-      {
-        id: 'log-cwb-5',
-        groupId: 'fb-cwb-5',
-        groupName: 'CURITIBA (40.712 membros)',
-        groupUrl: 'https://facebook.com/groups/curitibagrupogeral',
-        postedAt: '10/11/2026 15:40',
-        headline: '🌸 Meninas e colegas de Curitiba, achei esse material...',
-        status: 'success',
-        approvalStatus: 'published',
-        intervalWaitedSeconds: 318,
-        checkoutUrl: 'https://pay.kiwify.com.br/HE5xbnp'
-      }
-    ];
+    return [];
   });
 
   // Chrome Extension Bridge Status
@@ -1892,13 +1855,80 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
         } else if (ev.data && ev.data.action === 'AUTOVIRAL_IMPORT_INSTAGRAM_ACCOUNTS') {
           setIsExtensionDetected(true);
           refreshInstaCount();
+        } else if (ev.data && ev.data.action === 'AUTOVIRAL_FB_POST_RESULT') {
+          applyRealPostResultFromExtension(ev.data);
         }
       };
     } catch (e) {}
 
+    const applyRealPostResultFromExtension = (payload: any) => {
+      if (!payload) return;
+      setIsExtensionDetected(true);
+      const { logId, groupId, groupUrl, groupName, approvalStatus, note } = payload;
+      const now = new Date();
+      const formattedNow = `${now.toLocaleDateString('pt-BR')} ${now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
+      const normalizedStatus: FacebookPostLog['approvalStatus'] =
+        approvalStatus === 'published' || approvalStatus === 'awaiting_admin' || approvalStatus === 'not_member'
+          ? approvalStatus
+          : 'pending_verification';
+
+      setBotLogs(prev => {
+        const matchIdx = prev.findIndex(
+          l => (logId && l.id === logId) || (groupId && l.groupId === groupId) || (groupUrl && l.groupUrl === groupUrl)
+        );
+        if (matchIdx >= 0) {
+          const updated = [...prev];
+          updated[matchIdx] = {
+            ...updated[matchIdx],
+            postedAt: formattedNow,
+            status: normalizedStatus === 'not_member' ? 'error' : 'success',
+            approvalStatus: normalizedStatus,
+            isVerifiedReal: true
+          };
+          return updated;
+        }
+        const created: FacebookPostLog = {
+          id: logId || `log-${now.getTime()}`,
+          groupId: groupId || `fb-${now.getTime()}`,
+          groupName: groupName || 'Grupo do Facebook',
+          groupUrl: groupUrl || 'https://www.facebook.com/groups',
+          postedAt: formattedNow,
+          headline: note || 'Publicação verificada pela extensão Chrome',
+          status: normalizedStatus === 'not_member' ? 'error' : 'success',
+          approvalStatus: normalizedStatus,
+          isVerifiedReal: true,
+          intervalWaitedSeconds: 0,
+          checkoutUrl: ''
+        };
+        return [created, ...prev];
+      });
+
+      if (normalizedStatus === 'not_member') {
+        setExtensionSyncBanner({
+          message: `⚠️ Grupo "${groupName || 'Facebook'}" bloqueado: você ainda não participa dele ("Participar do grupo" detectado). Clique no link do grupo para entrar primeiro.`,
+          tone: 'warning'
+        });
+      } else if (normalizedStatus === 'awaiting_admin') {
+        setExtensionSyncBanner({
+          message: `⏳ Confirmado pelo Facebook: post em "${groupName || 'grupo'}" ficou Aguardando Permissão do Administrador.`,
+          tone: 'warning'
+        });
+      } else if (normalizedStatus === 'published') {
+        setExtensionSyncBanner({
+          message: `✅ Confirmado no Facebook: Postagem Feita com sucesso em "${groupName || 'grupo'}"!`,
+          tone: 'success'
+        });
+      }
+    };
+
+    const handleExtensionPostResult = (event: any) => {
+      applyRealPostResultFromExtension(event?.detail);
+    };
+
     window.addEventListener('autoviral_extension_groups_received', handleExtensionGroups);
     window.addEventListener('autoviral_extension_youtube_videos_received', handleExtensionYtVideos);
     window.addEventListener('autoviral_extension_instagram_accounts_received', refreshInstaCount);
+    window.addEventListener('autoviral_fb_post_result', handleExtensionPostResult);
 
     const handleExtensionReset = () => {
       setMappedGroups([]);
@@ -1923,16 +1953,20 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       window.removeEventListener('autoviral_extension_groups_received', handleExtensionGroups);
       window.removeEventListener('autoviral_extension_youtube_videos_received', handleExtensionYtVideos);
       window.removeEventListener('autoviral_extension_instagram_accounts_received', refreshInstaCount);
+      window.removeEventListener('autoviral_fb_post_result', handleExtensionPostResult);
       window.removeEventListener('autoviral_extension_groups_reset', handleExtensionReset);
     };
   }, []);
 
-  // Execute Facebook post on current group
+  // Execute assisted Facebook group dispatch (NEVER fakes 'Postagem Feita' without real verification)
   const handleExecuteGroupPost = () => {
     if (dailyDispatchesCompleted >= dailyDispatchLimit) {
       globalBotRunner.stop();
       setIsBotRunning(false);
-      alert(`⚠️ Limite diário de segurança de ${dailyDispatchLimit} disparos atingido com sucesso!`);
+      setExtensionSyncBanner({
+        message: `⚠️ Limite diário de segurança de ${dailyDispatchLimit} disparos atingido hoje.`,
+        tone: 'warning'
+      });
       return;
     }
 
@@ -1940,6 +1974,10 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
     if (targetGroups.length === 0) {
       globalBotRunner.stop();
       setIsBotRunning(false);
+      setExtensionSyncBanner({
+        message: '⚠️ Selecione pelo menos 1 grupo na aba "Grupos Mapeados" antes de iniciar.',
+        tone: 'warning'
+      });
       return;
     }
 
@@ -1948,50 +1986,62 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       ? Math.floor(Math.random() * (400 - 300 + 1)) + 300
       : intervalSeconds;
 
+    const fullText = `${postHeadline}\n\n${postCopy}`.trim();
+    try {
+      navigator.clipboard?.writeText(fullText);
+    } catch {}
+
     const now = new Date();
+    const logId = `log-${now.getTime()}`;
     const newLog: FacebookPostLog = {
-      id: `log-${now.getTime()}`,
+      id: logId,
       groupId: currentGroup.id,
       groupName: `${currentGroup.name} (${currentGroup.membersCount.toLocaleString('pt-BR')} membros)`,
       groupUrl: currentGroup.url,
       postedAt: `${now.toLocaleDateString('pt-BR')} ${now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`,
       headline: postHeadline.slice(0, 55) + '...',
       status: 'success',
-      approvalStatus: newPostApprovalMode,
+      approvalStatus: 'pending_verification',
+      isVerifiedReal: false,
       intervalWaitedSeconds: waited,
       checkoutUrl: selectedCheckoutUrl
     };
 
     setBotLogs(prev => [newLog, ...prev]);
+    setLastOpenedPostLog({
+      logId,
+      groupName: currentGroup.name,
+      groupUrl: currentGroup.url
+    });
     setDailyDispatchesCompleted(prev => prev + 1);
 
-    // Update group dispatch count
     setMappedGroups(prev =>
       prev.map(g =>
         g.id === currentGroup.id
-          ? { ...g, dispatchCount: g.dispatchCount + 1, lastDispatchedAt: 'Agora mesmo' }
+          ? { ...g, dispatchCount: g.dispatchCount + 1, lastDispatchedAt: 'Aberto para postar' }
           : g
       )
     );
 
-    // Tracking event (marked as simulation/bot dispatch log)
-    if (onAddTrackingEvent) {
-      onAddTrackingEvent({
-        id: `fb-evt-${Date.now()}`,
-        campaignId: selectedProductId,
-        campaignTitle: activeCampaign.title,
-        niche: currentGroup.niche,
-        type: 'impression',
-        timestamp: new Date().toISOString(),
-        geo: { city: currentGroup.city || 'Curitiba', state: 'PR', country: 'Brasil' },
-        device: 'mobile',
-        ageBracket: '25-34',
-        source: 'facebook_groups',
-        isSimulation: true,
-        adCreativeName: `Post no Grupo: ${currentGroup.name}`,
-        utmContent: `interval_${waited}s`
-      });
-    }
+    // Send real command to Chrome Extension to open the group tab & check membership ("Participar do grupo")
+    try {
+      window.postMessage(
+        {
+          type: 'AUTOVIRAL_OPEN_GROUP_FOR_POST',
+          logId,
+          groupId: currentGroup.id,
+          groupUrl: currentGroup.url,
+          groupName: currentGroup.name,
+          fullText
+        },
+        '*'
+      );
+    } catch {}
+
+    setExtensionSyncBanner({
+      message: `📋 Texto copiado! Grupo "${currentGroup.name}" enviado para abertura no Facebook. Publique e confirme o status real (ou aguarde a extensão detectar).`,
+      tone: 'success'
+    });
 
     setCurrentPostingIndex(prev => (prev + 1) % targetGroups.length);
   };
@@ -2458,15 +2508,35 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
     }
   };
 
-  // Logistics & Analytics Calculations (3 distinct group post states)
+  // Real Logistics & Verification Calculations (Separating Verified Real Posts from Legacy Unverified Logs)
   const awaitingAdminLogs = botLogs.filter(
-    l => l.status === 'success' && l.approvalStatus === 'awaiting_admin'
+    l => l.isVerifiedReal === true && l.status === 'success' && l.approvalStatus === 'awaiting_admin'
   );
-  const publishedLogs = botLogs.filter(
-    l => l.status === 'success' && l.approvalStatus !== 'awaiting_admin'
+  const verifiedPublishedLogs = botLogs.filter(
+    l => l.isVerifiedReal === true && l.status === 'success' && l.approvalStatus === 'published'
+  );
+  const notMemberLogs = botLogs.filter(
+    l => l.approvalStatus === 'not_member'
+  );
+  const pendingVerificationLogs = botLogs.filter(
+    l => l.approvalStatus === 'pending_verification'
+  );
+  const legacyUnverifiedLogs = botLogs.filter(
+    l =>
+      l.isVerifiedReal !== true &&
+      l.approvalStatus !== 'pending_verification' &&
+      l.approvalStatus !== 'not_member' &&
+      l.status === 'success'
   );
   const dispatchedGroupIds = new Set(
-    botLogs.filter(l => l.status === 'success').map(l => l.groupId)
+    botLogs
+      .filter(
+        l =>
+          l.isVerifiedReal === true ||
+          l.approvalStatus === 'pending_verification' ||
+          l.approvalStatus === 'not_member'
+      )
+      .map(l => l.groupId)
   );
   const pendingQueueGroups = mappedGroups.filter(
     g => selectedGroupIds.includes(g.id) && !dispatchedGroupIds.has(g.id)
@@ -2474,17 +2544,38 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
 
   const handleToggleLogApprovalStatus = (
     logId: string,
-    nextApproval: 'awaiting_admin' | 'published'
+    nextApproval: 'awaiting_admin' | 'published' | 'not_member'
   ) => {
     setBotLogs(prev =>
-      prev.map(l => (l.id === logId ? { ...l, approvalStatus: nextApproval } : l))
+      prev.map(l =>
+        l.id === logId
+          ? {
+              ...l,
+              approvalStatus: nextApproval,
+              status: nextApproval === 'not_member' ? 'error' : 'success',
+              isVerifiedReal: true
+            }
+          : l
+      )
     );
   };
 
+  const handleClearLegacyUnverifiedLogs = () => {
+    setBotLogs(prev =>
+      prev.filter(
+        l =>
+          l.isVerifiedReal === true ||
+          l.approvalStatus === 'pending_verification' ||
+          l.approvalStatus === 'not_member'
+      )
+    );
+    setPostsLogFilter('all');
+  };
+
   const totalTargetGroups = selectedGroupIds.length;
-  const completedCount = botLogs.length;
+  const completedCount = verifiedPublishedLogs.length + awaitingAdminLogs.length;
   const pendingCount = pendingQueueGroups.length;
-  const successPercentage = totalTargetGroups > 0 ? Math.min(100, Math.round((completedCount / totalTargetGroups) * 100)) : 100;
+  const successPercentage = totalTargetGroups > 0 ? Math.min(100, Math.round((completedCount / totalTargetGroups) * 100)) : 0;
   const pendingPercentage = Math.max(0, 100 - successPercentage);
 
   const selectedGroupsTotalMembers = mappedGroups
@@ -2598,7 +2689,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                 setActiveSubTab('posts_log');
               }}
               className="bg-amber-950/60 hover:bg-amber-900/70 border border-amber-700/60 text-amber-200 px-2.5 py-1.5 rounded-lg font-semibold transition cursor-pointer"
-              title="Grupos onde o post aguarda aprovação do administrador"
+              title="Grupos reais confirmados aguardando aprovação do administrador"
             >
               Aguardando Admin: <strong className="text-white font-mono">{awaitingAdminLogs.length}</strong>
             </button>
@@ -2609,9 +2700,9 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                 setActiveSubTab('posts_log');
               }}
               className="bg-emerald-950/60 hover:bg-emerald-900/70 border border-emerald-700/60 text-emerald-200 px-2.5 py-1.5 rounded-lg font-semibold transition cursor-pointer"
-              title="Grupos com postagem já publicada/aprovada"
+              title="Grupos reais com postagem confirmada no Facebook"
             >
-              Postagem Feita: <strong className="text-white font-mono">{publishedLogs.length}</strong>
+              Postagem Feita: <strong className="text-white font-mono">{verifiedPublishedLogs.length}</strong>
             </button>
             <button
               type="button"
@@ -2850,7 +2941,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                 <span className="truncate">Posts Realizados</span>
               </span>
-              <span className="text-[11px] text-slate-400 tabular-nums shrink-0">{botLogs.length}</span>
+              <span className="text-[11px] text-slate-400 tabular-nums shrink-0">{verifiedPublishedLogs.length + awaitingAdminLogs.length}</span>
             </button>
 
             <button
@@ -3655,12 +3746,12 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                 className="bg-slate-950 hover:bg-slate-900 p-3.5 rounded-xl border border-emerald-800/50 text-left transition cursor-pointer"
               >
                 <span className="text-[10px] text-emerald-400 uppercase font-bold block">
-                  2. Postagem Feita
+                  2. Postagem Feita (Confirmada)
                 </span>
                 <div className="text-2xl font-black text-emerald-400 font-mono tabular-nums mt-1">
-                  {publishedLogs.length}
+                  {verifiedPublishedLogs.length}
                 </div>
-                <span className="text-[10px] text-slate-400">Publicadas e visíveis no grupo</span>
+                <span className="text-[10px] text-slate-400">Confirmadas no Facebook (reais)</span>
               </button>
 
               <button
@@ -3698,21 +3789,40 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
 
               <div className="space-y-1.5 max-h-36 overflow-y-auto">
                 {botLogs.slice(0, 4).map((log, idx) => {
-                  const isAwaitingAdmin = log.status === 'success' && log.approvalStatus === 'awaiting_admin';
+                  const isAwaitingAdmin = log.approvalStatus === 'awaiting_admin';
+                  const isNotMember = log.approvalStatus === 'not_member';
+                  const isPendingVerify = log.approvalStatus === 'pending_verification';
+                  const isVerifiedPub = log.isVerifiedReal === true && log.approvalStatus === 'published';
                   return (
                     <div key={log.id || idx} className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1 text-[11px] py-1 border-b border-slate-900">
                       <div className="flex items-center gap-2 min-w-0">
-                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isAwaitingAdmin ? 'bg-amber-400' : 'bg-emerald-400'}`} />
+                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                          isNotMember ? 'bg-rose-400' : isAwaitingAdmin ? 'bg-amber-400' : isVerifiedPub ? 'bg-emerald-400' : 'bg-blue-400'
+                        }`} />
                         <strong className="text-white font-mono tabular-nums shrink-0">{log.postedAt}</strong>
                         <span className="text-slate-300 truncate max-w-[260px]">{log.groupName}</span>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         <span className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${
-                          isAwaitingAdmin
+                          isNotMember
+                            ? 'bg-rose-950/80 text-rose-300 border-rose-800/60'
+                            : isAwaitingAdmin
                             ? 'bg-amber-950/80 text-amber-300 border-amber-800/60'
-                            : 'bg-emerald-950/80 text-emerald-300 border-emerald-800/60'
+                            : isVerifiedPub
+                            ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800/60'
+                            : isPendingVerify
+                            ? 'bg-blue-950/80 text-blue-300 border-blue-800/60'
+                            : 'bg-slate-900 text-slate-400 border-slate-700'
                         }`}>
-                          {isAwaitingAdmin ? 'Aguardando Permissão Admin' : 'Postagem Feita'}
+                          {isNotMember
+                            ? 'Precisa Participar'
+                            : isAwaitingAdmin
+                            ? 'Aguardando Admin'
+                            : isVerifiedPub
+                            ? 'Postagem Feita'
+                            : isPendingVerify
+                            ? 'Aguard. Confirmação'
+                            : 'Antigo Não Verif.'}
                         </span>
                       </div>
                     </div>
@@ -4743,38 +4853,63 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                 </div>
               </div>
 
-              {/* Approval Mode & Bot Control Button */}
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-                <span className="text-slate-300 font-medium">
-                  Ao disparar, registrar grupo como:
-                </span>
-                <div className="inline-flex bg-slate-900 p-1 rounded-lg border border-slate-800 gap-1">
-                  <button
-                    type="button"
-                    onClick={() => setNewPostApprovalMode('awaiting_admin')}
-                    className={`px-2.5 py-1 rounded text-[11px] font-semibold cursor-pointer transition ${
-                      newPostApprovalMode === 'awaiting_admin'
-                        ? 'bg-amber-500 text-slate-950'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    Aguardando Permissão Admin
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setNewPostApprovalMode('published')}
-                    className={`px-2.5 py-1 rounded text-[11px] font-semibold cursor-pointer transition ${
-                      newPostApprovalMode === 'published'
-                        ? 'bg-emerald-500 text-slate-950'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    Postagem Feita Direto
-                  </button>
+              {/* Assisted Real Posting Notice & Controls */}
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-2 text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-bold text-white">
+                    Como funciona o Disparo Real nos Grupos do Facebook:
+                  </span>
+                  <span className="text-[11px] font-semibold text-emerald-400">
+                    Verificação Real Ativa
+                  </span>
                 </div>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Nenhum site pode postar escondido dentro do Facebook. Ao clicar abaixo, o sistema copia sua copy, abre o grupo real via Extensão Chrome, verifica se você já participa do grupo (avisa se ainda tiver o botão <strong className="text-slate-200">"Participar do grupo"</strong>) e só registra <strong className="text-emerald-400">Postagem Feita</strong> ou <strong className="text-amber-300">Aguardando Admin</strong> após confirmação real.
+                </p>
+
+                {lastOpenedPostLog && (
+                  <div className="mt-2 pt-2.5 border-t border-slate-800 flex flex-col gap-2 bg-slate-900/90 p-3 rounded-lg">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-white truncate">
+                        Último grupo aberto: {lastOpenedPostLog.groupName}
+                      </span>
+                      <a
+                        href={lastOpenedPostLog.groupUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[11px] text-blue-400 hover:underline font-semibold inline-flex items-center gap-1 shrink-0"
+                      >
+                        Abrir Grupo no FB <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleLogApprovalStatus(lastOpenedPostLog.logId, 'published')}
+                        className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold text-[11px] cursor-pointer"
+                      >
+                        ✓ Confirmar Postagem Feita
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleLogApprovalStatus(lastOpenedPostLog.logId, 'awaiting_admin')}
+                        className="px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold text-[11px] cursor-pointer"
+                      >
+                        ⏳ Aguardando Admin
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleLogApprovalStatus(lastOpenedPostLog.logId, 'not_member')}
+                        className="px-2.5 py-1 rounded bg-rose-900/80 hover:bg-rose-800 text-rose-100 font-semibold text-[11px] cursor-pointer"
+                      >
+                        🚫 Preciso Participar
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
-              <div className="pt-1 flex items-center gap-3">
+              <div className="pt-1 flex flex-wrap items-center gap-3">
                 <button
                   onClick={handleToggleBot}
                   className={`flex-1 py-3.5 font-extrabold rounded-xl text-sm flex items-center justify-center gap-2 shadow-xl transition transform hover:-translate-y-0.5 cursor-pointer ${
@@ -4786,12 +4921,12 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                   {isBotRunning ? (
                     <>
                       <Pause className="w-4 h-4 fill-white" />
-                      Pausar Robô Divulgador
+                      Pausar Fila Assistida
                     </>
                   ) : (
                     <>
                       <Play className="w-4 h-4 fill-white" />
-                      Iniciar Divulgação em Segundo Plano
+                      Iniciar Fila Assistida (300s-400s)
                     </>
                   )}
                 </button>
@@ -4799,20 +4934,20 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                 <button
                   onClick={handleExecuteGroupPost}
                   className="px-4 py-3.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
-                  title="Disparar 1 post agora mesmo no grupo da fila"
+                  title="Copiar texto e abrir próximo grupo selecionado no Facebook"
                 >
                   <Zap className="w-4 h-4 text-amber-400" />
-                  Postar Agora
+                  Abrir Grupo + Copiar Texto
                 </button>
               </div>
             </div>
 
-            {/* Right: Live Countdown & Distinct 3-State Group Status */}
+            {/* Right: Live Countdown & Distinct Group Status */}
             <div className="lg:col-span-5 space-y-5">
               {/* Countdown Card */}
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 text-center space-y-3">
                 <span className="text-xs text-emerald-300 font-semibold tracking-wide uppercase">
-                  Próxima Publicação no Grupo:
+                  Próximo Grupo da Fila Assistida:
                 </span>
 
                 <div className="text-5xl font-black text-white font-mono tabular-nums tracking-tight">
@@ -4821,8 +4956,8 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
 
                 <p className="text-xs text-slate-300">
                   {isBotRunning
-                    ? 'Intervalo seguro em andamento. O robô continua executando mesmo com o navegador minimizado.'
-                    : 'Robô em espera. Clique em Iniciar para rodar com pausas de 300s a 400s.'}
+                    ? 'Intervalo anti-bloqueio em andamento entre 300s e 400s.'
+                    : 'Em espera. Clique em "Abrir Grupo + Copiar Texto" para publicar manualmente agora.'}
                 </p>
 
                 <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
@@ -4833,10 +4968,10 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                 </div>
               </div>
 
-              {/* Distinct 3-State Display Mini-Panel */}
+              {/* Distinct Status Mini-Panel */}
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
                 <div className="flex items-center justify-between text-xs border-b border-slate-800 pb-2.5">
-                  <span className="font-bold text-white">Status Distinto dos Grupos</span>
+                  <span className="font-bold text-white">Status Real dos Grupos</span>
                   <button
                     type="button"
                     onClick={() => setActiveSubTab('posts_log')}
@@ -4867,7 +5002,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                     }}
                     className="p-2.5 rounded-lg bg-slate-950 border border-emerald-700/40 hover:border-emerald-500 transition cursor-pointer"
                   >
-                    <div className="text-lg font-bold text-emerald-400">{publishedLogs.length}</div>
+                    <div className="text-lg font-bold text-emerald-400">{verifiedPublishedLogs.length}</div>
                     <div className="text-[10px] font-sans text-slate-300 leading-tight mt-0.5">
                       Postagem Feita
                     </div>
@@ -4893,14 +5028,17 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                 <div className="flex items-center justify-between text-xs">
                   <span className="font-bold text-white flex items-center gap-1.5">
                     <Activity className="w-4 h-4 text-blue-400" />
-                    Logs de Disparos Concluídos
+                    Histórico de Grupos Abertos &amp; Confirmados
                   </span>
                   <span className="text-slate-500 font-mono tabular-nums">{botLogs.length} registros</span>
                 </div>
 
                 <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
                   {botLogs.map(log => {
-                    const isAwaiting = log.status === 'success' && log.approvalStatus === 'awaiting_admin';
+                    const isAwaiting = log.approvalStatus === 'awaiting_admin';
+                    const isNotMem = log.approvalStatus === 'not_member';
+                    const isPendingVer = log.approvalStatus === 'pending_verification';
+                    const isVerifiedPub = log.isVerifiedReal === true && log.approvalStatus === 'published';
                     return (
                       <div
                         key={log.id}
@@ -4909,11 +5047,25 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                         <div className="flex items-start justify-between gap-2">
                           <span className="font-bold text-white line-clamp-1">{log.groupName}</span>
                           <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border shrink-0 ${
-                            isAwaiting
+                            isNotMem
+                              ? 'text-rose-300 bg-rose-950 border-rose-800/60'
+                              : isAwaiting
                               ? 'text-amber-300 bg-amber-950 border-amber-800/60'
-                              : 'text-emerald-400 bg-emerald-950 border-emerald-900/50'
+                              : isVerifiedPub
+                              ? 'text-emerald-400 bg-emerald-950 border-emerald-900/50'
+                              : isPendingVer
+                              ? 'text-blue-300 bg-blue-950 border-blue-800/60'
+                              : 'text-slate-400 bg-slate-900 border-slate-700'
                           }`}>
-                            {isAwaiting ? 'Aguardando Admin' : 'Postagem Feita'}
+                            {isNotMem
+                              ? 'Precisa Participar'
+                              : isAwaiting
+                              ? 'Aguardando Admin'
+                              : isVerifiedPub
+                              ? 'Postagem Feita'
+                              : isPendingVer
+                              ? 'Aguard. Confirmação'
+                              : 'Não Verificado'}
                           </span>
                         </div>
 
@@ -5445,17 +5597,26 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
         </div>
       )}
 
-      {/* RESULTADOS: DISPLAY DISTINTO DE STATUS DOS GRUPOS (Aguardando Admin | Postagem Feita | Pendente) */}
+      {/* RESULTADOS: DISPLAY REAL DE STATUS DOS GRUPOS (Aguardando Admin | Postagem Feita Real | Precisa Participar | Pendente) */}
       {activeSubTab === 'posts_log' && (() => {
         const filteredLogs = botLogs.filter((l) => {
           if (postsLogFilter === 'awaiting_admin') {
-            return l.status === 'success' && l.approvalStatus === 'awaiting_admin';
+            return l.isVerifiedReal === true && l.status === 'success' && l.approvalStatus === 'awaiting_admin';
           }
           if (postsLogFilter === 'published') {
-            return l.status === 'success' && l.approvalStatus !== 'awaiting_admin';
+            return l.isVerifiedReal === true && l.status === 'success' && l.approvalStatus === 'published';
+          }
+          if (postsLogFilter === 'not_member') {
+            return l.approvalStatus === 'not_member';
+          }
+          if (postsLogFilter === 'pending_verification') {
+            return l.approvalStatus === 'pending_verification';
+          }
+          if (postsLogFilter === 'legacy_unverified') {
+            return l.isVerifiedReal !== true && l.approvalStatus !== 'pending_verification' && l.approvalStatus !== 'not_member' && l.status === 'success';
           }
           if (postsLogFilter === 'error') {
-            return l.status === 'error';
+            return l.status === 'error' && l.approvalStatus !== 'not_member';
           }
           return true;
         });
@@ -5466,10 +5627,10 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
               <div>
                 <h2 className="text-base font-bold text-white flex items-center gap-2">
                   <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                  Display de Status dos Grupos &amp; Postagens
+                  Display Real de Status dos Grupos &amp; Postagens
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Acompanhe separadamente cada grupo por status: Aguardando Permissão do Administrador, Postagem Feita e Pendente na fila.
+                  Acompanhe apenas status reais confirmados no Facebook: Postagem Feita, Aguardando Permissão do Administrador, Precisa Participar e Pendente na fila.
                 </p>
               </div>
 
@@ -5478,16 +5639,21 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                   type="button"
                   onClick={() => {
                     const rows = [
-                      ['Data/Hora', 'Grupo', 'URL', 'Estado', 'Intervalo(s)'],
+                      ['Data/Hora', 'Grupo', 'URL', 'Estado Real', 'Verificado', 'Intervalo(s)'],
                       ...botLogs.map(l => [
                         l.postedAt || '',
                         (l.groupName || '').replace(/,/g, ' '),
                         l.groupUrl || '',
-                        l.status === 'error'
-                          ? 'Falha'
+                        l.approvalStatus === 'not_member'
+                          ? 'Precisa Participar (Não é Membro)'
+                          : l.approvalStatus === 'pending_verification'
+                          ? 'Aberto — Aguardando Confirmação'
                           : l.approvalStatus === 'awaiting_admin'
                           ? 'Grupo (Aguardando Permissão do Administrador)'
-                          : 'Postagem Feita',
+                          : l.isVerifiedReal
+                          ? 'Postagem Feita (Confirmada)'
+                          : 'Antigo Não Verificado',
+                        l.isVerifiedReal ? 'Sim' : 'Não',
                         String(l.intervalWaitedSeconds || 0)
                       ]),
                       ...pendingQueueGroups.map(g => [
@@ -5495,6 +5661,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                         (g.name || '').replace(/,/g, ' '),
                         g.url || '',
                         'Pendente',
+                        'Não',
                         '0'
                       ])
                     ];
@@ -5503,7 +5670,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `autoviral-grupos-status-${new Date().toISOString().slice(0, 10)}.csv`;
+                    a.download = `autoviral-grupos-status-real-${new Date().toISOString().slice(0, 10)}.csv`;
                     document.body.appendChild(a);
                     a.click();
                     document.body.removeChild(a);
@@ -5520,13 +5687,34 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                   onClick={() => setBotLogs([])}
                   className="px-3 py-1.5 bg-slate-950 hover:bg-rose-950 text-slate-300 hover:text-rose-200 border border-slate-700 rounded-lg font-semibold cursor-pointer transition"
                 >
-                  Limpar Logs
+                  Limpar Tudo
                 </button>
               </div>
             </div>
 
-            {/* Distinct 3-State Interactive Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {legacyUnverifiedLogs.length > 0 && (
+              <div className="bg-amber-950/40 border border-amber-700/60 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                <div className="space-y-1">
+                  <div className="font-bold text-amber-200 flex items-center gap-1.5">
+                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>Encontrados {legacyUnverifiedLogs.length} registros antigos sem verificação real no Facebook</span>
+                  </div>
+                  <p className="text-amber-100/80 text-[11px] leading-relaxed">
+                    Esses registros foram criados antes da atualização pelo antigo cronômetro local (por isso grupos em que você ainda precisava clicar em "Participar do grupo" apareciam como "Postagem Feita"). Recomendamos zerar esses logs antigos para acompanhar apenas postagens 100% reais.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleClearLegacyUnverifiedLogs}
+                  className="px-3.5 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shrink-0 cursor-pointer transition"
+                >
+                  Zerar {legacyUnverifiedLogs.length} Antigos Não Verificados
+                </button>
+              </div>
+            )}
+
+            {/* Distinct Real Status Interactive Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <button
                 type="button"
                 onClick={() => setPostsLogFilter(postsLogFilter === 'awaiting_admin' ? 'all' : 'awaiting_admin')}
@@ -5538,7 +5726,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
               >
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-bold uppercase tracking-wider text-amber-400">
-                    Grupo (Aguardando Permissão Administrador)
+                    Grupo (Aguardando Permissão Admin)
                   </span>
                   <Clock className="w-4 h-4 text-amber-400 shrink-0" />
                 </div>
@@ -5546,7 +5734,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                   {awaitingAdminLogs.length}
                 </div>
                 <p className="text-[11px] text-slate-400 mt-1">
-                  Post enviado — esperando o administrador do grupo liberar.
+                  Confirmados esperando aprovação do admin.
                 </p>
               </button>
 
@@ -5561,15 +5749,38 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
               >
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-400">
-                    Postagem Feita
+                    Postagem Feita (Real)
                   </span>
                   <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                 </div>
                 <div className="text-2xl font-bold text-white font-mono tabular-nums mt-2">
-                  {publishedLogs.length}
+                  {verifiedPublishedLogs.length}
                 </div>
                 <p className="text-[11px] text-slate-400 mt-1">
-                  Publicada e visível para os membros do grupo.
+                  Confirmadas no Facebook após publicação.
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setPostsLogFilter(postsLogFilter === 'not_member' ? 'all' : 'not_member')}
+                className={`p-4 rounded-xl border text-left transition cursor-pointer ${
+                  postsLogFilter === 'not_member'
+                    ? 'bg-rose-950/50 border-rose-500'
+                    : 'bg-slate-950 border-slate-800 hover:border-rose-700/70'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-rose-400">
+                    Precisa Participar
+                  </span>
+                  <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                </div>
+                <div className="text-2xl font-bold text-white font-mono tabular-nums mt-2">
+                  {notMemberLogs.length}
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Extensão detectou botão "Participar do grupo".
                 </p>
               </button>
 
@@ -5584,7 +5795,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
               >
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-bold uppercase tracking-wider text-blue-400">
-                    Pendente
+                    Pendente na Fila
                   </span>
                   <Layers className="w-4 h-4 text-blue-400 shrink-0" />
                 </div>
@@ -5592,7 +5803,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                   {pendingQueueGroups.length}
                 </div>
                 <p className="text-[11px] text-slate-400 mt-1">
-                  Grupos selecionados na fila aguardando o próximo disparo.
+                  Selecionados aguardando abertura para postar.
                 </p>
               </button>
             </div>
@@ -5603,9 +5814,13 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                 {[
                   { id: 'all', label: `Todos (${botLogs.length + pendingQueueGroups.length})` },
                   { id: 'awaiting_admin', label: `Aguardando Admin (${awaitingAdminLogs.length})` },
-                  { id: 'published', label: `Postagem Feita (${publishedLogs.length})` },
-                  { id: 'pending', label: `Pendente (${pendingQueueGroups.length})` },
-                  { id: 'error', label: `Falhas (${botLogs.filter(l => l.status === 'error').length})` },
+                  { id: 'published', label: `Postagem Feita (${verifiedPublishedLogs.length})` },
+                  { id: 'not_member', label: `Precisa Participar (${notMemberLogs.length})` },
+                  { id: 'pending_verification', label: `Aguard. Confirmação (${pendingVerificationLogs.length})` },
+                  { id: 'pending', label: `Pendente na Fila (${pendingQueueGroups.length})` },
+                  ...(legacyUnverifiedLogs.length > 0
+                    ? [{ id: 'legacy_unverified', label: `Antigos Não Verificados (${legacyUnverifiedLogs.length})` }]
+                    : []),
                 ].map(tab => (
                   <button
                     key={tab.id}
@@ -5623,7 +5838,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
               </div>
             </div>
 
-            {/* Pendente View (when filter === 'pending' or shown below on 'all') */}
+            {/* Pendente View */}
             {(postsLogFilter === 'pending' || (postsLogFilter === 'all' && pendingQueueGroups.length > 0)) && (
               <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
                 <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
@@ -5636,13 +5851,13 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                     onClick={() => setActiveSubTab('campaign')}
                     className="text-xs text-emerald-400 hover:underline font-semibold cursor-pointer"
                   >
-                    Ir para Disparador &rarr;
+                    Ir para Sala de Disparo &rarr;
                   </button>
                 </div>
 
                 {pendingQueueGroups.length === 0 ? (
                   <p className="text-xs text-slate-400 py-3 text-center">
-                    Todos os grupos selecionados já foram disparados neste ciclo. Selecione mais grupos em "Grupos Mapeados".
+                    Todos os grupos selecionados já foram processados neste ciclo. Selecione mais grupos em "Grupos Mapeados".
                   </p>
                 ) : (
                   <div className="divide-y divide-slate-800/70 max-h-72 overflow-y-auto">
@@ -5666,7 +5881,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                             rel="noreferrer"
                             className="text-indigo-400 hover:text-indigo-300 inline-flex items-center gap-1 font-semibold"
                           >
-                            Abrir <ExternalLink className="w-3 h-3" />
+                            Abrir no FB <ExternalLink className="w-3 h-3" />
                           </a>
                         </div>
                       </div>
@@ -5676,20 +5891,23 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
               </div>
             )}
 
-            {/* Dispatched Logs View (when filter !== 'pending') */}
+            {/* Dispatched / Verified Logs View */}
             {postsLogFilter !== 'pending' && (
               filteredLogs.length === 0 ? (
                 <div className="bg-slate-950 border border-slate-800 rounded-xl p-8 text-center space-y-2">
-                  <p className="text-sm font-semibold text-slate-300">Nenhum registro neste status.</p>
+                  <p className="text-sm font-semibold text-slate-300">Nenhum registro real neste status.</p>
                   <p className="text-xs text-slate-500">
-                    Dispare em "Campanhas &amp; Disparos" ou alterne entre os cartões acima para visualizar todos os grupos.
+                    Use "Campanhas &amp; Disparos" para abrir um grupo selecionado com a Extensão Chrome, publicar e registrar o resultado real aqui.
                   </p>
                 </div>
               ) : (
                 <div className="divide-y divide-slate-800/70">
                   {filteredLogs.map(log => {
-                    const isAwaitingAdmin = log.status === 'success' && log.approvalStatus === 'awaiting_admin';
-                    const isError = log.status === 'error';
+                    const isAwaitingAdmin = log.approvalStatus === 'awaiting_admin';
+                    const isNotMember = log.approvalStatus === 'not_member';
+                    const isPendingVerification = log.approvalStatus === 'pending_verification';
+                    const isVerifiedPublished = log.isVerifiedReal === true && log.approvalStatus === 'published';
+                    const isLegacyUnverified = log.isVerifiedReal !== true && !isPendingVerification && !isNotMember;
                     return (
                       <div key={log.id} className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs hover:bg-slate-950/60 px-2 rounded-lg transition">
                         <div className="space-y-1 min-w-0">
@@ -5704,17 +5922,29 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                             {log.groupUrl}
                           </div>
                           <div className="flex flex-wrap items-center gap-2.5 pt-0.5">
-                            {isError ? (
+                            {isNotMember ? (
                               <span className="px-2 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-800/60 text-[11px] font-semibold">
-                                Falha ao enviar neste grupo
+                                Precisa Participar (Não é Membro)
+                              </span>
+                            ) : isPendingVerification ? (
+                              <span className="px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800/60 text-[11px] font-semibold">
+                                Aberto — Aguardando Confirmação no FB
                               </span>
                             ) : isAwaitingAdmin ? (
                               <span className="px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-700/60 text-[11px] font-semibold">
                                 Grupo (Aguardando Permissão do Administrador)
                               </span>
-                            ) : (
+                            ) : isVerifiedPublished ? (
                               <span className="px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-700/60 text-[11px] font-semibold">
-                                Postagem Feita
+                                Postagem Feita (Confirmada)
+                              </span>
+                            ) : isLegacyUnverified ? (
+                              <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 text-[11px] font-semibold">
+                                Registro Antigo Não Verificado
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-800/60 text-[11px] font-semibold">
+                                Falha
                               </span>
                             )}
 
@@ -5729,27 +5959,35 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                           </div>
                         </div>
 
-                        {!isError && (
-                          <div className="flex items-center gap-2 shrink-0">
-                            {isAwaitingAdmin ? (
-                              <button
-                                type="button"
-                                onClick={() => handleToggleLogApprovalStatus(log.id, 'published')}
-                                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold text-[11px] transition cursor-pointer"
-                              >
-                                Confirmar Postagem Feita
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => handleToggleLogApprovalStatus(log.id, 'awaiting_admin')}
-                                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 font-semibold text-[11px] transition cursor-pointer"
-                              >
-                                Marcar Aguardando Admin
-                              </button>
-                            )}
-                          </div>
-                        )}
+                        <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                          {!isVerifiedPublished && (
+                            <button
+                              type="button"
+                              onClick={() => handleToggleLogApprovalStatus(log.id, 'published')}
+                              className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold text-[11px] transition cursor-pointer"
+                            >
+                              Confirmar Postagem Feita
+                            </button>
+                          )}
+                          {!isAwaitingAdmin && (
+                            <button
+                              type="button"
+                              onClick={() => handleToggleLogApprovalStatus(log.id, 'awaiting_admin')}
+                              className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 font-semibold text-[11px] transition cursor-pointer"
+                            >
+                              Aguardando Admin
+                            </button>
+                          )}
+                          {!isNotMember && (
+                            <button
+                              type="button"
+                              onClick={() => handleToggleLogApprovalStatus(log.id, 'not_member')}
+                              className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-rose-950 text-rose-300 border border-slate-700 font-semibold text-[11px] transition cursor-pointer"
+                            >
+                              Preciso Participar
+                            </button>
+                          )}
+                        </div>
                       </div>
                     );
                   })}
@@ -6118,6 +6356,26 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
 
         return (
           <div className="space-y-5">
+            {/* Clarity 2-Step Banner: Step 1 (Here: Post Factory) vs Step 2 (Campaigns & Dispatches Room) */}
+            <div className="bg-indigo-950/40 border border-indigo-700/60 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+              <div className="space-y-1">
+                <div className="font-bold text-indigo-200">
+                  Passo 1 (Aqui): Fábrica do Post &amp; Link Curto (/z/{pkg.shortSlug}) — Passo 2: Disparo nos Grupos
+                </div>
+                <p className="text-slate-300 text-[11px] leading-relaxed">
+                  Esta aba serve apenas para <strong className="text-white">montar o visual "Botão WhatsApp" e configurar os benefícios do seu ManyChat</strong>. O disparo nos grupos acontece somente na aba <strong className="text-emerald-300">Campanhas &amp; Disparos</strong>.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleApplyPostToBot(fbWaShareCaption, `${effectiveSnippet}\n\n👇 Chame no WhatsApp ou veja os benefícios:\n${pkg.shortUrl}`)}
+                className="px-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-slate-950 text-xs font-bold inline-flex items-center gap-1.5 shrink-0 cursor-pointer"
+              >
+                <span>Preparar Post e Ir para Sala de Disparo</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
             {/* Header + Product Selector */}
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -6198,7 +6456,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                   onClick={() => handleApplyPostToBot(fbWaShareCaption, `${effectiveSnippet}\n\n👇 Chame no WhatsApp ou veja os benefícios:\n${pkg.shortUrl}`)}
                   className="px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-slate-950 text-xs font-bold inline-flex items-center gap-1.5 shrink-0 cursor-pointer"
                 >
-                  <span>Usar no Disparador de Grupos</span>
+                  <span>Preparar Post e Ir para Sala de Disparo</span>
                   <ArrowRight className="w-3.5 h-3.5" />
                 </button>
               </div>

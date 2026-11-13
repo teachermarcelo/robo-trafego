@@ -180,7 +180,8 @@ export interface FacebookPostLog {
   postedAt: string;
   headline: string;
   status: 'success' | 'cooling_down' | 'error';
-  approvalStatus?: 'awaiting_admin' | 'published' | 'error';
+  approvalStatus?: 'awaiting_admin' | 'published' | 'pending_verification' | 'not_member' | 'error';
+  isVerifiedReal?: boolean;
   intervalWaitedSeconds: number;
   checkoutUrl: string;
   trackedToken?: string;

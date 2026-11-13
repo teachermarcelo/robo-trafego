@@ -409,6 +409,211 @@
       }
     }
 
+    // =====================================================================
+    // 1B. REAL GROUP POST ASSISTANT & MEMBERSHIP CHECKER (/groups/...)
+    // =====================================================================
+    function isUserNotMemberOfCurrentGroup() {
+      try {
+        const btns = Array.from(document.querySelectorAll('div[role="button"], button, a[role="button"]'));
+        for (const el of btns) {
+          const txt = ((el.innerText || el.getAttribute('aria-label') || '') + '').trim().toLowerCase();
+          if (txt === 'participar do grupo' || txt === 'join group' || txt === 'entrar no grupo') {
+            return true;
+          }
+        }
+      } catch (e) {}
+      return false;
+    }
+
+    function sendRealPostResultToPlatform(payload) {
+      try {
+        const bc = new BroadcastChannel('autoviral_bridge_channel');
+        bc.postMessage({
+          action: 'AUTOVIRAL_FB_POST_RESULT',
+          ...payload,
+          timestamp: new Date().toISOString()
+        });
+        setTimeout(() => bc.close(), 1000);
+      } catch (e) {}
+
+      if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
+        chrome.runtime.sendMessage({
+          action: 'AUTOVIRAL_FB_POST_RESULT',
+          ...payload,
+          timestamp: new Date().toISOString()
+        }, () => { void chrome.runtime.lastError; });
+      }
+    }
+
+    function initGroupPostAssistant() {
+      if (!window.location.pathname.includes('/groups/')) return;
+      if (!chrome.storage || !chrome.storage.local) return;
+
+      chrome.storage.local.get(['autoviral_pending_fb_post'], (res) => {
+        const pending = res.autoviral_pending_fb_post;
+        const notMember = isUserNotMemberOfCurrentGroup();
+        createFloatingWidget();
+        const badge = document.getElementById('autoviral-floating-badge');
+        if (!badge || document.getElementById('autoviral-post-assistant')) return;
+
+        const box = document.createElement('div');
+        box.id = 'autoviral-post-assistant';
+        box.style.cssText = 'border-top: 1px solid #334155; padding-top: 8px; margin-top: 4px; display: flex; flex-direction: column; gap: 6px;';
+
+        if (notMember) {
+          box.innerHTML = `
+            <div style="background: rgba(225,29,72,0.18); border: 1px solid #fb7185; color: #fecdd3; padding: 6px 8px; border-radius: 8px; font-size: 10px; line-height: 1.35;">
+              <strong>⚠️ Você ainda NÃO participa deste grupo!</strong><br/>
+              Clique no botão azul <strong>"Participar do grupo"</strong> acima primeiro.
+            </div>
+            <button id="autoviral-btn-report-not-member" style="background: #be123c; color: #fff; border: none; border-radius: 7px; padding: 6px 8px; font-size: 10px; font-weight: 700; cursor: pointer;">
+              Avisar Painel: Preciso Participar
+            </button>
+          `;
+          badge.appendChild(box);
+          if (pending) {
+            sendRealPostResultToPlatform({
+              logId: pending.logId,
+              groupId: pending.groupId,
+              groupUrl: window.location.href,
+              approvalStatus: 'not_member'
+            });
+          }
+          const btnNotMem = document.getElementById('autoviral-btn-report-not-member');
+          if (btnNotMem) {
+            btnNotMem.onclick = () => {
+              sendRealPostResultToPlatform({
+                logId: pending ? pending.logId : '',
+                groupId: pending ? pending.groupId : '',
+                groupUrl: window.location.href,
+                approvalStatus: 'not_member'
+              });
+              btnNotMem.textContent = '✓ Status "Preciso Participar" enviado!';
+            };
+          }
+          return;
+        }
+
+        if (pending && pending.fullText) {
+          box.innerHTML = `
+            <div style="font-size: 10px; color: #34d399; font-weight: 800;">
+              📋 Post Pronto Para Este Grupo:
+            </div>
+            <button id="autoviral-btn-copy-fill" style="background: #2563eb; color: #fff; border: none; border-radius: 7px; padding: 7px 8px; font-size: 10px; font-weight: 700; cursor: pointer;">
+              1. Copiar Texto &amp; Abrir Caixa de Post
+            </button>
+            <div style="display: flex; gap: 4px;">
+              <button id="autoviral-btn-confirm-pub" style="flex: 1; background: #10b981; color: #022c22; border: none; border-radius: 7px; padding: 6px; font-size: 10px; font-weight: 800; cursor: pointer;">
+                ✓ Postagem Feita
+              </button>
+              <button id="autoviral-btn-confirm-admin" style="flex: 1; background: #f59e0b; color: #1c1917; border: none; border-radius: 7px; padding: 6px; font-size: 10px; font-weight: 800; cursor: pointer;">
+                ⏳ Aguard. Admin
+              </button>
+            </div>
+            <div id="autoviral-post-assist-msg" style="font-size: 9px; color: #94a3b8;">
+              Cole (Ctrl+V) na caixa do grupo, anexe a imagem e confirme o resultado real acima.
+            </div>
+          `;
+          badge.appendChild(box);
+
+          const msgEl = document.getElementById('autoviral-post-assist-msg');
+          const btnFill = document.getElementById('autoviral-btn-copy-fill');
+          if (btnFill) {
+            btnFill.onclick = async () => {
+              try {
+                await navigator.clipboard.writeText(pending.fullText);
+              } catch (e) {}
+              // Try opening Facebook's "Escreva algo..." / "Write something..." composer
+              const composerTriggers = Array.from(document.querySelectorAll('div[role="button"], span'));
+              const trigger = composerTriggers.find((el) => {
+                const t = (el.innerText || '').trim().toLowerCase();
+                return t.includes('escreva algo') || t.includes('write something') || t.includes('criar publicação pública');
+              });
+              if (trigger) {
+                trigger.click();
+                setTimeout(() => {
+                  const textbox = document.querySelector('div[role="dialog"] div[role="textbox"][contenteditable="true"], div[role="textbox"][contenteditable="true"]');
+                  if (textbox) {
+                    textbox.focus();
+                    try {
+                      document.execCommand('insertText', false, pending.fullText);
+                    } catch (e) {}
+                  }
+                }, 900);
+              }
+              if (msgEl) {
+                msgEl.textContent = '✅ Texto copiado! Se não colou sozinho, aperte Ctrl+V no campo do grupo e clique Publicar.';
+                msgEl.style.color = '#34d399';
+              }
+            };
+          }
+
+          const btnPub = document.getElementById('autoviral-btn-confirm-pub');
+          if (btnPub) {
+            btnPub.onclick = () => {
+              sendRealPostResultToPlatform({
+                logId: pending.logId,
+                groupId: pending.groupId,
+                groupUrl: window.location.href,
+                approvalStatus: 'published'
+              });
+              chrome.storage.local.remove(['autoviral_pending_fb_post']);
+              if (msgEl) {
+                msgEl.textContent = '✅ Confirmado como POSTAGEM FEITA no AutoViral!';
+                msgEl.style.color = '#34d399';
+              }
+            };
+          }
+
+          const btnAdm = document.getElementById('autoviral-btn-confirm-admin');
+          if (btnAdm) {
+            btnAdm.onclick = () => {
+              sendRealPostResultToPlatform({
+                logId: pending.logId,
+                groupId: pending.groupId,
+                groupUrl: window.location.href,
+                approvalStatus: 'awaiting_admin'
+              });
+              chrome.storage.local.remove(['autoviral_pending_fb_post']);
+              if (msgEl) {
+                msgEl.textContent = '⏳ Confirmado como AGUARDANDO ADMIN no AutoViral!';
+                msgEl.style.color = '#fbbf24';
+              }
+            };
+          }
+
+          // Watch for Facebook admin approval toast automatically
+          let approvalNotified = false;
+          const approvalCheck = setInterval(() => {
+            if (approvalNotified) return;
+            const bodyTxt = (document.body ? document.body.innerText : '').toLowerCase();
+            if (
+              bodyTxt.includes('aguardando aprovação de um administrador') ||
+              bodyTxt.includes('pendente de aprovação do administrador') ||
+              bodyTxt.includes('pending admin approval') ||
+              bodyTxt.includes('sent for admin approval')
+            ) {
+              approvalNotified = true;
+              sendRealPostResultToPlatform({
+                logId: pending.logId,
+                groupId: pending.groupId,
+                groupUrl: window.location.href,
+                approvalStatus: 'awaiting_admin'
+              });
+              if (msgEl) {
+                msgEl.textContent = '⏳ Facebook informou aprovação pendente do admin — status atualizado no painel!';
+                msgEl.style.color = '#fbbf24';
+              }
+              clearInterval(approvalCheck);
+            }
+          }, 2500);
+          setTimeout(() => clearInterval(approvalCheck), 180000);
+        }
+      });
+    }
+
+    setTimeout(initGroupPostAssistant, 1800);
+
     // Message listener for popup
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (request.action === 'AUTOVIRAL_MAP_GROUPS' || request.action === 'AUTOVIRAL_GET_GROUPS') {
@@ -1150,8 +1355,29 @@
             timestamp: data.timestamp
           }
         }));
+      } else if (data.action === 'AUTOVIRAL_FB_POST_RESULT') {
+        window.dispatchEvent(new CustomEvent('autoviral_fb_post_result', {
+          detail: data
+        }));
       }
     };
+
+    // Listen for outgoing commands from the AutoViral web app to the Chrome Extension
+    window.addEventListener('message', (ev) => {
+      if (ev.source !== window || !ev.data) return;
+      if (ev.data.type === 'AUTOVIRAL_OPEN_GROUP_FOR_POST') {
+        if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
+          chrome.runtime.sendMessage({
+            action: 'AUTOVIRAL_OPEN_GROUP_FOR_POST',
+            logId: ev.data.logId,
+            groupId: ev.data.groupId,
+            groupUrl: ev.data.groupUrl,
+            groupName: ev.data.groupName,
+            fullText: ev.data.fullText
+          }, () => { void chrome.runtime.lastError; });
+        }
+      }
+    });
 
     // Listen via BroadcastChannel for real-time inter-tab sync
     try {
@@ -1167,7 +1393,8 @@
         message.action === 'AUTOVIRAL_IMPORT_GROUPS_FROM_EXTENSION' ||
         message.action === 'AUTOVIRAL_IMPORT_YOUTUBE_VIDEOS_FROM_EXTENSION' ||
         message.action === 'AUTOVIRAL_IMPORT_INSTAGRAM_ACCOUNTS' ||
-        message.action === 'AUTOVIRAL_INSTA_ACCOUNT_SYNC'
+        message.action === 'AUTOVIRAL_INSTA_ACCOUNT_SYNC' ||
+        message.action === 'AUTOVIRAL_FB_POST_RESULT'
       ) {
         forwardExtensionEvent(message);
         sendResponse({ received: true });

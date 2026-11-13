@@ -33,7 +33,9 @@ import {
   Hash,
   Compass,
   MessageSquare,
-  Heart
+  Heart,
+  Copy,
+  Download
 } from 'lucide-react';
 import { Campaign, InstagramStoryItem } from '../types';
 import { SecurityDefenseModal } from './SecurityDefenseModal';
@@ -768,16 +770,19 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
     setStoryQueue(updatedQueue);
     setDailyStoriesDispatched(prev => prev + 1);
     setActionsInCurrentCycle(prev => prev + 1);
-    setInstaSyncNotice(`✅ Story "${targetItem.title}" marcado como publicado em ${accountHandle}. Cliques reais serão contabilizados automaticamente pelo link /api/r!`);
-    setTimeout(() => setInstaSyncNotice(null), 5000);
+    setInstaSyncNotice(`✅ "${targetItem.title}" marcado na lista! Para gerar cliques reais, publique a imagem no Instagram de ${accountHandle} com o sticker de link (/api/r).`);
+    setTimeout(() => setInstaSyncNotice(null), 6000);
   };
 
-  // Quick manual post now (zero fake clicks/sales!)
+  // Quick manual checklist confirmation + clipboard copy of /api/r link
   const handlePostNow = (id: string) => {
     const idx = storyQueue.findIndex(s => s.id === id);
     if (idx === -1) return;
 
     const targetItem = storyQueue[idx];
+    try {
+      navigator.clipboard?.writeText(targetItem.stickerUrl);
+    } catch {}
     const nowTime = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     const updated = [...storyQueue];
     updated[idx] = {
@@ -791,8 +796,8 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
     setStoryQueue(updated);
     setDailyStoriesDispatched(prev => prev + 1);
     setActionsInCurrentCycle(prev => prev + 1);
-    setInstaSyncNotice(`✅ Story publicado em ${accountHandle}! Compartilhe o link rastreado /api/r para ver cliques reais.`);
-    setTimeout(() => setInstaSyncNotice(null), 5000);
+    setInstaSyncNotice(`📋 Link /api/r copiado e Story marcado como publicado no checklist! Cole na Figurinha de Link ao subir no Instagram de ${accountHandle}.`);
+    setTimeout(() => setInstaSyncNotice(null), 6000);
   };
 
   // Simulate Mapping from Open Instagram Web Tab
@@ -1139,12 +1144,12 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
               {isInstagramBotRunning ? (
                 <>
                   <Pause className="w-4 h-4" />
-                  Pausar Robô
+                  Pausar Fila Assistida
                 </>
               ) : (
                 <>
                   <Play className="w-4 h-4" />
-                  Iniciar Robô ({readyCount} na fila)
+                  Iniciar Fila Assistida ({readyCount})
                 </>
               )}
             </button>
@@ -1153,7 +1158,7 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
       </div>
 
       {/* 100% REAL Metrics Counters Grid (Zero Simulated Numbers) */}
-      <div className="space-y-2">
+      <div className="space-y-2.5">
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs px-1">
           <span className="text-slate-300 flex items-center gap-1.5 font-semibold">
             <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
@@ -1175,17 +1180,21 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
           </div>
         </div>
 
+        <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3 text-[11px] text-slate-300 leading-relaxed">
+          <strong className="text-white">Verificação de Eficiência:</strong> O navegador não publica Stories automaticamente dentro da sua conta do Instagram por segurança. O número em <strong className="text-cyan-300">Cliques Reais (/api/r)</strong> e <strong className="text-amber-300">Abriram o Checkout</strong> é 100% real — ele só sobe quando você baixa a imagem abaixo, posta o Story no Instagram com a <strong>Figurinha de Link (/api/r)</strong> copiada aqui e alguém clica nela.
+        </div>
+
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 tabular-nums">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
             <span className="text-slate-400 text-xs font-bold flex items-center gap-1.5">
               <Instagram className="w-4 h-4 text-purple-400" />
-              Stories Publicados
+              Stories Marcados (Checklist)
             </span>
             <div className="text-2xl font-black text-white mt-1">
-              {publishedCount} stories
+              {publishedCount} marcados
             </div>
             <div className="text-[11px] text-slate-400 mt-1">
-              Fila pronta: {readyCount} · Cota hoje: {dailyStoriesDispatched} / {dailyQuotaLimit}
+              Fila pronta: {readyCount} · Requer postagem no IG com link
             </div>
           </div>
 
@@ -1555,11 +1564,11 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
                     {item.status === 'ready' && (
                       <button
                         onClick={() => handlePostNow(item.id)}
-                        className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] font-bold transition flex items-center gap-1 cursor-pointer flex-shrink-0"
-                        title="Postar agora de forma imediata"
+                        className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-slate-950 rounded-lg text-[10px] font-bold transition flex items-center gap-1 cursor-pointer flex-shrink-0"
+                        title="Copiar link /api/r e marcar este Story como publicado no Instagram"
                       >
                         <Send className="w-3 h-3" />
-                        Postar Agora
+                        Marcar Publicado
                       </button>
                     )}
                   </div>
@@ -1577,6 +1586,43 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
                       className="text-[10px] text-blue-600 hover:text-blue-800 underline ml-2 flex-shrink-0"
                     >
                       Testar Link
+                    </a>
+                  </div>
+
+                  {/* Real Assisted Publish Tools: Copy /api/r Link + Download Image + Open Instagram */}
+                  <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard?.writeText(item.stickerUrl);
+                        setCopiedCampLinkId(item.id);
+                        setTimeout(() => setCopiedCampLinkId(null), 2000);
+                      }}
+                      className="px-2.5 py-1 bg-cyan-950 hover:bg-cyan-900 text-cyan-200 border border-cyan-800 rounded text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      {copiedCampLinkId === item.id ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                      <span>{copiedCampLinkId === item.id ? 'Link Copiado!' : 'Copiar Link (/api/r)'}</span>
+                    </button>
+
+                    <a
+                      href={item.mediaUrl}
+                      download={`story-${item.id}.png`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 rounded text-[11px] font-semibold inline-flex items-center gap-1"
+                    >
+                      <Download className="w-3 h-3" />
+                      <span>Baixar Imagem</span>
+                    </a>
+
+                    <a
+                      href="https://www.instagram.com/"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-2.5 py-1 bg-purple-950 hover:bg-purple-900 text-purple-200 border border-purple-700 rounded text-[11px] font-semibold inline-flex items-center gap-1"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      <span>Abrir Instagram</span>
                     </a>
                   </div>
 

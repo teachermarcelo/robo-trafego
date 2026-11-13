@@ -47,6 +47,11 @@ import {
   saveCustomerLeadToFirebase,
   deleteCustomerLeadFromFirebase,
   saveWorkspaceSyncToFirebase,
+  subscribeWorkspaceSync,
+  pullFullCloudSnapshotFromFirebase,
+  fetchRecoverableArchivedCampaigns,
+  restoreArchivedCampaignToFirebase,
+  WorkspaceSyncData,
 } from './lib/firebase';
 
 export default function App() {
@@ -68,24 +73,37 @@ export default function App() {
     try {
       const savedDeleted = localStorage.getItem('autoviral_deleted_campaign_ids');
       const delSet = savedDeleted ? new Set(JSON.parse(savedDeleted)) : new Set(['camp-1', 'camp-2', 'camp-3']);
-      const saved = localStorage.getItem('autoviral_campaigns');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const nonDeleted = parsed.filter((c: any) => !delSet.has(c.id));
-          const existingIds = new Set(nonDeleted.map((c: any) => c.id));
-          const missingDefaults = INITIAL_CAMPAIGNS.filter(
-            (d) => !existingIds.has(d.id) && !delSet.has(d.id)
-          );
-          const merged = [...nonDeleted, ...missingDefaults];
-          return merged.map((c) => {
-            // Correct tarefinhas price if it had legacy 37 or 3.99
-            if (c.id === 'camp-tarefinhas-autismo' && (c.price === 37 || c.price === 3.99 || !c.price)) {
-              return { ...c, price: 9.90, oldPrice: 47.0 };
-            }
-            return c;
-          });
-        }
+      const mergedMap = new Map<string, Campaign>();
+
+      const pushList = (raw: string | null) => {
+        if (!raw) return;
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            parsed.forEach((c: any) => {
+              if (c?.id && !delSet.has(c.id) && !mergedMap.has(c.id)) {
+                mergedMap.set(c.id, c);
+              }
+            });
+          }
+        } catch {}
+      };
+
+      pushList(localStorage.getItem('autoviral_campaigns'));
+      pushList(localStorage.getItem('autoviral_managed_campaigns_v5'));
+
+      if (mergedMap.size > 0) {
+        INITIAL_CAMPAIGNS.forEach((d) => {
+          if (!mergedMap.has(d.id) && !delSet.has(d.id)) {
+            mergedMap.set(d.id, d);
+          }
+        });
+        return Array.from(mergedMap.values()).map((c) => {
+          if (c.id === 'camp-tarefinhas-autismo' && (c.price === 37 || c.price === 3.99 || !c.price)) {
+            return { ...c, price: 9.90, oldPrice: 47.0 };
+          }
+          return c;
+        });
       }
       return INITIAL_CAMPAIGNS.filter((c) => !delSet.has(c.id));
     } catch {
@@ -112,6 +130,10 @@ export default function App() {
   const [isVercelModalOpen, setIsVercelModalOpen] = useState(false);
   const [isPWAInstallModalOpen, setIsPWAInstallModalOpen] = useState(false);
   const [bridgeModalCampaign, setBridgeModalCampaign] = useState<Campaign | null>(null);
+  const [firebaseSyncStatus, setFirebaseSyncStatus] = useState<'connecting' | 'synced' | 'error'>('connecting');
+  const [cloudCampaignsCount, setCloudCampaignsCount] = useState<number>(0);
+  const [isSyncingCloud, setIsSyncingCloud] = useState<boolean>(false);
+  const [recoverableCampaigns, setRecoverableCampaigns] = useState<Campaign[]>([]);
   const [isPublicLeadMode, setIsPublicLeadMode] = useState<boolean>(() => {
     try {
       const search = window.location.search;
@@ -163,7 +185,7 @@ export default function App() {
     }
   }, [campaigns]);
 
-  // 1. Subscribe to Firebase deleted campaign IDs (ensures fictitious campaigns stay deleted on all devices)
+  // 1. Subscribe to Firebase deleted campaign IDs (ensures dummy campaigns stay deleted on all devices)
   useEffect(() => {
     const unsubDeleted = subscribeDeletedCampaignIds((ids) => {
       if (ids && ids.length > 0) {
@@ -180,14 +202,19 @@ export default function App() {
   useEffect(() => {
     const unsubCampaigns = subscribeFirebaseCampaigns(
       (cloudCampaigns) => {
+        setFirebaseSyncStatus('synced');
+        setCloudCampaignsCount(cloudCampaigns?.length || 0);
         if (cloudCampaigns && cloudCampaigns.length > 0) {
-          const savedDeleted = localStorage.getItem('autoviral_deleted_campaign_ids');
-          const delSet = savedDeleted ? new Set(JSON.parse(savedDeleted)) : deletedCampaignIds;
+          let delSet = deletedCampaignIds;
+          try {
+            const savedDeleted = localStorage.getItem('autoviral_deleted_campaign_ids');
+            if (savedDeleted) delSet = new Set(JSON.parse(savedDeleted));
+          } catch {}
           const valid = cloudCampaigns.filter((c) => !delSet.has(c.id));
           if (valid.length > 0) {
             setCampaigns((prev) => {
               const cloudIds = new Set(valid.map((c) => c.id));
-              // Preserve any newly created local campaigns not yet in cloud
+              // Preserve any newly created local campaigns not yet in cloud and push them up
               const localUnsynced = prev.filter((p) => !cloudIds.has(p.id) && !delSet.has(p.id));
               localUnsynced.forEach((lu) => {
                 saveCampaignToFirebase(lu).catch(console.warn);
@@ -201,10 +228,89 @@ export default function App() {
           }
         }
       },
-      (err) => console.warn('Firebase campaigns sync notice:', err)
+      (err) => {
+        console.warn('Firebase campaigns sync notice:', err);
+        setFirebaseSyncStatus('error');
+      }
     );
     return () => unsubCampaigns();
   }, [deletedCampaignIds]);
+
+  // 2b. Root-level Firebase Workspace Sync listener (guarantees mobile PWA receives groups/audiences/stories even on Dashboard)
+  useEffect(() => {
+    const mergeWorkspaceIntoLocalStorage = (cloud: WorkspaceSyncData) => {
+      if (!cloud || typeof cloud !== 'object') return;
+      const safeRead = (k: string) => {
+        try {
+          const r = localStorage.getItem(k);
+          return r ? JSON.parse(r) : null;
+        } catch {
+          return null;
+        }
+      };
+      const safeWrite = (k: string, val: any) => {
+        try {
+          localStorage.setItem(k, JSON.stringify(val));
+        } catch {}
+      };
+
+      if (cloud.savedCopiesMap && typeof cloud.savedCopiesMap === 'object') {
+        const prev = safeRead('autoviral_saved_copies_v1') || {};
+        const next = { ...prev };
+        Object.entries(cloud.savedCopiesMap).forEach(([id, entry]: [string, any]) => {
+          if (!entry) return;
+          if (!next[id] || (entry.savedAt && (!next[id].savedAt || entry.savedAt > next[id].savedAt))) {
+            next[id] = entry;
+          }
+        });
+        safeWrite('autoviral_saved_copies_v1', next);
+      }
+
+      const mergeArrayByKey = (keys: string[], incoming: any[] | undefined, idKey: string) => {
+        if (!Array.isArray(incoming) || incoming.length === 0) return;
+        const existing: any[] = safeRead(keys[0]) || [];
+        const seen = new Set(existing.map((item) => String(item?.[idKey] || '').toLowerCase()).filter(Boolean));
+        const fresh = incoming.filter((item) => {
+          const k = String(item?.[idKey] || '').toLowerCase();
+          if (!k || seen.has(k)) return false;
+          seen.add(k);
+          return true;
+        });
+        if (fresh.length > 0) {
+          const combined = [...fresh, ...existing];
+          keys.forEach((k) => safeWrite(k, combined));
+        }
+      };
+
+      mergeArrayByKey(['autoviral_fb_audiences_v4', 'autoviral_fb_audiences_v3'], cloud.audiences, 'id');
+      mergeArrayByKey(['autoviral_fb_mapped_groups_v5_real', 'autoviral_fb_mapped_groups_v3'], cloud.mappedGroups, 'url');
+      mergeArrayByKey(['autoviral_yt_videos_v2'], cloud.youtubeVideos, 'url');
+      mergeArrayByKey(['autoviral_pinterest_pins_v1'], cloud.pinterestPins, 'id');
+      mergeArrayByKey(['autoviral_insta_campaigns_v1'], cloud.instaCampaigns, 'id');
+      mergeArrayByKey(['autoviral_insta_story_queue', 'autoviral_insta_story_queue_v2'], cloud.storyQueue, 'id');
+      mergeArrayByKey(['autoviral_insta_mapped_targets_v2'], cloud.mappedInstaTargets, 'handle');
+      mergeArrayByKey(['autoviral_custom_copy_presets_v1'], cloud.customCopyPresets, 'id');
+
+      window.dispatchEvent(new CustomEvent('autoviral_workspace_synced', { detail: cloud }));
+    };
+
+    const unsubWs = subscribeWorkspaceSync(mergeWorkspaceIntoLocalStorage);
+    return () => unsubWs();
+  }, []);
+
+  // 2c. Discover archived/previous campaigns in Firebase settings so user can restore in 1 click if needed
+  useEffect(() => {
+    let active = true;
+    const activeIds = campaigns.map((c) => c.id);
+    fetchRecoverableArchivedCampaigns(activeIds)
+      .then((found) => {
+        if (active) setRecoverableCampaigns(found);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [campaigns]);
 
   // 3. Real-time Firebase Firestore tracking events listener + Server /api/tracking/events sync
   useEffect(() => {
@@ -276,49 +382,36 @@ export default function App() {
     return () => unsubCustomers();
   }, []);
 
-  // 5. Secondary fallback fetch from server backend and Supabase
+  // 5. Secondary fallback fetch from server backend and Supabase (non-destructive functional merge)
   useEffect(() => {
     let isMounted = true;
 
     const syncAllCampaigns = async () => {
-      let merged: Campaign[] = [...campaigns];
-      const savedDeleted = localStorage.getItem('autoviral_deleted_campaign_ids');
-      const delSet = savedDeleted ? new Set(JSON.parse(savedDeleted)) : deletedCampaignIds;
+      const incomingFromSecondary: Campaign[] = [];
+      let delSet = deletedCampaignIds;
+      try {
+        const savedDeleted = localStorage.getItem('autoviral_deleted_campaign_ids');
+        if (savedDeleted) delSet = new Set(JSON.parse(savedDeleted));
+      } catch {}
 
-      // Fetch from server endpoint
       try {
         const res = await fetch('/api/campaigns');
         if (res.ok) {
           const json = await res.json();
           if (json.campaigns && Array.isArray(json.campaigns)) {
             json.campaigns.forEach((sc: Campaign) => {
-              if (delSet.has(sc.id)) return;
-              const idx = merged.findIndex((m) => m.id === sc.id);
-              if (idx >= 0) {
-                merged[idx] = { ...merged[idx], ...sc };
-              } else {
-                merged.unshift(sc);
-              }
+              if (!delSet.has(sc.id)) incomingFromSecondary.push(sc);
             });
           }
         }
-      } catch (err) {
-        // Backend server offline/swallowed on Vercel
-      }
+      } catch {}
 
-      // Fetch from Supabase if configured
       try {
         if (isSupabaseConnected()) {
           const supaCampaigns = await fetchSupabaseCampaigns();
           if (supaCampaigns && supaCampaigns.length > 0) {
             supaCampaigns.forEach((sc) => {
-              if (delSet.has(sc.id)) return;
-              const idx = merged.findIndex((m) => m.id === sc.id);
-              if (idx >= 0) {
-                merged[idx] = { ...merged[idx], ...sc };
-              } else {
-                merged.unshift(sc);
-              }
+              if (!delSet.has(sc.id)) incomingFromSecondary.push(sc);
             });
           }
         }
@@ -326,8 +419,13 @@ export default function App() {
         console.warn('Supabase sync notice:', err);
       }
 
-      if (isMounted && merged.length > 0) {
-        setCampaigns(merged);
+      if (isMounted && incomingFromSecondary.length > 0) {
+        setCampaigns((prev) => {
+          const existingIds = new Set(prev.map((p) => p.id));
+          const onlyMissing = incomingFromSecondary.filter((sc) => !existingIds.has(sc.id));
+          if (onlyMissing.length === 0) return prev;
+          return [...prev, ...onlyMissing];
+        });
       }
     };
 
@@ -1021,6 +1119,99 @@ export default function App() {
     e.target.value = '';
   };
 
+  // Manual 2-way Cloud Sync (Desktop <-> Mobile)
+  const handleForceCloudSync = async () => {
+    setIsSyncingCloud(true);
+    try {
+      const safeParse = (k: string) => {
+        try {
+          const raw = localStorage.getItem(k);
+          return raw ? JSON.parse(raw) : undefined;
+        } catch {
+          return undefined;
+        }
+      };
+
+      // 1. Push all local non-deleted campaigns to Firebase
+      for (const camp of campaigns) {
+        if (!deletedCampaignIds.has(camp.id)) {
+          await saveCampaignToFirebase(camp).catch(console.warn);
+        }
+      }
+
+      // 2. Push local workspace state to Firebase
+      await saveWorkspaceSyncToFirebase({
+        savedCopiesMap: safeParse('autoviral_saved_copies_v1'),
+        customCopyPresets: safeParse('autoviral_custom_copy_presets_v1'),
+        audiences: safeParse('autoviral_fb_audiences_v4') || safeParse('autoviral_fb_audiences_v3'),
+        youtubeVideos: safeParse('autoviral_yt_videos_v2'),
+        pinterestPins: safeParse('autoviral_pinterest_pins_v1'),
+        instaCampaigns: safeParse('autoviral_insta_campaigns_v1'),
+        storyQueue: safeParse('autoviral_insta_story_queue') || safeParse('autoviral_insta_story_queue_v2'),
+        mappedInstaTargets: safeParse('autoviral_insta_mapped_targets_v2'),
+        mappedGroups: safeParse('autoviral_fb_mapped_groups_v5_real') || safeParse('autoviral_fb_mapped_groups_v3'),
+      });
+
+      // 3. Pull fresh snapshot directly from Firestore server
+      const snap = await pullFullCloudSnapshotFromFirebase();
+      const cloudDelSet = new Set(snap.deletedIds);
+      setDeletedCampaignIds(cloudDelSet);
+      try {
+        localStorage.setItem('autoviral_deleted_campaign_ids', JSON.stringify(snap.deletedIds));
+      } catch {}
+
+      const validCloud = snap.campaigns.filter((c) => !cloudDelSet.has(c.id));
+      setCloudCampaignsCount(validCloud.length);
+      setFirebaseSyncStatus('synced');
+
+      if (validCloud.length > 0) {
+        setCampaigns((prev) => {
+          const cloudIds = new Set(validCloud.map((c) => c.id));
+          const localExtra = prev.filter((p) => !cloudIds.has(p.id) && !cloudDelSet.has(p.id));
+          const merged = [...validCloud, ...localExtra];
+          try {
+            localStorage.setItem('autoviral_campaigns', JSON.stringify(merged));
+          } catch {}
+          return merged;
+        });
+      }
+
+      if (snap.workspace) {
+        window.dispatchEvent(new CustomEvent('autoviral_workspace_synced', { detail: snap.workspace }));
+      }
+    } catch (err) {
+      console.warn('Manual cloud sync error:', err);
+      setFirebaseSyncStatus('error');
+    } finally {
+      setIsSyncingCloud(false);
+    }
+  };
+
+  // Restore single or all archived cloud campaigns
+  const handleRestoreArchivedCampaign = async (camp: Campaign) => {
+    setDeletedCampaignIds((prev) => {
+      const next = new Set(prev);
+      next.delete(camp.id);
+      try {
+        localStorage.setItem('autoviral_deleted_campaign_ids', JSON.stringify(Array.from(next)));
+      } catch {}
+      return next;
+    });
+    setCampaigns((prev) => {
+      if (prev.some((p) => p.id === camp.id)) return prev;
+      return [camp, ...prev];
+    });
+    setRecoverableCampaigns((prev) => prev.filter((r) => r.id !== camp.id));
+    await restoreArchivedCampaignToFirebase(camp).catch(console.warn);
+  };
+
+  const handleRestoreAllArchivedCampaigns = async () => {
+    const toRestore = [...recoverableCampaigns];
+    for (const camp of toRestore) {
+      await handleRestoreArchivedCampaign(camp);
+    }
+  };
+
   const unreadNotificationsCount = notifications.filter((n) => !n.read).length;
 
   if (isPublicLeadMode) {
@@ -1128,6 +1319,10 @@ export default function App() {
         onOpenVercel={() => setIsVercelModalOpen(true)}
         onResetAllMetrics={handleResetToRealMode}
         onOpenPWAInstall={() => setIsPWAInstallModalOpen(true)}
+        firebaseSyncStatus={firebaseSyncStatus}
+        cloudCampaignsCount={cloudCampaignsCount || campaigns.length}
+        isSyncingCloud={isSyncingCloud}
+        onForceCloudSync={handleForceCloudSync}
       />
 
 
@@ -1265,6 +1460,11 @@ export default function App() {
             onPreviewBridge={(c) => setBridgeModalCampaign(c)}
             onDeleteCampaign={handleDeleteCampaign}
             onResetAllMetrics={handleResetToRealMode}
+            recoverableCampaigns={recoverableCampaigns}
+            onRestoreArchivedCampaign={handleRestoreArchivedCampaign}
+            onRestoreAllArchivedCampaigns={handleRestoreAllArchivedCampaigns}
+            onForceCloudSync={handleForceCloudSync}
+            isSyncingCloud={isSyncingCloud}
             onNavigateToDispatches={(camp) => {
               try {
                 localStorage.setItem('autoviral_selected_product_id', camp.id);
@@ -1406,6 +1606,10 @@ export default function App() {
       <PWAInstallModal
         isOpen={isPWAInstallModalOpen}
         onClose={() => setIsPWAInstallModalOpen(false)}
+        firebaseSyncStatus={firebaseSyncStatus}
+        cloudCampaignsCount={cloudCampaignsCount || campaigns.length}
+        isSyncingCloud={isSyncingCloud}
+        onForceCloudSync={handleForceCloudSync}
       />
 
       <OfflineIndicator />

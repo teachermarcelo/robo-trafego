@@ -7,30 +7,38 @@ service cloud.firestore {
     }
 
     function isValidId(id) {
-      return id is string && id.size() <= 128;
+      return id is string && id.size() > 0 && id.size() <= 128;
     }
 
-    // Campaigns collection synced across browsers
+    // Health check document used on app boot
+    match /test/connection {
+      allow get: if true;
+    }
+
+    // Campaigns collection synced across browsers and mobile PWA
     match /autoviral_campaigns/{campaignId} {
-      allow read: if isValidId(campaignId);
+      allow get: if isValidId(campaignId);
+      allow list: if true;
       allow create, update: if isValidId(campaignId)
         && request.resource.data.id is string
         && (
-          (request.resource.data.title is string && request.resource.data.title.size() > 0) ||
-          (request.resource.data.name is string && request.resource.data.name.size() > 0)
+          (request.resource.data.title is string && request.resource.data.title.size() > 0 && request.resource.data.title.size() <= 500) ||
+          (request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 500)
         );
       allow delete: if isValidId(campaignId);
     }
 
-    // Landing page settings and cross-browser metadata
+    // Landing page settings, workspace sync, and cross-browser metadata
     match /autoviral_settings/{settingId} {
-      allow read: if isValidId(settingId);
+      allow get: if isValidId(settingId);
+      allow list: if true;
       allow create, update, delete: if isValidId(settingId);
     }
 
     // Public analytics and tracking events (views, clicks, conversions)
     match /autoviral_tracking_events/{eventId} {
-      allow read: if isValidId(eventId);
+      allow get: if isValidId(eventId);
+      allow list: if true;
       allow create: if isValidId(eventId)
         && request.resource.data.campaignId is string;
       allow update, delete: if isValidId(eventId);
@@ -38,14 +46,16 @@ service cloud.firestore {
 
     // Mined Instagram / social profiles
     match /autoviral_profiles/{profileId} {
-      allow read: if isValidId(profileId);
+      allow get: if isValidId(profileId);
+      allow list: if true;
       allow create, update, delete: if isValidId(profileId)
         && request.resource.data.handle is string;
     }
 
-    // Customers and leads with WhatsApp and Hotmart purchase details
+    // Customers and leads with WhatsApp and purchase details
     match /autoviral_customers/{customerId} {
-      allow read: if isValidId(customerId);
+      allow get: if isValidId(customerId);
+      allow list: if true;
       allow create, update, delete: if isValidId(customerId)
         && request.resource.data.name is string;
     }

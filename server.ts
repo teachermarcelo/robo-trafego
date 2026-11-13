@@ -126,6 +126,25 @@ const DEFAULT_SERVER_CAMPAIGNS: ServerCampaign[] = [
     conversions: 0,
     revenue: 0.0,
   },
+  {
+    id: 'camp-ecom-club',
+    title: 'ecom club - Loja Profissional Pronta',
+    niche: 'renda_extra',
+    nicheLabel: 'E-commerce & Loja Pronta',
+    targetAudience: 'Empreendedores e iniciantes buscando loja virtual validada sem estoque e renda na internet',
+    painPointTargeted: 'Dificuldade de configurar loja do zero, encontrar produtos que vendem e conseguir fornecedores rápidos',
+    checkoutUrl: 'https://kiwify.app/iO0cHVz?afid=g4LOi2IE',
+    whatsappNumber: '5541998778348',
+    price: 37.0,
+    status: 'active',
+    createdAt: new Date().toISOString(),
+    antiBanOrganicMode: true,
+    platforms: ['instagram', 'tiktok', 'whatsapp', 'facebook', 'pinterest'],
+    impressions: 0,
+    clicks: 0,
+    conversions: 0,
+    revenue: 0.0,
+  },
 ];
 
 function loadCampaignsFromDisk(): ServerCampaign[] {

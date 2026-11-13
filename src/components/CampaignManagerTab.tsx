@@ -17,7 +17,7 @@ import {
   Edit3,
   Save,
   X,
-  Eye,
+  RefreshCw,
 } from 'lucide-react';
 import { Campaign, NicheType } from '../types';
 import { getCampaignLandingUrl } from '../utils/campaignSlug';
@@ -32,6 +32,11 @@ interface CampaignManagerTabProps {
   onDeleteCampaign?: (id: string) => void;
   onResetAllMetrics?: () => void;
   onNavigateToDispatches?: (campaign: Campaign) => void;
+  recoverableCampaigns?: Campaign[];
+  onRestoreArchivedCampaign?: (campaign: Campaign) => Promise<void> | void;
+  onRestoreAllArchivedCampaigns?: () => Promise<void> | void;
+  onForceCloudSync?: () => Promise<void> | void;
+  isSyncingCloud?: boolean;
 }
 
 export const CampaignManagerTab: React.FC<CampaignManagerTabProps> = ({
@@ -43,6 +48,11 @@ export const CampaignManagerTab: React.FC<CampaignManagerTabProps> = ({
   onDeleteCampaign,
   onResetAllMetrics,
   onNavigateToDispatches,
+  recoverableCampaigns = [],
+  onRestoreArchivedCampaign,
+  onRestoreAllArchivedCampaigns,
+  onForceCloudSync,
+  isSyncingCloud = false,
 }) => {
   const [isCreating, setIsCreating] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -171,6 +181,18 @@ export const CampaignManagerTab: React.FC<CampaignManagerTabProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {onForceCloudSync && (
+              <button
+                onClick={() => onForceCloudSync()}
+                disabled={isSyncingCloud}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-indigo-950/70 hover:bg-indigo-900/80 text-indigo-300 border border-indigo-700/60 transition cursor-pointer"
+                title="Sincronizar campanhas entre Computador e Celular na Nuvem Firebase"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isSyncingCloud ? 'animate-spin' : ''}`} />
+                <span>{isSyncingCloud ? 'Sincronizando...' : 'Sincronizar Nuvem (PC ↔ Celular)'}</span>
+              </button>
+            )}
+
             {onResetAllMetrics && (
               <button
                 onClick={onResetAllMetrics}
@@ -192,6 +214,51 @@ export const CampaignManagerTab: React.FC<CampaignManagerTabProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Archived/Previous Cloud Campaigns Recovery Banner */}
+      {recoverableCampaigns.length > 0 && (
+        <div className="bg-amber-950/30 border border-amber-500/40 rounded-2xl p-4 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h3 className="text-xs font-extrabold text-amber-300 uppercase tracking-wide">
+                🗂️ Campanhas Anteriores Encontradas na Nuvem ({recoverableCampaigns.length})
+              </h3>
+              <p className="text-[11px] text-slate-300 mt-0.5">
+                Encontramos páginas/ofertas anteriores salvas no Firebase que estão arquivadas. Clique para restaurar com 1 toque sem perder nada:
+              </p>
+            </div>
+            {onRestoreAllArchivedCampaigns && (
+              <button
+                type="button"
+                onClick={() => onRestoreAllArchivedCampaigns()}
+                className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition cursor-pointer shrink-0"
+              >
+                Restaurar Todas ({recoverableCampaigns.length})
+              </button>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {recoverableCampaigns.map((rc) => (
+              <div
+                key={rc.id}
+                className="flex items-center gap-2 bg-slate-900/90 border border-slate-700 rounded-xl px-3 py-1.5 text-xs"
+              >
+                <span className="text-white font-semibold">{rc.title}</span>
+                <span className="text-emerald-400 font-bold">R$ {Number(rc.price || 0).toFixed(2).replace('.', ',')}</span>
+                {onRestoreArchivedCampaign && (
+                  <button
+                    type="button"
+                    onClick={() => onRestoreArchivedCampaign(rc)}
+                    className="ml-1 px-2 py-0.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] cursor-pointer"
+                  >
+                    Restaurar
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Modal / Form Create */}
       {isCreating && (

@@ -5,14 +5,13 @@ import {
   QrCode,
   CheckCircle2,
   Share2,
-  ExternalLink,
   ShieldCheck,
   Copy,
   X,
-  Zap,
   Sparkles,
   Layers,
-  ArrowRight
+  RefreshCw,
+  AlertTriangle
 } from 'lucide-react';
 import JSZip from 'jszip';
 import { usePWAInstall } from '../hooks/usePWAInstall';
@@ -20,17 +19,33 @@ import { usePWAInstall } from '../hooks/usePWAInstall';
 interface PWAInstallModalProps {
   isOpen: boolean;
   onClose: () => void;
+  firebaseSyncStatus?: 'connecting' | 'synced' | 'error';
+  cloudCampaignsCount?: number;
+  isSyncingCloud?: boolean;
+  onForceCloudSync?: () => Promise<void> | void;
 }
 
-export const PWAInstallModal: React.FC<PWAInstallModalProps> = ({ isOpen, onClose }) => {
-  const { isInstallable, isInstalled, isIOS, isAndroid, install } = usePWAInstall();
+const PUBLIC_SHARED_APP_URL = 'https://ais-pre-fdvdpr73jbu2hzpbbibxp5-395073471759.us-west2.run.app';
+
+export const PWAInstallModal: React.FC<PWAInstallModalProps> = ({
+  isOpen,
+  onClose,
+  firebaseSyncStatus = 'synced',
+  cloudCampaignsCount = 0,
+  isSyncingCloud = false,
+  onForceCloudSync,
+}) => {
+  const { isInstallable, isInstalled, install } = usePWAInstall();
   const [activeTab, setActiveTab] = useState<'android' | 'ios' | 'apk_package' | 'qrcode'>('android');
   const [copiedLink, setCopiedLink] = useState(false);
   const [isGeneratingApkZip, setIsGeneratingApkZip] = useState(false);
+  const [statusNotice, setStatusNotice] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
-  const appUrl = window.location.origin;
+  const currentOrigin = typeof window !== 'undefined' ? window.location.origin : PUBLIC_SHARED_APP_URL;
+  // Never hand out temporary ais-dev sandbox URL to mobile devices (always use public production origin)
+  const appUrl = currentOrigin.includes('ais-dev-') ? PUBLIC_SHARED_APP_URL : currentOrigin;
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(appUrl);
@@ -41,9 +56,15 @@ export const PWAInstallModal: React.FC<PWAInstallModalProps> = ({ isOpen, onClos
   const handleTriggerInstall = async () => {
     const success = await install();
     if (success) {
-      alert('🎉 AutoViral AI instalado com sucesso no seu dispositivo!');
-      onClose();
+      setStatusNotice('🎉 AutoViral AI instalado com sucesso no seu dispositivo!');
     }
+  };
+
+  const handleManualSyncClick = async () => {
+    if (!onForceCloudSync) return;
+    await onForceCloudSync();
+    setStatusNotice(`✅ Sincronização PC ↔ Celular concluída! (${cloudCampaignsCount} campanhas na Nuvem Firebase)`);
+    setTimeout(() => setStatusNotice(null), 5000);
   };
 
   // Generate and download Android APK Project Package (Capacitor/Cordova)
@@ -157,7 +178,7 @@ echo "=== APK gerado com sucesso em android/app/build/outputs/apk/debug/app-debu
       URL.revokeObjectURL(url);
     } catch (err) {
       console.error(err);
-      alert('Erro ao gerar o pacote APK.');
+      setStatusNotice('⚠️ Erro ao gerar o pacote APK. Tente novamente.');
     } finally {
       setIsGeneratingApkZip(false);
     }
@@ -246,6 +267,51 @@ echo "=== APK gerado com sucesso em android/app/build/outputs/apk/debug/app-debu
 
         {/* Modal Content */}
         <div className="p-6 overflow-y-auto space-y-5 flex-1">
+          {/* Cloud Sync Banner (PC <-> Mobile) */}
+          <div className="p-4 rounded-2xl bg-slate-950 border border-indigo-500/40 space-y-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span
+                  className={`w-2.5 h-2.5 rounded-full ${
+                    firebaseSyncStatus === 'error'
+                      ? 'bg-rose-400'
+                      : firebaseSyncStatus === 'synced'
+                      ? 'bg-emerald-400 animate-pulse'
+                      : 'bg-amber-400 animate-ping'
+                  }`}
+                />
+                <strong className="text-xs text-white">
+                  Sincronia em Tempo Real (PC ↔ Celular) • {cloudCampaignsCount} campanhas na Nuvem
+                </strong>
+              </div>
+              {onForceCloudSync && (
+                <button
+                  type="button"
+                  onClick={handleManualSyncClick}
+                  disabled={isSyncingCloud}
+                  className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-60"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncingCloud ? 'animate-spin' : ''}`} />
+                  <span>{isSyncingCloud ? 'Sincronizando...' : 'Sincronizar Agora'}</span>
+                </button>
+              )}
+            </div>
+            <p className="text-[11px] text-slate-300 leading-relaxed">
+              Para o app no celular mostrar exatamente os mesmos dados do computador em tempo real, instale ou abra o app pelo link de produção abaixo (mesma nuvem Firebase). Se você já tinha instalado uma versão antiga antes desta atualização, abra o link abaixo no Chrome/Safari do celular para atualizar automaticamente.
+            </p>
+            {isInstalled && (
+              <p className="text-[11px] text-emerald-300 font-semibold">
+                ✅ Você já está usando o aplicativo instalado no dispositivo.
+              </p>
+            )}
+            {statusNotice && (
+              <div className="p-2.5 rounded-xl bg-emerald-950/60 border border-emerald-500/40 text-xs font-semibold text-emerald-300 flex items-center gap-2">
+                {statusNotice.startsWith('⚠️') ? <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" /> : <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />}
+                <span>{statusNotice}</span>
+              </div>
+            )}
+          </div>
+
           {/* TAB 1: ANDROID */}
           {activeTab === 'android' && (
             <div className="space-y-4">

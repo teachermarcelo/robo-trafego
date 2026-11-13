@@ -31,6 +31,10 @@ interface HeaderProps {
   onOpenVercel?: () => void;
   onResetAllMetrics?: () => void;
   onOpenPWAInstall?: () => void;
+  firebaseSyncStatus?: 'connecting' | 'synced' | 'error';
+  cloudCampaignsCount?: number;
+  isSyncingCloud?: boolean;
+  onForceCloudSync?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -46,6 +50,10 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenVercel,
   onResetAllMetrics,
   onOpenPWAInstall,
+  firebaseSyncStatus = 'synced',
+  cloudCampaignsCount,
+  isSyncingCloud = false,
+  onForceCloudSync,
 }) => {
   const tabs = [
     { id: 'dashboard', label: 'Dashboard & Métricas', icon: TrendingUp },
@@ -165,10 +173,38 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           )}
 
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs border bg-emerald-950/70 text-emerald-300 border-emerald-700/60 shadow-sm" title="Google Cloud Firebase Firestore: Sincronização em tempo real ativa em todos os computadores, celulares e navegadores">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="font-semibold tracking-wide">Nuvem Firebase: Sincronizado</span>
-          </div>
+          <button
+            type="button"
+            onClick={() => onForceCloudSync?.()}
+            disabled={isSyncingCloud}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs border shadow-sm transition cursor-pointer ${
+              firebaseSyncStatus === 'error'
+                ? 'bg-rose-950/70 text-rose-300 border-rose-700/60 hover:bg-rose-900/60'
+                : firebaseSyncStatus === 'connecting' || isSyncingCloud
+                ? 'bg-amber-950/70 text-amber-300 border-amber-700/60 hover:bg-amber-900/60'
+                : 'bg-emerald-950/70 text-emerald-300 border-emerald-700/60 hover:bg-emerald-900/60'
+            }`}
+            title="Clique para forçar sincronização PC ↔ Celular na Nuvem Firebase Firestore agora"
+          >
+            <span
+              className={`w-2 h-2 rounded-full ${
+                firebaseSyncStatus === 'error'
+                  ? 'bg-rose-400'
+                  : firebaseSyncStatus === 'connecting' || isSyncingCloud
+                  ? 'bg-amber-400 animate-ping'
+                  : 'bg-emerald-400 animate-pulse'
+              }`}
+            />
+            <span className="font-semibold tracking-wide">
+              {isSyncingCloud
+                ? 'Sincronizando Nuvem...'
+                : firebaseSyncStatus === 'error'
+                ? 'Reconectar Nuvem Firebase'
+                : firebaseSyncStatus === 'connecting'
+                ? 'Conectando Firebase...'
+                : `Nuvem Firebase: Sincronizado${typeof cloudCampaignsCount === 'number' ? ` (${cloudCampaignsCount})` : ''}`}
+            </span>
+          </button>
 
           <button
             onClick={onOpenNotifications}

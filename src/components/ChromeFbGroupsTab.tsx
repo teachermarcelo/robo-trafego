@@ -1606,9 +1606,20 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
 
   // Real-time Firebase Workspace Sync (receives and merges non-destructively across domains/browsers)
   useEffect(() => {
-    const unsub = subscribeWorkspaceSync((cloud) => {
+    const applyCloudWorkspace = (cloud: any) => {
+      if (!cloud || typeof cloud !== 'object') return;
       if (cloud.savedCopiesMap && typeof cloud.savedCopiesMap === 'object') {
-        setSavedCopiesMap(prev => ({ ...cloud.savedCopiesMap, ...prev }));
+        setSavedCopiesMap(prev => {
+          const next = { ...prev };
+          Object.entries(cloud.savedCopiesMap).forEach(([campId, cloudEntry]: [string, any]) => {
+            if (!cloudEntry) return;
+            const prevEntry = next[campId];
+            if (!prevEntry || (cloudEntry.savedAt && (!prevEntry.savedAt || cloudEntry.savedAt > prevEntry.savedAt))) {
+              next[campId] = cloudEntry;
+            }
+          });
+          return next;
+        });
       }
       if (Array.isArray(cloud.customCopyPresets) && cloud.customCopyPresets.length > 0) {
         setCustomCopyPresets(prev => {
@@ -1619,9 +1630,20 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       }
       if (Array.isArray(cloud.audiences) && cloud.audiences.length > 0) {
         setAudiences(prev => {
-          const seen = new Set(prev.map(a => a.id));
-          const fresh = cloud.audiences!.filter((a: any) => a?.id && !seen.has(a.id));
-          return fresh.length > 0 ? [...prev, ...fresh] : prev;
+          const byId = new Map(prev.map(a => [a.id, a]));
+          let changed = false;
+          cloud.audiences!.forEach((ca: any) => {
+            if (!ca?.id) return;
+            const existing = byId.get(ca.id);
+            if (!existing) {
+              byId.set(ca.id, ca);
+              changed = true;
+            } else if (Array.isArray(ca.groupIds) && ca.groupIds.length > (existing.groupIds?.length || 0)) {
+              byId.set(ca.id, { ...existing, ...ca });
+              changed = true;
+            }
+          });
+          return changed ? Array.from(byId.values()) : prev;
         });
       }
       if (Array.isArray(cloud.youtubeVideos) && cloud.youtubeVideos.length > 0) {
@@ -1645,8 +1667,18 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
           return fresh.length > 0 ? [...fresh, ...prev] : prev;
         });
       }
-    });
-    return () => unsub();
+    };
+
+    const unsub = subscribeWorkspaceSync(applyCloudWorkspace);
+    const onManualSync = (ev: Event) => {
+      const detail = (ev as CustomEvent).detail;
+      if (detail) applyCloudWorkspace(detail);
+    };
+    window.addEventListener('autoviral_workspace_synced', onManualSync);
+    return () => {
+      unsub();
+      window.removeEventListener('autoviral_workspace_synced', onManualSync);
+    };
   }, []);
 
   // Push workspace state to Firebase Cloud debounced

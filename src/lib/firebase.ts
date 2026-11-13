@@ -107,7 +107,7 @@ export function subscribeFirebaseCampaigns(
     colRef,
     async (snapshot) => {
       if (snapshot.empty) {
-        // Bootstrap defaults if empty
+        // Bootstrap defaults only if collection is genuinely empty
         console.log('Firebase campaigns collection is empty, bootstrapping initial campaigns...');
         try {
           for (const camp of INITIAL_CAMPAIGNS) {
@@ -554,7 +554,9 @@ export interface WorkspaceSyncData {
   updatedAt?: string;
 }
 
-export async function saveWorkspaceSyncToFirebase(partial: Partial<WorkspaceSyncData>): Promise<void> {
+export async function saveWorkspaceSyncToFirebase(
+  partial: Partial<WorkspaceSyncData>
+): Promise<{ ok: boolean; error?: string }> {
   try {
     const safePayload: Record<string, any> = {
       updatedAt: new Date().toISOString(),
@@ -583,12 +585,17 @@ export async function saveWorkspaceSyncToFirebase(partial: Partial<WorkspaceSync
     }
 
     await setDoc(doc(db, SETTINGS_COLLECTION, 'workspace_sync_v1'), safePayload, { merge: true });
-  } catch (error) {
+    return { ok: true };
+  } catch (error: any) {
     console.warn('Workspace sync write notice:', error);
+    return { ok: false, error: error?.message || String(error) };
   }
 }
 
-export function subscribeWorkspaceSync(onUpdate: (data: WorkspaceSyncData) => void): () => void {
+export function subscribeWorkspaceSync(
+  onUpdate: (data: WorkspaceSyncData) => void,
+  onError?: (err: any) => void
+): () => void {
   const docRef = doc(db, SETTINGS_COLLECTION, 'workspace_sync_v1');
   return onSnapshot(
     docRef,
@@ -599,6 +606,129 @@ export function subscribeWorkspaceSync(onUpdate: (data: WorkspaceSyncData) => vo
     },
     (err) => {
       console.warn('Workspace sync subscription error:', err);
+      if (onError) onError(err);
     }
   );
 }
+
+/**
+ * Fetch latest campaigns and workspace_sync_v1 directly from Firestore server (for manual Force Sync on PC/Mobile)
+ */
+export async function pullFullCloudSnapshotFromFirebase(): Promise<{
+  campaigns: Campaign[];
+  workspace: WorkspaceSyncData | null;
+  deletedIds: string[];
+}> {
+  const [campSnap, wsSnap, metaSnap] = await Promise.all([
+    getDocs(collection(db, CAMPAIGNS_COLLECTION)),
+    getDocFromServer(doc(db, SETTINGS_COLLECTION, 'workspace_sync_v1')).catch(() =>
+      getDoc(doc(db, SETTINGS_COLLECTION, 'workspace_sync_v1'))
+    ),
+    getDocFromServer(doc(db, SETTINGS_COLLECTION, 'meta_config')).catch(() =>
+      getDoc(doc(db, SETTINGS_COLLECTION, 'meta_config'))
+    ),
+  ]);
+
+  const campaigns: Campaign[] = [];
+  campSnap.forEach((d) => {
+    const data = d.data() as any;
+    campaigns.push({
+      ...data,
+      id: d.id,
+      title: data.title || data.name || 'Campanha',
+    });
+  });
+
+  const workspace = wsSnap.exists() ? (wsSnap.data() as WorkspaceSyncData) : null;
+  const deletedIds: string[] = metaSnap.exists() && Array.isArray(metaSnap.data()?.deletedCampaignIds)
+    ? metaSnap.data()!.deletedCampaignIds
+    : ['camp-1', 'camp-2', 'camp-3'];
+
+  return { campaigns, workspace, deletedIds };
+}
+
+/**
+ * Discover archived campaigns stored in autoviral_settings/landing_page_* or INITIAL_CAMPAIGNS
+ * that are currently missing from active campaigns (excluding dummy camp-1..camp-3).
+ */
+export async function fetchRecoverableArchivedCampaigns(activeCampaignIds: string[]): Promise<Campaign[]> {
+  const activeSet = new Set(activeCampaignIds);
+  const dummyIds = new Set(['camp-1', 'camp-2', 'camp-3']);
+  const recoveredMap = new Map<string, Campaign>();
+
+  try {
+    const settingsSnap = await getDocs(collection(db, SETTINGS_COLLECTION));
+    settingsSnap.forEach((d) => {
+      if (!d.id.startsWith('landing_page_')) return;
+      const data = d.data() as any;
+      const campId = data.campaignId || d.id.replace('landing_page_', '');
+      if (!campId || campId === 'tarefinhas' || dummyIds.has(campId) || activeSet.has(campId)) return;
+      const title = data.title || data.headline;
+      if (!title) return;
+      recoveredMap.set(campId, {
+        id: campId,
+        title,
+        niche: (data.niche as any) || 'renda_extra',
+        nicheLabel: data.nicheLabel || data.badgeText || 'Campanha Recuperada',
+        targetAudience: data.targetAudience || 'Público-alvo da campanha recuperada',
+        painPointTargeted: data.subheadline || data.painPointTargeted || 'Dor tratada pelo produto',
+        checkoutUrl: data.checkoutUrl || undefined,
+        whatsappNumber: data.whatsappNumber || '5541998778348',
+        price: Number(data.price) || 9.9,
+        oldPrice: data.oldPrice ? Number(data.oldPrice) : undefined,
+        headline: data.headline || title,
+        subheadline: data.subheadline || '',
+        badgeText: data.badgeText || '',
+        guaranteeDays: data.guaranteeDays ? Number(data.guaranteeDays) : 7,
+        ctaText: data.ctaText || 'QUERO GARANTIR MEU ACESSO AGORA',
+        imageUrl: typeof data.imageUrl === 'string' && data.imageUrl.length < 300000 ? data.imageUrl : '',
+        status: 'active',
+        createdAt: data.updatedAt || new Date().toISOString(),
+        antiBanOrganicMode: true,
+        platforms: ['facebook', 'instagram', 'whatsapp'],
+        impressions: 0,
+        clicks: 0,
+        conversions: 0,
+        revenue: 0,
+      });
+    });
+  } catch (err) {
+    console.warn('Could not scan landing_page settings for recovery:', err);
+  }
+
+  INITIAL_CAMPAIGNS.forEach((initCamp) => {
+    if (!activeSet.has(initCamp.id) && !recoveredMap.has(initCamp.id)) {
+      recoveredMap.set(initCamp.id, initCamp);
+    }
+  });
+
+  return Array.from(recoveredMap.values());
+}
+
+/**
+ * Restore an archived campaign back into autoviral_campaigns and remove from deletedCampaignIds blacklist.
+ */
+export async function restoreArchivedCampaignToFirebase(campaign: Campaign): Promise<void> {
+  await saveCampaignToFirebase(campaign);
+  try {
+    const metaRef = doc(db, SETTINGS_COLLECTION, 'meta_config');
+    const metaSnap = await getDoc(metaRef);
+    if (metaSnap.exists()) {
+      const existingDeleted: string[] = Array.isArray(metaSnap.data()?.deletedCampaignIds)
+        ? metaSnap.data()!.deletedCampaignIds
+        : [];
+      const filtered = existingDeleted.filter((id) => id !== campaign.id);
+      await setDoc(
+        metaRef,
+        {
+          deletedCampaignIds: filtered,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+    }
+  } catch (err) {
+    console.warn('Could not clear deletedCampaignIds entry:', err);
+  }
+}
+

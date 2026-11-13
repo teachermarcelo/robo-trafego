@@ -490,7 +490,8 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
 
   // Firestore Workspace Sync for Instagram Campaigns, Stories, and Mapped Targets
   useEffect(() => {
-    const unsub = subscribeWorkspaceSync((cloud) => {
+    const applyCloudInstagram = (cloud: any) => {
+      if (!cloud || typeof cloud !== 'object') return;
       if (Array.isArray(cloud.instaCampaigns) && cloud.instaCampaigns.length > 0) {
         setInstaCampaigns(prev => {
           const prevIds = new Set(prev.map(i => i.id));
@@ -513,8 +514,18 @@ export const InstagramRobotTab: React.FC<InstagramRobotTabProps> = ({
           return fresh.length > 0 ? [...fresh, ...prev] : prev;
         });
       }
-    });
-    return () => unsub();
+    };
+
+    const unsub = subscribeWorkspaceSync(applyCloudInstagram);
+    const onManualSync = (ev: Event) => {
+      const detail = (ev as CustomEvent).detail;
+      if (detail) applyCloudInstagram(detail);
+    };
+    window.addEventListener('autoviral_workspace_synced', onManualSync);
+    return () => {
+      unsub();
+      window.removeEventListener('autoviral_workspace_synced', onManualSync);
+    };
   }, [deletedInstaCampIds]);
 
   useEffect(() => {

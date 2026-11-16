@@ -1,7 +1,7 @@
 // AutoViral AI Chrome Extension - Background Service Worker (Manifest V3)
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('[AutoViral AI] Extensão v1.3.8 instalada com sucesso!');
+  console.log('[AutoViral AI] Extensão v1.3.9 instalada com sucesso!');
   chrome.storage.local.get(['autoviral_interval', 'autoviral_mapped_groups'], (res) => {
     chrome.storage.local.set({
       autoviral_interval: res.autoviral_interval || 350,
@@ -238,5 +238,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       sendResponse({ success: true, forwardedCount });
     });
     return true;
+  }
+
+  if (request.action === 'AUTOVIRAL_CLOSE_CURRENT_TAB') {
+    if (sender && sender.tab && typeof sender.tab.id === 'number') {
+      chrome.tabs.remove(sender.tab.id, () => {
+        void chrome.runtime.lastError;
+        sendResponse({ closed: true });
+      });
+      return true;
+    }
+    sendResponse({ closed: false });
+    return false;
   }
 });

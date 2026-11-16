@@ -705,6 +705,76 @@
       }, 250);
     }
 
+    function findCreatePostDialog() {
+      const dialogs = Array.from(document.querySelectorAll('div[role="dialog"]')).filter((d) => {
+        const r = d.getBoundingClientRect();
+        return r.width > 200 && r.height > 150;
+      });
+      return dialogs.find((d) => {
+        const txt = (d.innerText || '').toLowerCase();
+        const aria = (d.getAttribute('aria-label') || '').toLowerCase();
+        const isComposerTitle =
+          txt.includes('criar post') ||
+          txt.includes('create post') ||
+          txt.includes('criar publicação') ||
+          txt.includes('create a public post') ||
+          aria.includes('criar post') ||
+          aria.includes('create post');
+        const hasPublishBtn = Array.from(d.querySelectorAll('div[role="button"], button')).some((b) => {
+          const bt = ((b.innerText || b.getAttribute('aria-label') || '') + '').trim().toLowerCase();
+          return bt === 'publicar' || bt === 'post';
+        });
+        return isComposerTitle || hasPublishBtn;
+      }) || null;
+    }
+
+    function findCreatePostTextbox(dlg) {
+      const scope = dlg || findCreatePostDialog();
+      if (!scope) return null;
+      const boxes = Array.from(scope.querySelectorAll('div[role="textbox"][contenteditable="true"]'));
+      return boxes.find((tb) => {
+        const rect = tb.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return false;
+        const label = ((tb.getAttribute('aria-label') || tb.getAttribute('placeholder') || '') + '').toLowerCase();
+        if (label.includes('coment') || label.includes('comment') || label.includes('responder') || label.includes('reply')) {
+          return false;
+        }
+        return true;
+      }) || null;
+    }
+
+    function scheduleAutoCloseTab(msgEl, cancelAutoBtn, baseMsg, delaySeconds) {
+      let keepOpen = false;
+      let secsLeft = delaySeconds || 4;
+      if (cancelAutoBtn) {
+        cancelAutoBtn.style.display = 'block';
+        cancelAutoBtn.textContent = '✋ Manter esta aba aberta';
+        cancelAutoBtn.onclick = () => {
+          keepOpen = true;
+          cancelAutoBtn.style.display = 'none';
+          if (msgEl) {
+            msgEl.textContent = baseMsg + ' (Você já pode fechar esta aba quando quiser.)';
+          }
+        };
+      }
+      const tickClose = () => {
+        if (keepOpen) return;
+        if (secsLeft <= 0) {
+          if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
+          if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
+            chrome.runtime.sendMessage({ action: 'AUTOVIRAL_CLOSE_CURRENT_TAB' }, () => { void chrome.runtime.lastError; });
+          }
+          return;
+        }
+        if (msgEl) {
+          msgEl.textContent = `${baseMsg} Fechando aba em ${secsLeft}s...`;
+        }
+        secsLeft--;
+        setTimeout(tickClose, 1000);
+      };
+      tickClose();
+    }
+
     function findPublishButtonInDialog(dlg) {
       if (!dlg) return null;
       const candidates = Array.from(dlg.querySelectorAll('div[role="button"], button'));
@@ -736,12 +806,36 @@
       }
     }
 
-    function startSubmissionMonitor(pending, currentSlug, msgEl) {
+    function startSubmissionMonitor(pending, currentSlug, msgEl, didAutoClickPublish, cancelAutoBtn) {
       let finished = false;
       let ticks = 0;
+      let userClickedPublish = !!didAutoClickPublish;
+      let dialogClosedStreak = 0;
+
+      const attachPublishClickListener = () => {
+        if (userClickedPublish) return;
+        const dlg = findCreatePostDialog();
+        if (!dlg) return;
+        const candidates = Array.from(dlg.querySelectorAll('div[role="button"], button'));
+        candidates.forEach((btn) => {
+          const bt = ((btn.innerText || btn.getAttribute('aria-label') || '') + '').trim().toLowerCase();
+          if ((bt === 'publicar' || bt === 'post') && !btn.dataset.avHooked) {
+            btn.dataset.avHooked = '1';
+            btn.addEventListener('click', () => {
+              userClickedPublish = true;
+              if (msgEl) {
+                msgEl.textContent = '🚀 Publicando no grupo... aguarde confirmação antes de fechar!';
+                msgEl.style.color = '#34d399';
+              }
+            }, { once: true });
+          }
+        });
+      };
+
       const checkInterval = setInterval(() => {
         if (finished) return;
         ticks++;
+        attachPublishClickListener();
         const bodyTxt = (document.body ? document.body.innerText : '').toLowerCase();
 
         if (isFacebookRateLimited()) {
@@ -780,32 +874,56 @@
           });
           clearStoredPendingGroupPost(currentSlug);
           if (msgEl) {
-            msgEl.textContent = '⏳ Facebook informou Aprovação Pendente do Admin — registrado no painel!';
             msgEl.style.color = '#fbbf24';
           }
-          return;
-        }
-
-        const openComposerTextbox = document.querySelector('div[role="dialog"] div[role="textbox"][contenteditable="true"]');
-        if (!openComposerTextbox && ticks >= 3) {
-          finished = true;
-          clearInterval(checkInterval);
-          sendRealPostResultToPlatform({
-            logId: pending.logId,
-            groupId: pending.groupId,
-            groupUrl: window.location.href,
-            groupName: pending.groupName,
-            approvalStatus: 'published'
-          });
-          clearStoredPendingGroupPost(currentSlug);
-          if (msgEl) {
-            msgEl.textContent = '✅ Publicação enviada e confirmada como POSTAGEM FEITA no AutoViral!';
-            msgEl.style.color = '#34d399';
+          if (pending.autoJoinAndPost !== false) {
+            scheduleAutoCloseTab(msgEl, cancelAutoBtn, '⏳ Enviada p/ Aprovação do Admin e registrada!', 4);
+          } else if (msgEl) {
+            msgEl.textContent = '⏳ Aprovação Pendente do Admin registrada! Já pode fechar esta aba.';
           }
           return;
         }
 
-        if (ticks >= 45) {
+        const activeDialog = findCreatePostDialog();
+        if (!activeDialog) {
+          dialogClosedStreak++;
+        } else {
+          dialogClosedStreak = 0;
+        }
+
+        if (dialogClosedStreak >= 2) {
+          if (userClickedPublish) {
+            finished = true;
+            clearInterval(checkInterval);
+            sendRealPostResultToPlatform({
+              logId: pending.logId,
+              groupId: pending.groupId,
+              groupUrl: window.location.href,
+              groupName: pending.groupName,
+              approvalStatus: 'published'
+            });
+            clearStoredPendingGroupPost(currentSlug);
+            if (msgEl) {
+              msgEl.style.color = '#34d399';
+            }
+            if (pending.autoJoinAndPost !== false) {
+              scheduleAutoCloseTab(msgEl, cancelAutoBtn, '✅ POSTAGEM FEITA confirmada no Painel!', 4);
+            } else if (msgEl) {
+              msgEl.textContent = '✅ Publicação enviada e confirmada como POSTAGEM FEITA! Já pode fechar esta aba.';
+            }
+            return;
+          } else if (ticks >= 4) {
+            finished = true;
+            clearInterval(checkInterval);
+            if (msgEl) {
+              msgEl.textContent = '⚠️ Janela "Criar post" fechou sem clicar em Publicar. Clique em "Solicitar Entrada / Preencher Post Agora" para tentar de novo.';
+              msgEl.style.color = '#fbbf24';
+            }
+            return;
+          }
+        }
+
+        if (ticks >= 50) {
           finished = true;
           clearInterval(checkInterval);
         }
@@ -840,9 +958,9 @@
         });
         clearStoredPendingGroupPost(currentSlug);
         if (msgEl) {
-          msgEl.textContent = '🚫 Grupo indisponível ou excluído no Facebook! Removido da fila do AutoViral.';
           msgEl.style.color = '#fb7185';
         }
+        scheduleAutoCloseTab(msgEl, cancelAutoBtn, '🚫 Grupo indisponível/excluído (removido da fila)!', 3);
         return;
       }
       try {
@@ -852,18 +970,19 @@
       let cancelled = false;
       if (cancelAutoBtn) {
         cancelAutoBtn.style.display = autoSubmit ? 'block' : 'none';
+        cancelAutoBtn.textContent = '⏸️ Pausar Auto-Envio (Revisar antes de publicar)';
         cancelAutoBtn.onclick = () => {
           cancelled = true;
           cancelAutoBtn.style.display = 'none';
           if (msgEl) {
-            msgEl.textContent = '⏸️ Auto-envio pausado! Texto já preenchido na caixa — revise/anexe imagem e clique Publicar.';
+            msgEl.textContent = '⏸️ Auto-envio pausado! Revise o texto dentro de "Criar post" e clique em Publicar.';
             msgEl.style.color = '#38bdf8';
           }
         };
       }
 
       if (msgEl) {
-        msgEl.textContent = '🤖 Abrindo caixa de publicação do grupo...';
+        msgEl.textContent = '🤖 Abrindo janela "Criar post"... NÃO feche esta aba ainda!';
         msgEl.style.color = '#38bdf8';
       }
 
@@ -882,13 +1001,13 @@
           });
           clearStoredPendingGroupPost(currentSlug);
           if (msgEl) {
-            msgEl.textContent = '🚫 Grupo indisponível/excluído no Facebook! Removido automaticamente da fila.';
             msgEl.style.color = '#fb7185';
           }
+          scheduleAutoCloseTab(msgEl, cancelAutoBtn, '🚫 Grupo indisponível/excluído (removido da fila)!', 3);
           return;
         }
         const trigger = findComposerTrigger();
-        if (trigger || triggerTries >= 10) {
+        if (trigger || triggerTries >= 12) {
           clearInterval(waitTrigger);
           if (!trigger) {
             if (isFacebookGroupUnavailable()) {
@@ -902,9 +1021,9 @@
               });
               clearStoredPendingGroupPost(currentSlug);
               if (msgEl) {
-                msgEl.textContent = '🚫 Grupo indisponível/excluído no Facebook! Removido automaticamente da fila.';
                 msgEl.style.color = '#fb7185';
               }
+              scheduleAutoCloseTab(msgEl, cancelAutoBtn, '🚫 Grupo indisponível/excluído (removido da fila)!', 3);
               return;
             }
             if (msgEl) {
@@ -915,70 +1034,85 @@
           }
 
           trigger.click();
+          if (msgEl) {
+            msgEl.textContent = '⏳ Aguardando janela "Criar post" terminar de carregar... NÃO feche esta aba!';
+            msgEl.style.color = '#38bdf8';
+          }
+
           let boxTries = 0;
           const waitTextbox = setInterval(() => {
             boxTries++;
-            const textbox = document.querySelector('div[role="dialog"] div[role="textbox"][contenteditable="true"], div[role="textbox"][contenteditable="true"]');
+            const dlg = findCreatePostDialog();
+            const textbox = findCreatePostTextbox(dlg);
             if (textbox) {
               clearInterval(waitTextbox);
-              insertTextIntoFacebookComposer(textbox, pending.fullText);
-
-              if (!autoSubmit) {
-                if (msgEl) {
-                  msgEl.textContent = '✅ Texto inserido! Revise/anexe imagem e clique Publicar.';
-                  msgEl.style.color = '#34d399';
-                }
-                startSubmissionMonitor(pending, currentSlug, msgEl);
-                return;
-              }
-
-              if (msgEl) {
-                msgEl.textContent = '✅ Texto inserido! Publicando automaticamente em 2.5s...';
-                msgEl.style.color = '#34d399';
-              }
-
               setTimeout(() => {
-                if (cancelled) {
-                  startSubmissionMonitor(pending, currentSlug, msgEl);
+                textbox.click();
+                textbox.focus();
+                insertTextIntoFacebookComposer(textbox, pending.fullText);
+
+                if (!autoSubmit) {
+                  if (msgEl) {
+                    msgEl.textContent = '✅ Texto inserido em "Criar post"! Revise e clique em Publicar.';
+                    msgEl.style.color = '#34d399';
+                  }
+                  startSubmissionMonitor(pending, currentSlug, msgEl, false, cancelAutoBtn);
                   return;
                 }
-                const dlg = textbox.closest('div[role="dialog"]') || document.querySelector('div[role="dialog"]');
-                let pubTries = 0;
-                const waitPubBtn = setInterval(() => {
-                  pubTries++;
+
+                if (msgEl) {
+                  msgEl.textContent = '✅ Texto inserido em "Criar post"! Publicando em 2.5s...';
+                  msgEl.style.color = '#34d399';
+                }
+
+                setTimeout(() => {
                   if (cancelled) {
-                    clearInterval(waitPubBtn);
+                    startSubmissionMonitor(pending, currentSlug, msgEl, false, cancelAutoBtn);
                     return;
                   }
-                  const pubBtn = findPublishButtonInDialog(dlg);
-                  if (pubBtn) {
-                    clearInterval(waitPubBtn);
-                    if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
-                    if (msgEl) {
-                      msgEl.textContent = '🚀 Enviando publicação no grupo...';
-                      msgEl.style.color = '#34d399';
+                  const activeDlg = findCreatePostDialog() || textbox.closest('div[role="dialog"]');
+                  let pubTries = 0;
+                  const waitPubBtn = setInterval(() => {
+                    pubTries++;
+                    if (cancelled) {
+                      clearInterval(waitPubBtn);
+                      return;
                     }
-                    pubBtn.click();
-                    startSubmissionMonitor(pending, currentSlug, msgEl);
-                  } else if (pubTries >= 12) {
-                    clearInterval(waitPubBtn);
-                    if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
-                    if (msgEl) {
-                      msgEl.textContent = '✅ Texto colado! Clique no botão azul "Publicar" acima para finalizar.';
-                      msgEl.style.color = '#38bdf8';
+                    const currentContent = (textbox.innerText || '').trim();
+                    if (currentContent.length < 5 && pubTries === 1) {
+                      insertTextIntoFacebookComposer(textbox, pending.fullText);
                     }
-                    startSubmissionMonitor(pending, currentSlug, msgEl);
-                  }
-                }, 400);
-              }, 2400);
-            } else if (boxTries >= 18) {
+                    const pubBtn = findPublishButtonInDialog(activeDlg);
+                    if (pubBtn) {
+                      clearInterval(waitPubBtn);
+                      if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
+                      if (msgEl) {
+                        msgEl.textContent = '🚀 Publicando no grupo... NÃO feche esta aba ainda!';
+                        msgEl.style.color = '#34d399';
+                      }
+                      pubBtn.click();
+                      startSubmissionMonitor(pending, currentSlug, msgEl, true, cancelAutoBtn);
+                    } else if (pubTries >= 16) {
+                      clearInterval(waitPubBtn);
+                      if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
+                      if (msgEl) {
+                        msgEl.textContent = '✅ Texto colado em "Criar post"! Clique no botão azul "Publicar" acima para finalizar.';
+                        msgEl.style.color = '#38bdf8';
+                      }
+                      startSubmissionMonitor(pending, currentSlug, msgEl, false, cancelAutoBtn);
+                    }
+                  }, 450);
+                }, 2200);
+              }, 450);
+            } else if (boxTries >= 36) {
               clearInterval(waitTextbox);
+              if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
               if (msgEl) {
-                msgEl.textContent = '📋 Texto copiado! Cole (Ctrl+V) na caixa do grupo.';
+                msgEl.textContent = '⚠️ Janela "Criar post" demorou para carregar no Facebook. Clique dentro dela (ou em "Solicitar Entrada / Preencher Post Agora") e cole com Ctrl+V.';
                 msgEl.style.color = '#fbbf24';
               }
             }
-          }, 350);
+          }, 450);
         }
       }, 450);
     }

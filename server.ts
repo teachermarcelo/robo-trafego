@@ -2408,6 +2408,136 @@ app.get('/api/extension/download', async (req, res) => {
   }
 });
 
+app.post('/api/global/generate-kit', async (req, res) => {
+  const {
+    productName,
+    nichePain,
+    countryName,
+    languageName,
+    currencyCode,
+    offerPriceText,
+    discountText,
+    affiliateUrl,
+    presellUrl,
+  } = req.body || {};
+
+  if (!productName || !countryName) {
+    return res.status(400).json({ error: 'Informe o nome do produto e o país alvo.' });
+  }
+
+  const ai = getGeminiClient();
+  if (!ai) {
+    return res.status(503).json({
+      error: 'Chave Gemini não configurada no servidor. Verifique Settings > Secrets ou use o gerador estruturado local.',
+      code: 'GEMINI_KEY_MISSING',
+    });
+  }
+
+  try {
+    const targetLang = languageName || 'English';
+    const prompt = `Create a complete international affiliate launch & organic traffic kit for:
+- Product: ${productName}
+- Core Problem / Angle: ${nichePain || 'High-intent buyer problem & comparison'}
+- Target Country: ${countryName}
+- Target Language for ALL copy, headlines, keywords, presell, and social posts: ${targetLang}
+- Price / Discount: ${offerPriceText || 'Special Offer'} (${discountText || 'Limited Discount'}) ${currencyCode ? `in ${currencyCode}` : ''}
+- Presell Destination URL: ${presellUrl || 'https://global-sell-beta.vercel.app/'}
+- Affiliate URL: ${affiliateUrl || ''}
+
+Rules:
+1. Write ALL customer-facing copy, Google Ads headlines (<= 30 chars STRICTLY), Google Ads descriptions (<= 90 chars STRICTLY), negative keywords, Presell comparison rows, Facebook group posts, YouTube comments, and Pinterest pins strictly in natural, native ${targetLang} tailored for ${countryName}.
+2. Google Ads headlines must NEVER exceed 30 characters. Google Ads descriptions must NEVER exceed 90 characters.
+3. Organic Facebook group posts and YouTube comments must sound like a genuine helpful community member sharing a personal discovery/comparison (anti-spam), containing the exact placeholder [PRESELL_LINK] where the tracked link should go.
+4. Negative keywords must block bargain hunters, DIYers, and cheap marketplaces (e.g., free, diy, amazon, temu, aliexpress, used, wholesale, ebay, kmart, walmart, ikea, etc. localized to ${countryName}).`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-4-hydrogen',
+      contents: prompt,
+      config: {
+        systemInstruction:
+          'You are a senior international performance marketer & SEO/Presell copywriter. Return valid JSON matching the exact schema.',
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            presellStructure: {
+              type: Type.OBJECT,
+              properties: {
+                headline: { type: Type.STRING },
+                subheadline: { type: Type.STRING },
+                painBullets: { type: Type.ARRAY, items: { type: Type.STRING } },
+                comparisonRows: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      criterion: { type: Type.STRING },
+                      traditionalOption: { type: Type.STRING },
+                      thisProduct: { type: Type.STRING },
+                    },
+                  },
+                },
+                ctaButtonText: { type: Type.STRING },
+                trustBadges: { type: Type.ARRAY, items: { type: Type.STRING } },
+                fullPresellDraft: { type: Type.STRING },
+              },
+            },
+            googleAdsKit: {
+              type: Type.OBJECT,
+              properties: {
+                bottomFunnelKeywords: { type: Type.ARRAY, items: { type: Type.STRING } },
+                negativeKeywords: { type: Type.ARRAY, items: { type: Type.STRING } },
+                headlines30: { type: Type.ARRAY, items: { type: Type.STRING } },
+                descriptions90: { type: Type.ARRAY, items: { type: Type.STRING } },
+                launchChecklist: { type: Type.ARRAY, items: { type: Type.STRING } },
+              },
+            },
+            organicSocialKit: {
+              type: Type.OBJECT,
+              properties: {
+                fbGroupQueries: { type: Type.ARRAY, items: { type: Type.STRING } },
+                fbGroupPosts: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      angle: { type: Type.STRING },
+                      headline: { type: Type.STRING },
+                      body: { type: Type.STRING },
+                    },
+                  },
+                },
+                youtubeQueries: { type: Type.ARRAY, items: { type: Type.STRING } },
+                youtubeComments: { type: Type.ARRAY, items: { type: Type.STRING } },
+                pinterestQueries: { type: Type.ARRAY, items: { type: Type.STRING } },
+                pinterestPins: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      title: { type: Type.STRING },
+                      description: { type: Type.STRING },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const parsed = JSON.parse((response.text || '{}').trim());
+    return res.json({ success: true, kit: parsed });
+  } catch (err: any) {
+    console.error('Error generating global kit via Gemini:', err);
+    return res.status(502).json({
+      error: err?.message || 'Falha na geração com Gemini API.',
+      code: 'GEMINI_UPSTREAM_ERROR',
+    });
+  }
+});
+
 app.get('/api/health', (req, res) => {
   const ai = getGeminiClient();
   res.json({

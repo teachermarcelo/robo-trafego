@@ -16,7 +16,8 @@ import {
   Mail,
   Share2,
   Smartphone,
-  MessageCircle
+  MessageCircle,
+  Globe
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -59,6 +60,7 @@ export const Header: React.FC<HeaderProps> = ({
   const tabs = [
     { id: 'dashboard', label: 'Dashboard & Métricas', icon: TrendingUp },
     { id: 'chrome_fb_groups', label: '🤖 Grupos no Chrome • Disparos & Campanhas', icon: Share2, badge: '🔥 Disparar FB & Stories' },
+    { id: 'global_mediascalers', label: '🌍 Modo Global • MediaScalers', icon: Globe, badge: 'Qualquer País' },
     { id: 'campaigns', label: 'Minhas Campanhas', icon: DollarSign },
     { id: 'robo_cidades', label: 'Robô Divulgador & Cidades', icon: Bot, badge: 'Destravar 1ª Venda' },
     { id: 'whatsapp_x1', label: 'Robô WhatsApp X1', icon: MessageCircle, badge: 'Funil X1' },

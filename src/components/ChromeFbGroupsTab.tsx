@@ -1750,6 +1750,21 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
     setIsBotRunning(globalBotRunner.getIsRunning());
   }, [currentPostingIndex, selectedGroupIds, mappedGroups, dailyDispatchesCompleted, dailyDispatchLimit]);
 
+  useEffect(() => {
+    const onMutualPause = (ev: Event) => {
+      const customEv = ev as CustomEvent<{ origin?: string }>;
+      if (customEv.detail?.origin === 'global') {
+        setIsBotRunning(false);
+        setExtensionSyncBanner({
+          message: '⏸️ Robô Brasil pausado automaticamente porque o Robô Global foi iniciado (proteção anti-bloqueio).',
+          tone: 'warning'
+        });
+      }
+    };
+    window.addEventListener('autoviral_bot_mutual_pause', onMutualPause);
+    return () => window.removeEventListener('autoviral_bot_mutual_pause', onMutualPause);
+  }, []);
+
   // Listen for extension events
   useEffect(() => {
     const handleExtensionGroups = (event: any) => {

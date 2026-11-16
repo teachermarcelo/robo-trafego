@@ -25,6 +25,7 @@ import { MetaAdsBoosterTab } from './components/MetaAdsBoosterTab';
 import { RoboDivulgadorCidades } from './components/RoboDivulgadorCidades';
 import { BrevoEmailWhatsAppTab } from './components/BrevoEmailWhatsAppTab';
 import { ChromeFbGroupsTab } from './components/ChromeFbGroupsTab';
+import { GlobalMediaScalersTab } from './components/GlobalMediaScalersTab';
 import { WhatsAppFunnelX1Tab } from './components/WhatsAppFunnelX1Tab';
 import { ManyChatPreChatPage } from './components/ManyChatPreChatPage';
 import { PWAInstallModal } from './components/PWAInstallModal';
@@ -59,6 +60,13 @@ import {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
+  const activeTabRef = React.useRef(activeTab);
+  useEffect(() => {
+    activeTabRef.current = activeTab;
+    try {
+      localStorage.setItem('autoviral_active_main_tab', activeTab);
+    } catch {}
+  }, [activeTab]);
   const [selectedCampaignForDispatches, setSelectedCampaignForDispatches] = useState<string | null>(null);
   const pushedUnsyncedCampaignIdsRef = React.useRef<Set<string>>(new Set());
   const [deletedCampaignIds, setDeletedCampaignIds] = useState<Set<string>>(() => {
@@ -814,6 +822,19 @@ export default function App() {
         } else if (data.action === 'AUTOVIRAL_IMPORT_YOUTUBE_VIDEOS_FROM_EXTENSION') {
           persistYtVideos(data.videos || []);
         } else if (data.action === 'AUTOVIRAL_IMPORT_GROUPS_FROM_EXTENSION') {
+          if (
+            Array.isArray(data.groups) &&
+            data.groups.length > 0 &&
+            activeTabRef.current !== 'chrome_fb_groups' &&
+            activeTabRef.current !== 'global_mediascalers'
+          ) {
+            try {
+              const existingRaw = localStorage.getItem('autoviral_universal_inbox_pending_v1');
+              const existing = existingRaw ? JSON.parse(existingRaw) : [];
+              const merged = [...data.groups, ...(Array.isArray(existing) ? existing : [])];
+              localStorage.setItem('autoviral_universal_inbox_pending_v1', JSON.stringify(merged));
+            } catch {}
+          }
           if (Array.isArray(data.instaAccounts)) {
             persistInstaAccounts(data.instaAccounts, data.connectedHandle, data.sourceUrl);
           }
@@ -1488,6 +1509,8 @@ export default function App() {
             onNavigateTab={(tab) => setActiveTab(tab)}
           />
         )}
+
+        {activeTab === 'global_mediascalers' && <GlobalMediaScalersTab />}
 
         {activeTab === 'robo_cidades' && (
           <RoboDivulgadorCidades

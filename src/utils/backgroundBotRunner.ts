@@ -17,6 +17,14 @@ class BackgroundBotRunner {
   constructor() {
     this.initWorker();
     this.restoreState();
+    if (typeof window !== 'undefined') {
+      window.addEventListener('autoviral_bot_mutual_pause', (ev: Event) => {
+        const customEv = ev as CustomEvent<{ origin?: string }>;
+        if (customEv.detail?.origin === 'global' && this.isRunning) {
+          this.stop();
+        }
+      });
+    }
   }
 
   private initWorker() {
@@ -70,6 +78,9 @@ class BackgroundBotRunner {
   }
 
   public start(interval: number, randomJitter: boolean, onExecute: () => void, onTick?: BotTickCallback) {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('autoviral_bot_mutual_pause', { detail: { origin: 'brazil' } }));
+    }
     this.intervalSeconds = interval;
     this.isRandomJitter = randomJitter;
     this.onExecuteCallback = onExecute;

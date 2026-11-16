@@ -722,7 +722,7 @@
           aria.includes('create post');
         const hasPublishBtn = Array.from(d.querySelectorAll('div[role="button"], button')).some((b) => {
           const bt = ((b.innerText || b.getAttribute('aria-label') || '') + '').trim().toLowerCase();
-          return bt === 'publicar' || bt === 'post';
+          return bt === 'postar' || bt === 'publicar' || bt === 'post';
         });
         return isComposerTitle || hasPublishBtn;
       }) || null;
@@ -779,9 +779,11 @@
       if (!dlg) return null;
       const candidates = Array.from(dlg.querySelectorAll('div[role="button"], button'));
       return candidates.find((el) => {
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return false;
         const txt = ((el.innerText || el.getAttribute('aria-label') || '') + '').trim().toLowerCase();
-        if (txt !== 'publicar' && txt !== 'post') return false;
-        const disabled = el.getAttribute('aria-disabled') === 'true' || el.disabled;
+        if (txt !== 'postar' && txt !== 'publicar' && txt !== 'post') return false;
+        const disabled = el.getAttribute('aria-disabled') === 'true' || el.disabled || el.getAttribute('tabindex') === '-1';
         return !disabled;
       });
     }
@@ -819,7 +821,7 @@
         const candidates = Array.from(dlg.querySelectorAll('div[role="button"], button'));
         candidates.forEach((btn) => {
           const bt = ((btn.innerText || btn.getAttribute('aria-label') || '') + '').trim().toLowerCase();
-          if ((bt === 'publicar' || bt === 'post') && !btn.dataset.avHooked) {
+          if ((bt === 'postar' || bt === 'publicar' || bt === 'post') && !btn.dataset.avHooked) {
             btn.dataset.avHooked = '1';
             btn.addEventListener('click', () => {
               userClickedPublish = true;
@@ -1090,13 +1092,17 @@
                         msgEl.textContent = '🚀 Publicando no grupo... NÃO feche esta aba ainda!';
                         msgEl.style.color = '#34d399';
                       }
+                      try {
+                        pubBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+                        pubBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+                      } catch (e) {}
                       pubBtn.click();
                       startSubmissionMonitor(pending, currentSlug, msgEl, true, cancelAutoBtn);
                     } else if (pubTries >= 16) {
                       clearInterval(waitPubBtn);
                       if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
                       if (msgEl) {
-                        msgEl.textContent = '✅ Texto colado em "Criar post"! Clique no botão azul "Publicar" acima para finalizar.';
+                        msgEl.textContent = '✅ Texto colado em "Criar post"! Clique no botão azul "Postar / Publicar" acima para finalizar.';
                         msgEl.style.color = '#38bdf8';
                       }
                       startSubmissionMonitor(pending, currentSlug, msgEl, false, cancelAutoBtn);

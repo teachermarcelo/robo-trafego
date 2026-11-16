@@ -29,7 +29,9 @@ import {
   CheckCircle2,
   Send,
   Filter,
+  Download,
 } from 'lucide-react';
+import JSZip from 'jszip';
 import { FacebookGroup, FacebookPostLog } from '../types';
 import { globalEnBotRunner } from '../utils/globalEnBotRunner';
 
@@ -1640,6 +1642,52 @@ export const GlobalMediaScalersTab: React.FC = () => {
     setCurrentPostIndex((prev) => (prev + 1) % activeAudienceGroups.length);
   };
 
+  const [isDownloadingExt, setIsDownloadingExt] = useState(false);
+
+  const handleDownloadGlobalExtensionZip = async () => {
+    setIsDownloadingExt(true);
+    try {
+      const zip = new JSZip();
+      const files = ['manifest.json', 'popup.html', 'popup.js', 'content.js', 'background.js', 'README.md'];
+      await Promise.all(
+        files.map(async (fname) => {
+          const r = await fetch(`/chrome-extension/${fname}`);
+          zip.file(fname, await r.text());
+        })
+      );
+      zip.file(
+        'COMO-ATUALIZAR.txt',
+        '1. Extraia este ZIP substituindo os arquivos da pasta anterior (ou em uma pasta nova).\n2. Abra chrome://extensions no Google Chrome.\n3. Clique no ícone de Atualizar (↻) da extensão AutoViral AI v1.4.0.\n4. Recarregue (F5) a aba do AutoViral AI.'
+      );
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'extensao-autoviral-v1.4.0.zip';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setBanner({
+        message: 'Extensão v1.4.0 atualizada baixada! Extraia, recarregue (↻) em chrome://extensions e dê F5 nesta página.',
+        tone: 'success',
+      });
+    } catch {
+      setBanner({
+        message: 'Não foi possível gerar o ZIP agora. Tente baixar pela aba "Grupos no Chrome".',
+        tone: 'warning',
+      });
+    } finally {
+      setIsDownloadingExt(false);
+    }
+  };
+
+  const handleMarkGlobalLogStatus = (logId: string, nextStatus: 'published' | 'awaiting_admin') => {
+    setBotLogs((prev) =>
+      prev.map((l) =>
+        l.id === logId ? { ...l, approvalStatus: nextStatus, status: 'success', isVerifiedReal: true } : l
+      )
+    );
+  };
+
   const handleRetryGlobalPost = (log: FacebookPostLog) => {
     const presellLink = activeOffer
       ? appendTrackingParam(activeOffer.presellUrl || 'https://global-sell-beta.vercel.app/', 'utm_source', 'facebook_groups')
@@ -1656,6 +1704,15 @@ export const GlobalMediaScalersTab: React.FC = () => {
       prev.map((l) => (l.id === log.id ? { ...l, approvalStatus: 'pending_verification', status: 'success' } : l))
     );
 
+    const now = new Date();
+    setLastDispatchState({
+      groupName: sanitizeGlobalGroupName(log.groupName),
+      groupUrl: log.groupUrl,
+      phase: 'opening',
+      statusLabel: 'Reabrindo grupo → Entrando → Postando...',
+      updatedAt: now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+    });
+
     try {
       window.postMessage(
         {
@@ -1663,7 +1720,7 @@ export const GlobalMediaScalersTab: React.FC = () => {
           logId: log.id,
           groupId: log.groupId,
           groupUrl: log.groupUrl,
-          groupName: log.groupName,
+          groupName: sanitizeGlobalGroupName(log.groupName),
           fullText,
           autoJoinAndPost: true,
         },
@@ -1672,7 +1729,7 @@ export const GlobalMediaScalersTab: React.FC = () => {
     } catch {}
 
     setBanner({
-      message: `Reabrindo "${log.groupName}" para verificar aprovação e finalizar a postagem automaticamente!`,
+      message: `Reabrindo "${sanitizeGlobalGroupName(log.groupName)}" para verificar aprovação e finalizar a postagem automaticamente!`,
       tone: 'success',
     });
   };
@@ -3038,11 +3095,20 @@ export const GlobalMediaScalersTab: React.FC = () => {
                   <div className="lg:col-span-7 space-y-5">
                     {/* 1-Click Search Launchers for Mapping */}
                     <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
-                      <div className="flex items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
                         <h4 className="text-sm font-bold text-white">
                           1. Buscar & Mapear Grupos no Facebook ({activeOffer.countryName})
                         </h4>
-                        <span className="text-xs text-slate-400">Extensão v1.4.0 envia p/ Caixa Geral</span>
+                        <button
+                          type="button"
+                          onClick={handleDownloadGlobalExtensionZip}
+                          disabled={isDownloadingExt}
+                          className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-cyan-300 text-[11px] font-medium rounded-md inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                          title="Baixar Extensão v1.4.0 atualizada (correção automática se o Criar post travar)"
+                        >
+                          <Download className="w-3 h-3" />
+                          <span>{isDownloadingExt ? 'Gerando ZIP...' : 'Atualizar Extensão (ZIP)'}</span>
+                        </button>
                       </div>
                       <div className="flex flex-wrap gap-2">
                         {activeKit.organicSocialKit.fbGroupQueries.map((q, idx) => (
@@ -3488,7 +3554,29 @@ export const GlobalMediaScalersTab: React.FC = () => {
                           </div>
                           <div className="text-[11px] text-slate-400 flex flex-wrap items-center justify-between gap-2">
                             <span className="tabular-nums">{log.postedAt}</span>
-                            <div className="flex items-center gap-2">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {(log.approvalStatus === 'pending_verification' ||
+                                log.approvalStatus === 'join_requested' ||
+                                log.approvalStatus === 'not_member') && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleMarkGlobalLogStatus(log.id, 'published')}
+                                    className="px-2 py-0.5 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 rounded cursor-pointer"
+                                    title="Confirmar manualmente que a postagem foi publicada"
+                                  >
+                                    ✓ Feita
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleMarkGlobalLogStatus(log.id, 'awaiting_admin')}
+                                    className="px-2 py-0.5 bg-amber-600/20 hover:bg-amber-600/40 text-amber-300 rounded cursor-pointer"
+                                    title="Marcar manualmente como Aguardando Admin"
+                                  >
+                                    ⏳ Admin
+                                  </button>
+                                </>
+                              )}
                               {(log.approvalStatus === 'join_requested' ||
                                 log.approvalStatus === 'not_member' ||
                                 log.approvalStatus === 'pending_verification') && (
@@ -3504,7 +3592,7 @@ export const GlobalMediaScalersTab: React.FC = () => {
                                 href={log.groupUrl}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="text-cyan-400 hover:underline inline-flex items-center gap-1"
+                                className="text-cyan-400 hover:underline inline-flex items-center gap-1 ml-1"
                               >
                                 <span>Abrir Grupo</span>
                                 <ExternalLink className="w-3 h-3" />

@@ -731,16 +731,35 @@
     function findCreatePostTextbox(dlg) {
       const scope = dlg || findCreatePostDialog();
       if (!scope) return null;
-      const boxes = Array.from(scope.querySelectorAll('div[role="textbox"][contenteditable="true"]'));
+      const boxes = Array.from(
+        scope.querySelectorAll(
+          'div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"], div[contenteditable="true"][aria-label]'
+        )
+      );
       return boxes.find((tb) => {
         const rect = tb.getBoundingClientRect();
-        if (rect.width === 0 || rect.height === 0) return false;
+        if (rect.width < 40 || rect.height < 20) return false;
         const label = ((tb.getAttribute('aria-label') || tb.getAttribute('placeholder') || '') + '').toLowerCase();
         if (label.includes('coment') || label.includes('comment') || label.includes('responder') || label.includes('reply')) {
           return false;
         }
         return true;
       }) || null;
+    }
+
+    function closeStuckCreatePostDialog(dlg) {
+      try {
+        if (dlg) {
+          const closeBtn = dlg.querySelector(
+            'div[role="button"][aria-label="Fechar"], div[role="button"][aria-label="Close"], button[aria-label="Fechar"], button[aria-label="Close"]'
+          );
+          if (closeBtn) {
+            closeBtn.click();
+            return;
+          }
+        }
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+      } catch (e) {}
     }
 
     function scheduleAutoCloseTab(msgEl, cancelAutoBtn, baseMsg, delaySeconds) {
@@ -1042,7 +1061,10 @@
           }
 
           let boxTries = 0;
+          let retriedSkeleton = false;
+          let reopenPauseUntil = 0;
           const waitTextbox = setInterval(() => {
+            if (Date.now() < reopenPauseUntil) return;
             boxTries++;
             const dlg = findCreatePostDialog();
             const textbox = findCreatePostTextbox(dlg);
@@ -1110,11 +1132,31 @@
                   }, 450);
                 }, 2200);
               }, 450);
-            } else if (boxTries >= 36) {
+            } else if (boxTries === 16 && !retriedSkeleton) {
+              retriedSkeleton = true;
+              if (msgEl) {
+                msgEl.textContent = '🔄 Facebook travou ao abrir "Criar post". Reabrindo automaticamente...';
+                msgEl.style.color = '#fbbf24';
+              }
+              closeStuckCreatePostDialog(dlg);
+              reopenPauseUntil = Date.now() + 2000;
+              setTimeout(() => {
+                const retryTrigger = findComposerTrigger();
+                if (retryTrigger) retryTrigger.click();
+              }, 1400);
+            } else if (boxTries >= 42) {
               clearInterval(waitTextbox);
               if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
+              sendRealPostResultToPlatform({
+                logId: pending.logId,
+                groupId: pending.groupId,
+                groupUrl: window.location.href,
+                groupName: pending.groupName,
+                approvalStatus: 'not_member',
+                note: 'Janela Criar post travou no carregamento do Facebook'
+              });
               if (msgEl) {
-                msgEl.textContent = '⚠️ Janela "Criar post" demorou para carregar no Facebook. Clique dentro dela (ou em "Solicitar Entrada / Preencher Post Agora") e cole com Ctrl+V.';
+                msgEl.textContent = '⚠️ Janela "Criar post" demorou para carregar no Facebook. Clique em "Solicitar Entrada / Preencher Post Agora" ou cole com Ctrl+V.';
                 msgEl.style.color = '#fbbf24';
               }
             }
@@ -1397,7 +1439,15 @@
       });
     }
 
-    setTimeout(initGroupPostAssistant, 1800);
+    const scheduleGroupPostAssistant = () => {
+      if (document.readyState === 'complete') {
+        setTimeout(initGroupPostAssistant, 2200);
+      } else {
+        window.addEventListener('load', () => setTimeout(initGroupPostAssistant, 2000), { once: true });
+        setTimeout(initGroupPostAssistant, 3200);
+      }
+    };
+    scheduleGroupPostAssistant();
 
     // Message listener for popup
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {

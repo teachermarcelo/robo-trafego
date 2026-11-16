@@ -2427,8 +2427,9 @@ app.post('/api/global/generate-kit', async (req, res) => {
 
   const ai = getGeminiClient();
   if (!ai) {
-    return res.status(503).json({
-      error: 'Chave Gemini não configurada no servidor. Verifique Settings > Secrets ou use o gerador estruturado local.',
+    return res.status(200).json({
+      success: false,
+      error: 'Chave Gemini não configurada em Settings > Secrets. Você pode usar a estrutura pronta editável abaixo normalmente.',
       code: 'GEMINI_KEY_MISSING',
     });
   }

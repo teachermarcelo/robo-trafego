@@ -623,6 +623,19 @@ export const GlobalMediaScalersTab: React.FC = () => {
   const [isBotRunning, setIsBotRunning] = useState<boolean>(() => globalEnBotRunner.getIsRunning());
   const [secondsRemaining, setSecondsRemaining] = useState<number>(() => globalEnBotRunner.getRemainingSeconds());
   const [currentPostIndex, setCurrentPostIndex] = useState<number>(0);
+  const [autoJoinAndPostEnabled, setAutoJoinAndPostEnabled] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('autoviral_global_auto_join_post');
+      return saved === null ? true : saved === 'true';
+    } catch {
+      return true;
+    }
+  });
+  const [showQueuePreview, setShowQueuePreview] = useState<boolean>(false);
+  const [queueSearchFilter, setQueueSearchFilter] = useState<string>('');
+  const [logStatusFilter, setLogStatusFilter] = useState<'all' | 'published' | 'awaiting_admin' | 'join_requested' | 'not_member' | 'error'>('all');
+  const [renamingAudienceId, setRenamingAudienceId] = useState<string | null>(null);
+  const [renameAudienceInput, setRenameAudienceInput] = useState<string>('');
   const [customPostHeadline, setCustomPostHeadline] = useState('');
   const [customPostBody, setCustomPostBody] = useState('');
   const [botLogs, setBotLogs] = useState<FacebookPostLog[]>(() => {
@@ -976,7 +989,7 @@ export const GlobalMediaScalersTab: React.FC = () => {
     }
   };
 
-  // Generate Kit via Gemini Backend (with explicit local template option if API unavailable)
+  // Generate Kit via Gemini Backend (safe text parsing avoids Unexpected end of JSON input)
   const handleGenerateWithGemini = async () => {
     if (!activeOffer) return;
     setIsGeneratingKit(true);
@@ -987,9 +1000,28 @@ export const GlobalMediaScalersTab: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(activeOffer),
       });
-      const data = await resp.json();
+      const rawText = await resp.text();
+      let data: any = null;
+      try {
+        data = rawText ? JSON.parse(rawText) : null;
+      } catch {
+        data = null;
+      }
+
       if (!resp.ok || !data?.kit) {
-        setKitError(data?.error || 'Não foi possível gerar via Gemini agora.');
+        if (data?.code === 'GEMINI_KEY_MISSING') {
+          const tpl = buildStructuredTemplateKit(activeOffer);
+          setKitsByOffer((prev) => ({ ...prev, [activeOffer.id]: tpl }));
+          setBanner({
+            message: `Estrutura pronta editável em ${activeOffer.languageName} aplicada! (Obs.: para geração extra via IA Gemini, configure GEMINI_API_KEY em Settings > Secrets).`,
+            tone: 'info',
+          });
+          return;
+        }
+        setKitError(
+          data?.error ||
+            `Servidor respondeu sem JSON válido (HTTP ${resp.status}). Use o botão "Atualizar Modelo Estruturado" ao lado.`
+        );
         return;
       }
       const kit: GlobalGeneratedKit = {
@@ -1368,6 +1400,46 @@ export const GlobalMediaScalersTab: React.FC = () => {
           groupUrl: group.url,
           groupName: group.name,
           fullText,
+          autoJoinAndPost: autoJoinAndPostEnabled,
+        },
+        '*'
+      );
+    } catch {}
+
+    setBanner({
+      message: autoJoinAndPostEnabled
+        ? `Grupo Global "${group.name}" aberto! Extensão v1.4.0 vai entrar (se precisar), postar e fechar a aba automaticamente.`
+        : `Grupo Global "${group.name}" aberto e texto copiado para postagem manual assistida.`,
+      tone: 'success',
+    });
+    setCurrentPostIndex((prev) => (prev + 1) % activeAudienceGroups.length);
+  };
+
+  const handleRetryGlobalPost = (log: FacebookPostLog) => {
+    const presellLink = activeOffer
+      ? appendTrackingParam(activeOffer.presellUrl || 'https://global-sell-beta.vercel.app/', 'utm_source', 'facebook_groups')
+      : 'https://global-sell-beta.vercel.app/';
+    const headline = customPostHeadline.trim();
+    const bodyWithLink = customPostBody.replace(/\[PRESELL_LINK\]/g, presellLink).trim();
+    const fullText = headline ? `${headline}\n\n${bodyWithLink}` : bodyWithLink;
+
+    try {
+      navigator.clipboard?.writeText(fullText);
+    } catch {}
+
+    setBotLogs((prev) =>
+      prev.map((l) => (l.id === log.id ? { ...l, approvalStatus: 'pending_verification', status: 'success' } : l))
+    );
+
+    try {
+      window.postMessage(
+        {
+          type: 'AUTOVIRAL_OPEN_GROUP_FOR_POST',
+          logId: log.id,
+          groupId: log.groupId,
+          groupUrl: log.groupUrl,
+          groupName: log.groupName,
+          fullText,
           autoJoinAndPost: true,
         },
         '*'
@@ -1375,10 +1447,9 @@ export const GlobalMediaScalersTab: React.FC = () => {
     } catch {}
 
     setBanner({
-      message: `Grupo Global "${group.name}" aberto! Extensão v1.4.0 solicitando entrada/postando em ${activeAudience?.countryName || activeOffer?.countryName}.`,
+      message: `Reabrindo "${log.groupName}" para verificar aprovação e finalizar a postagem automaticamente!`,
       tone: 'success',
     });
-    setCurrentPostIndex((prev) => (prev + 1) % activeAudienceGroups.length);
   };
 
   // Re-attach Global runner callbacks on mount/update
@@ -2240,13 +2311,31 @@ export const GlobalMediaScalersTab: React.FC = () => {
 
               {/* Inbox Table */}
               {filteredInbox.length === 0 ? (
-                <div className="border border-dashed border-slate-800 rounded-lg p-6 text-center space-y-2">
+                <div className="border border-dashed border-slate-800 rounded-lg p-6 text-center space-y-3">
                   <p className="text-xs text-slate-300 font-medium">
                     Nenhum grupo aguardando triagem no momento.
                   </p>
                   <p className="text-xs text-slate-400">
-                    Vá na aba "04. Robô Global", clique em uma busca do Facebook para abrir e mapear grupos na extensão v1.4.0 — mantendo esta aba aberta, os grupos mapeados aparecem aqui automaticamente com Nome e Nº de Membros!
+                    Mapeie grupos no Facebook pela extensão v1.4.0 (mantendo esta aba aberta), cole links em lote ou puxe grupos já mapeados do Robô Brasil:
                   </p>
+                  <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setIsManualAddOpen(true)}
+                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs text-white rounded-lg inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Colar Links / Adicionar</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsBrazilPullOpen(true)}
+                      className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-xs font-semibold text-white rounded-lg inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <ArrowRightLeft className="w-3.5 h-3.5" />
+                      <span>Puxar / Mover do Robô Brasil</span>
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div className="max-h-[420px] overflow-y-auto divide-y divide-slate-800 border border-slate-800 rounded-lg bg-slate-950">
@@ -2399,37 +2488,76 @@ export const GlobalMediaScalersTab: React.FC = () => {
                       const isActive = activeAudience?.id === aud.id;
 
                       return (
-                        <div key={aud.id} className="p-3 flex items-center justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="text-xs font-semibold text-white truncate">{aud.name}</div>
-                            <div className="text-[11px] text-slate-400 tabular-nums mt-0.5">
-                              {aud.countryName} · {aud.languageName} · {matched.length} grupos ·{' '}
-                              {totalMembers.toLocaleString('pt-BR')} membros
+                        <div key={aud.id} className="p-3 space-y-2">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              {renamingAudienceId === aud.id ? (
+                                <div className="flex items-center gap-1.5">
+                                  <input
+                                    type="text"
+                                    value={renameAudienceInput}
+                                    onChange={(e) => setRenameAudienceInput(e.target.value)}
+                                    className="flex-1 bg-slate-900 border border-cyan-500 rounded px-2 py-1 text-xs text-white"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (renameAudienceInput.trim()) {
+                                        setGlobalAudiences((prev) =>
+                                          prev.map((a) =>
+                                            a.id === aud.id ? { ...a, name: renameAudienceInput.trim() } : a
+                                          )
+                                        );
+                                      }
+                                      setRenamingAudienceId(null);
+                                    }}
+                                    className="px-2 py-1 bg-cyan-600 text-white text-xs rounded cursor-pointer"
+                                  >
+                                    Salvar
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="text-xs font-semibold text-white truncate">{aud.name}</div>
+                              )}
+                              <div className="text-[11px] text-slate-400 tabular-nums mt-0.5">
+                                {aud.countryName} · {aud.languageName} · {matched.length} grupos ·{' '}
+                                {totalMembers.toLocaleString('pt-BR')} membros
+                              </div>
                             </div>
-                          </div>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSelectedAudienceId(aud.id);
-                                setSubTab('bot');
-                              }}
-                              className={`px-2.5 py-1 text-xs rounded-md font-medium cursor-pointer ${
-                                isActive
-                                  ? 'bg-emerald-600 text-white'
-                                  : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
-                              }`}
-                            >
-                              {isActive ? 'Ativo' : 'Publicar'}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setGlobalAudiences((prev) => prev.filter((a) => a.id !== aud.id))}
-                              className="text-slate-500 hover:text-rose-400 p-1 cursor-pointer"
-                              title="Excluir público"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setRenamingAudienceId(aud.id);
+                                  setRenameAudienceInput(aud.name);
+                                }}
+                                className="px-2 py-1 text-xs rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer"
+                              >
+                                Renomear
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedAudienceId(aud.id);
+                                  setSubTab('bot');
+                                }}
+                                className={`px-2.5 py-1 text-xs rounded-md font-medium cursor-pointer ${
+                                  isActive
+                                    ? 'bg-emerald-600 text-white'
+                                    : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
+                                }`}
+                              >
+                                {isActive ? 'Ativo' : 'Publicar'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setGlobalAudiences((prev) => prev.filter((a) => a.id !== aud.id))}
+                                className="text-slate-500 hover:text-rose-400 p-1 cursor-pointer"
+                                title="Excluir público"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </div>
                         </div>
                       );
@@ -2522,10 +2650,10 @@ export const GlobalMediaScalersTab: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Audience & Copy Config */}
+                {/* Audience, Product & Copy Config */}
                 <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
-                    <h4 className="text-sm font-bold text-white">2. Selecionar Público Nomeado & Publicar</h4>
+                    <h4 className="text-sm font-bold text-white">2. Escolher Produto, Público Nomeado & Publicar</h4>
                     <button
                       type="button"
                       onClick={() => setSubTab('triage')}
@@ -2535,12 +2663,52 @@ export const GlobalMediaScalersTab: React.FC = () => {
                     </button>
                   </div>
 
+                  {/* Product Selector directly in Dispatch Panel */}
+                  <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-xs font-semibold text-cyan-300">
+                        Qual Produto / Oferta para Disparar
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setIsNewOfferOpen(true)}
+                        className="text-xs text-emerald-400 hover:text-emerald-300 font-medium cursor-pointer"
+                      >
+                        + Cadastrar Novo Produto
+                      </button>
+                    </div>
+                    <select
+                      value={activeOffer.id}
+                      onChange={(e) => setSelectedOfferId(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs font-medium text-white"
+                    >
+                      {offers.map((offer) => (
+                        <option key={offer.id} value={offer.id}>
+                          {offer.productName} ({offer.countryName} · {offer.languageName} · {offer.offerPriceText})
+                        </option>
+                      ))}
+                    </select>
+                    <div className="text-[11px] text-slate-400 truncate">
+                      Link Presell injetado neste disparo:{' '}
+                      <span className="font-mono text-emerald-400">
+                        {appendTrackingParam(
+                          activeOffer.presellUrl || 'https://global-sell-beta.vercel.app/',
+                          'utm_source',
+                          'facebook_groups'
+                        )}
+                      </span>
+                    </div>
+                  </div>
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <label className="block space-y-1">
                       <span className="text-xs text-slate-400">Público Selecionado</span>
                       <select
                         value={activeAudience?.id || ''}
-                        onChange={(e) => setSelectedAudienceId(e.target.value)}
+                        onChange={(e) => {
+                          setSelectedAudienceId(e.target.value);
+                          setCurrentPostIndex(0);
+                        }}
                         className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white"
                       >
                         {globalAudiences.length === 0 && (
@@ -2600,6 +2768,110 @@ export const GlobalMediaScalersTab: React.FC = () => {
                     />
                   </label>
 
+                  {/* Auto Join + Auto Post + Auto Close Tab Toggle (Same System as Brazil v1.4.0) */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5">
+                    <div className="text-xs">
+                      <div className="font-semibold text-white">
+                        Sistema Automático: Abrir → Entrar no Grupo → Postar → Fechar Aba (v1.4.0)
+                      </div>
+                      <div className="text-[11px] text-slate-400">
+                        {autoJoinAndPostEnabled
+                          ? 'Ativado: entra automaticamente no grupo (se precisar), preenche, publica (Post/Postar) e fecha a aba em 4s.'
+                          : 'Desativado: apenas abre o grupo e copia o texto para você postar manualmente.'}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = !autoJoinAndPostEnabled;
+                        setAutoJoinAndPostEnabled(next);
+                        try {
+                          localStorage.setItem('autoviral_global_auto_join_post', String(next));
+                        } catch {}
+                      }}
+                      className={`px-3 py-1.5 text-xs font-semibold rounded-md cursor-pointer shrink-0 ${
+                        autoJoinAndPostEnabled ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-300'
+                      }`}
+                    >
+                      {autoJoinAndPostEnabled ? 'Auto-Post + Fechar Aba: ON' : 'Manual Assistido'}
+                    </button>
+                  </div>
+
+                  {/* Queue Preview Collapsible */}
+                  {activeAudienceGroups.length > 0 && (
+                    <div className="border border-slate-800 rounded-lg bg-slate-950">
+                      <button
+                        type="button"
+                        onClick={() => setShowQueuePreview((v) => !v)}
+                        className="w-full px-3 py-2 flex items-center justify-between text-xs text-slate-300 hover:text-white cursor-pointer"
+                      >
+                        <span className="truncate">
+                          Próximo da fila (#{(currentPostIndex % activeAudienceGroups.length) + 1} de{' '}
+                          {activeAudienceGroups.length}):{' '}
+                          <strong className="text-white">
+                            {activeAudienceGroups[currentPostIndex % activeAudienceGroups.length]?.name}
+                          </strong>
+                        </span>
+                        <span className="text-cyan-400 shrink-0 ml-2">
+                          {showQueuePreview ? 'Ocultar fila' : 'Ver / editar fila'}
+                        </span>
+                      </button>
+
+                      {showQueuePreview && (
+                        <div className="border-t border-slate-800 p-2.5 space-y-2">
+                          <input
+                            type="text"
+                            value={queueSearchFilter}
+                            onChange={(e) => setQueueSearchFilter(e.target.value)}
+                            placeholder="Filtrar grupo na fila..."
+                            className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white"
+                          />
+                          <div className="max-h-48 overflow-y-auto divide-y divide-slate-800">
+                            {activeAudienceGroups
+                              .filter((g) =>
+                                !queueSearchFilter.trim()
+                                  ? true
+                                  : g.name.toLowerCase().includes(queueSearchFilter.toLowerCase())
+                              )
+                              .slice(0, 60)
+                              .map((g, idx) => (
+                                <div key={g.id} className="py-1.5 px-1 flex items-center justify-between gap-2 text-xs">
+                                  <span className="text-slate-200 truncate">
+                                    {idx + 1}. {g.name}
+                                  </span>
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <span className="text-[11px] text-slate-400 tabular-nums">
+                                      {(g.membersCount || 0).toLocaleString('pt-BR')}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (activeAudience) {
+                                          setGlobalAudiences((prev) =>
+                                            prev.map((a) =>
+                                              a.id === activeAudience.id
+                                                ? { ...a, groupIds: a.groupIds.filter((id) => id !== g.id) }
+                                                : a
+                                            )
+                                          );
+                                        } else {
+                                          setGlobalGroups((prev) => prev.filter((item) => item.id !== g.id));
+                                        }
+                                      }}
+                                      className="text-slate-500 hover:text-rose-400 cursor-pointer"
+                                      title="Remover grupo deste público"
+                                    >
+                                      <Trash2 className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* Bot Controls */}
                   <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-800 pt-4">
                     <div className="text-xs text-slate-400 tabular-nums">
@@ -2640,7 +2912,7 @@ export const GlobalMediaScalersTab: React.FC = () => {
                 </div>
               </div>
 
-              {/* Right: Isolated Global Logs */}
+              {/* Right: Isolated Global Logs with Filters + Retry Action */}
               <div className="lg:col-span-5 bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <h4 className="text-sm font-bold text-white">Histórico do Robô Global ({botLogs.length})</h4>
@@ -2655,56 +2927,130 @@ export const GlobalMediaScalersTab: React.FC = () => {
                   )}
                 </div>
 
+                {/* Status Filter Bar */}
+                {botLogs.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {[
+                      { id: 'all' as const, label: `Todos (${botLogs.length})` },
+                      {
+                        id: 'published' as const,
+                        label: `Feitas (${botLogs.filter((l) => l.approvalStatus === 'published').length})`,
+                      },
+                      {
+                        id: 'awaiting_admin' as const,
+                        label: `Admin (${botLogs.filter((l) => l.approvalStatus === 'awaiting_admin').length})`,
+                      },
+                      {
+                        id: 'join_requested' as const,
+                        label: `Entrada (${botLogs.filter((l) => l.approvalStatus === 'join_requested').length})`,
+                      },
+                      {
+                        id: 'not_member' as const,
+                        label: `Participar (${botLogs.filter((l) => l.approvalStatus === 'not_member').length})`,
+                      },
+                      {
+                        id: 'error' as const,
+                        label: `Erros (${
+                          botLogs.filter(
+                            (l) =>
+                              l.approvalStatus === 'rate_limited' ||
+                              l.approvalStatus === 'unavailable' ||
+                              l.status === 'error'
+                          ).length
+                        })`,
+                      },
+                    ].map((f) => (
+                      <button
+                        key={f.id}
+                        type="button"
+                        onClick={() => setLogStatusFilter(f.id)}
+                        className={`px-2 py-1 text-[11px] rounded cursor-pointer tabular-nums ${
+                          logStatusFilter === f.id
+                            ? 'bg-cyan-600 text-white font-medium'
+                            : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+                        }`}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
                 {botLogs.length === 0 ? (
                   <p className="text-xs text-slate-400 py-6 text-center">
                     Nenhuma postagem global registrada ainda. Os resultados reais da extensão aparecerão aqui sem se misturar ao histórico do Brasil.
                   </p>
                 ) : (
                   <div className="max-h-[480px] overflow-y-auto divide-y divide-slate-800 border border-slate-800 rounded-lg bg-slate-950">
-                    {botLogs.map((log) => (
-                      <div key={log.id} className="p-3 space-y-1 text-xs">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="font-semibold text-white truncate">{log.groupName}</span>
-                          <span
-                            className={`font-medium shrink-0 ${
-                              log.approvalStatus === 'published'
-                                ? 'text-emerald-400'
-                                : log.approvalStatus === 'awaiting_admin' || log.approvalStatus === 'join_requested'
-                                ? 'text-amber-300'
-                                : log.status === 'error'
-                                ? 'text-rose-400'
-                                : 'text-cyan-300'
-                            }`}
-                          >
-                            {log.approvalStatus === 'published'
-                              ? 'Postagem Feita'
-                              : log.approvalStatus === 'awaiting_admin'
-                              ? 'Aguardando Admin'
-                              : log.approvalStatus === 'join_requested'
-                              ? 'Entrada Solicitada'
-                              : log.approvalStatus === 'rate_limited'
-                              ? 'Limite Temp. FB'
-                              : log.approvalStatus === 'unavailable'
-                              ? 'Indisponível'
-                              : log.approvalStatus === 'not_member'
-                              ? 'Precisa Participar'
-                              : 'Verificando'}
-                          </span>
+                    {botLogs
+                      .filter((log) => {
+                        if (logStatusFilter === 'all') return true;
+                        if (logStatusFilter === 'error') {
+                          return (
+                            log.approvalStatus === 'rate_limited' ||
+                            log.approvalStatus === 'unavailable' ||
+                            log.status === 'error'
+                          );
+                        }
+                        return log.approvalStatus === logStatusFilter;
+                      })
+                      .map((log) => (
+                        <div key={log.id} className="p-3 space-y-1.5 text-xs">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-semibold text-white truncate">{log.groupName}</span>
+                            <span
+                              className={`font-medium shrink-0 ${
+                                log.approvalStatus === 'published'
+                                  ? 'text-emerald-400'
+                                  : log.approvalStatus === 'awaiting_admin' || log.approvalStatus === 'join_requested'
+                                  ? 'text-amber-300'
+                                  : log.status === 'error'
+                                  ? 'text-rose-400'
+                                  : 'text-cyan-300'
+                              }`}
+                            >
+                              {log.approvalStatus === 'published'
+                                ? 'Postagem Feita'
+                                : log.approvalStatus === 'awaiting_admin'
+                                ? 'Aguardando Admin'
+                                : log.approvalStatus === 'join_requested'
+                                ? 'Entrada Solicitada'
+                                : log.approvalStatus === 'rate_limited'
+                                ? 'Limite Temp. FB'
+                                : log.approvalStatus === 'unavailable'
+                                ? 'Indisponível'
+                                : log.approvalStatus === 'not_member'
+                                ? 'Precisa Participar'
+                                : 'Verificando'}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-slate-400 flex flex-wrap items-center justify-between gap-2">
+                            <span className="tabular-nums">{log.postedAt}</span>
+                            <div className="flex items-center gap-2">
+                              {(log.approvalStatus === 'join_requested' ||
+                                log.approvalStatus === 'not_member' ||
+                                log.approvalStatus === 'pending_verification') && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleRetryGlobalPost(log)}
+                                  className="px-2 py-0.5 bg-cyan-600/20 hover:bg-cyan-600/40 text-cyan-300 rounded cursor-pointer"
+                                >
+                                  Entrar / Postar Agora
+                                </button>
+                              )}
+                              <a
+                                href={log.groupUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-cyan-400 hover:underline inline-flex items-center gap-1"
+                              >
+                                <span>Abrir Grupo</span>
+                                <ExternalLink className="w-3 h-3" />
+                              </a>
+                            </div>
+                          </div>
                         </div>
-                        <div className="text-[11px] text-slate-400 flex items-center justify-between">
-                          <span className="tabular-nums">{log.postedAt}</span>
-                          <a
-                            href={log.groupUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-cyan-400 hover:underline inline-flex items-center gap-1"
-                          >
-                            <span>Abrir Grupo</span>
-                            <ExternalLink className="w-3 h-3" />
-                          </a>
-                        </div>
-                      </div>
-                    ))}
+                      ))}
                   </div>
                 )}
               </div>

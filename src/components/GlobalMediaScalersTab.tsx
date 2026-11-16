@@ -23,6 +23,12 @@ import {
   RefreshCw,
   FolderPlus,
   X,
+  Clock,
+  SkipForward,
+  Eye,
+  CheckCircle2,
+  Send,
+  Filter,
 } from 'lucide-react';
 import { FacebookGroup, FacebookPostLog } from '../types';
 import { globalEnBotRunner } from '../utils/globalEnBotRunner';
@@ -213,6 +219,136 @@ function detectScopeAndCountry(name: string, searchTerm?: string): { scope: 'glo
   return { scope: 'global', country: 'Global / Internacional' };
 }
 
+function sanitizeGlobalGroupName(rawName: string): string {
+  let cleaned = String(rawName || '').trim();
+  if (!cleaned) return 'Facebook Group';
+  const prefixes = [
+    /^não\s+lida\s*/i,
+    /^unread\s*/i,
+    /^aproveite sua participação no grupo\s*/i,
+    /^enjoy your membership in\s*/i,
+    /^atividades?\s+recentes?\s+no\s+grupo\s*/i,
+    /^recent activity in\s*/i,
+    /^você entrou no grupo\s*/i,
+    /^you joined\s*/i,
+    /^postagens?\s+não\s+lidas?\s*/i,
+  ];
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const re of prefixes) {
+      if (re.test(cleaned)) {
+        cleaned = cleaned.replace(re, '').trim();
+        changed = true;
+      }
+    }
+  }
+  cleaned = cleaned
+    .replace(/\s*·\s*\d+[\d.,]*\s*(mil|k|m)?\s*(membros|members).*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned || 'Facebook Group';
+}
+
+function isLikelyPortugueseGroup(name: string, url?: string): boolean {
+  const clean = sanitizeGlobalGroupName(name);
+  const text = `${clean} ${url || ''}`.toLowerCase();
+  if (/[ãõçáéíóúâêôàü]/i.test(clean)) return true;
+  return /\b(brasil|brazil|curitiba|são paulo|sao paulo|rio de janeiro|minas|bahia|recife|fortaleza|salvador|porto alegre|manaus|goiânia|florianópolis|renda extra|currículo|curriculo|faço|pedagog|autismo|psicoped|pix|promoções|promocoes|desapego|vendas|emprego|vagas|receitas|culinária|culinaria|brechó|brecho|loja|comprar|vender|grupo de|dicas de)\b/i.test(
+    text
+  );
+}
+
+function formatCountdownClock(totalSeconds: number): string {
+  const sec = Math.max(0, Math.floor(totalSeconds));
+  const mins = Math.floor(sec / 60);
+  const rem = sec % 60;
+  return `${String(mins).padStart(2, '0')}:${String(rem).padStart(2, '0')}`;
+}
+
+type ChamativaStyle = 'alerta' | 'comparativo' | 'historia' | 'oferta';
+
+function buildEyeCatchingFbPost(
+  offer: GlobalOffer,
+  style: ChamativaStyle,
+  presellLink: string
+): { headline: string; body: string } {
+  const isKatori = offer.productName.toLowerCase().includes('katori') || offer.productName.toLowerCase().includes('titanium');
+  const isSpanish = offer.languageName.toLowerCase().includes('espa') || offer.languageName.toLowerCase().includes('span');
+  const isGerman = offer.languageName.toLowerCase().includes('deut') || offer.languageName.toLowerCase().includes('germ');
+  const isFrench = offer.languageName.toLowerCase().includes('fran');
+  const isPortuguese = offer.languageName.toLowerCase().includes('portu');
+
+  if (isKatori && !isSpanish && !isGerman && !isFrench && !isPortuguese) {
+    if (style === 'alerta') {
+      return {
+        headline: `⚠️ STOP using scratched plastic chopping boards in ${offer.countryName} kitchens`,
+        body: `Quick heads-up for anyone meal-prepping for their family this week 👇\n\nLook closely at the grey knife grooves on old plastic boards — every chop releases tiny microplastics straight into warm veggies & meat.\n\nWe swapped to a 100% Pure Titanium Board (${offer.productName}) and here is what changed overnight:\n✅ Zero microplastics & zero garlic/onion odours\n✅ Non-porous surface — raw meat juices rinse off in 3 seconds\n✅ Won't warp, crack, or dull sharp chef knives\n\nI wrote up a fast Plastic vs. Wood vs. Titanium comparison + the ${offer.countryName} ${offer.offerPriceText} link here:\n👉 ${presellLink}\n\nHas anyone else in ${offer.countryName} made the switch from plastic yet?`,
+      };
+    }
+    if (style === 'comparativo') {
+      return {
+        headline: `❌ Plastic vs. 🪵 Wood vs. 🛡️ Pure Titanium — Honest 30-Second Kitchen Test`,
+        body: `Tested all three chopping boards side by side so you don't waste money replacing boards every year:\n\n❌ Plastic: Scratches immediately & sheds microplastics into food\n⚠️ Wood / Bamboo: Heavy, stains with turmeric/tomato & absorbs raw juices\n✅ 100% Pure Titanium: Non-porous, dishwasher safe, lasts decades & keeps knives sharp\n\nIf you want the exact ${offer.countryName} breakdown + current ${offer.offerPriceText} deal (${offer.discountText}):\n👉 ${presellLink}\n\nWhich board are you still using in your kitchen?`,
+      };
+    }
+    if (style === 'historia') {
+      return {
+        headline: `💬 Finally threw out every stained chopping board in our house (best ${offer.countryCode} swap this year)`,
+        body: `Honest confession: I didn't realise how gross our bamboo & plastic boards were until we chopped garlic and could still smell it two days later.\n\nWe switched to ${offer.productName} last month and cleanup takes literally 5 seconds — zero smell, zero plastic dust in kids' lunches, and super gentle on blades.\n\nSaved the quick pros/cons review & where we got the ${offer.countryName} discount (${offer.offerPriceText}) right here:\n👉 ${presellLink}\n\nWorth checking if you're upgrading your kitchen setup!`,
+      };
+    }
+    return {
+      headline: `🔥 ${offer.countryName} Kitchen Upgrade: ${offer.productName} (${offer.offerPriceText})`,
+      body: `Quick share while the ${offer.countryName} seasonal batch is still in stock 👇\n\nIf you've been looking for a microplastic-free, antibacterial chopping board that never holds odours or dulls knives:\n\n✅ 100% Pure Medical-Grade Titanium\n✅ ${offer.discountText}\n✅ Currently ${offer.offerPriceText} for ${offer.countryName} orders\n\nFull comparison + verified ${offer.countryName} link here:\n👉 ${presellLink}`,
+    };
+  }
+
+  // Multilingual eye-catching formats for ANY product & ANY country
+  if (isSpanish) {
+    if (style === 'comparativo') {
+      return {
+        headline: `❌ Opción común vs. ✅ ${offer.productName} — Comparativa real en ${offer.countryName}`,
+        body: `Si estás lidiando con ${offer.nichePain}, mira esta diferencia rápida antes de comprar:\n\n❌ Alternativas baratas: No resuelven el problema de raíz\n✅ ${offer.productName}: Diseñado para solucionar ${offer.nichePain}\n\n👉 Revisa la comparativa completa y el enlace oficial (${offer.offerPriceText}):\n${presellLink}`,
+      };
+    }
+    return {
+      headline: `⚠️ Lo que nadie te cuenta sobre ${offer.nichePain} (${offer.countryName})`,
+      body: `Hola comunidad 👋 Comparto esto rápido porque vi varias personas preguntando por ${offer.nichePain}.\n\n✅ Probamos la comparativa completa de ${offer.productName}\n✅ Disponible para ${offer.countryName} con ${offer.offerPriceText}\n\n👉 Aquí dejé el resumen y el enlace verificado:\n${presellLink}\n\n¿Alguien más por aquí ya lo probó?`,
+    };
+  }
+
+  if (isPortuguese) {
+    return {
+      headline: `⚠️ Atenção antes de gastar à toa com ${offer.nichePain}`,
+      body: `Compartilhando rápido com o grupo 👇\n\n✅ Comparativo completo sobre ${offer.productName}\n✅ Condição atual: ${offer.offerPriceText} (${offer.discountText})\n\n👉 Confira os detalhes e o link oficial aqui:\n${presellLink}`,
+    };
+  }
+
+  if (style === 'comparativo') {
+    return {
+      headline: `❌ Regular options vs. ✅ ${offer.productName} — Honest ${offer.countryName} Comparison`,
+      body: `For anyone tired of dealing with ${offer.nichePain}, here is the quick side-by-side breakdown:\n\n❌ Standard options: Overpriced or fail to fix the root issue\n✅ ${offer.productName}: Built specifically to solve ${offer.nichePain}\n\n👉 Read the full notes & check ${offer.countryName} availability (${offer.offerPriceText}):\n${presellLink}`,
+    };
+  }
+  if (style === 'historia') {
+    return {
+      headline: `💬 Quick ${offer.countryName} share: What finally solved "${offer.nichePain}" for us`,
+      body: `Saw several folks in this group asking about ${offer.nichePain} recently.\n\nWe compared a few solutions and put together quick notes on ${offer.productName} (${offer.offerPriceText} · ${offer.discountText}) so you don't have to guess:\n👉 ${presellLink}\n\nCurious what everyone else here is using!`,
+    };
+  }
+  if (style === 'oferta') {
+    return {
+      headline: `🔥 ${offer.countryName} Alert: ${offer.productName} — ${offer.offerPriceText}`,
+      body: `Sharing while the ${offer.countryName} offer is live 👇\n\n✅ Targets: ${offer.nichePain}\n✅ Offer: ${offer.offerPriceText} (${offer.discountText})\n\n👉 Check specs & verified ${offer.countryName} link here:\n${presellLink}`,
+    };
+  }
+  return {
+    headline: `⚠️ Quick warning if you're dealing with ${offer.nichePain} (${offer.countryName})`,
+    body: `Wanted to share a fast comparison before anyone wastes money on the wrong option 👇\n\n✅ Why ${offer.productName} stands out for ${offer.nichePain}\n✅ ${offer.offerPriceText} · ${offer.discountText}\n\n👉 Full comparison + ${offer.countryName} link:\n${presellLink}\n\nHope this saves someone hours of research!`,
+  };
+}
+
 function buildStructuredTemplateKit(offer: GlobalOffer): GlobalGeneratedKit {
   const isKatori = offer.productName.toLowerCase().includes('katori') || offer.productName.toLowerCase().includes('titanium');
   const isSpanish = offer.languageName.toLowerCase().includes('espa') || offer.languageName.toLowerCase().includes('span');
@@ -325,19 +461,19 @@ function buildStructuredTemplateKit(offer: GlobalOffer): GlobalGeneratedKit {
         ],
         fbGroupPosts: [
           {
-            angle: 'Microplastics Discovery (Review Style)',
-            headline: `Switched away from scratched plastic chopping boards in our ${offer.countryName} kitchen`,
-            body: `Quick share for anyone meal-prepping this week — I just read how deep grooves on old plastic boards shed microplastics right into veggies and warm meat.\n\nWe swapped to a 100% pure titanium board and the difference in smell and cleanup is huge (no garlic residue after chopping, dishwasher safe, and doesn't wreck knife edges).\n\nI put together a quick comparison (Plastic vs Wood vs Titanium) plus the ${offer.countryName} link where we got the discount:\n[PRESELL_LINK]\n\nCurious if anyone else here switched from wood/plastic yet?`,
+            angle: '🚨 Alerta Microplásticos (Alta Retenção)',
+            headline: `⚠️ STOP using scratched plastic chopping boards in ${offer.countryName} kitchens`,
+            body: `Quick heads-up for anyone meal-prepping for their family this week 👇\n\nLook closely at the grey knife grooves on old plastic boards — every chop releases tiny microplastics straight into warm veggies & meat.\n\nWe swapped to a 100% Pure Titanium Board (${offer.productName}) and here is what changed overnight:\n✅ Zero microplastics & zero garlic/onion odours\n✅ Non-porous surface — raw meat juices rinse off in 3 seconds\n✅ Won't warp, crack, or dull sharp chef knives\n\nI wrote up a fast Plastic vs. Wood vs. Titanium comparison + the ${offer.countryName} ${offer.offerPriceText} link here:\n👉 [PRESELL_LINK]\n\nHas anyone else in ${offer.countryName} made the switch from plastic yet?`,
           },
           {
-            angle: 'Knife & Hygiene Angle',
-            headline: 'Honest comparison: Wood vs Plastic vs Pure Titanium chopping boards',
-            body: `If you're tired of wooden boards warping or plastic ones staining with tomato/turmeric, worth checking out pure titanium boards.\n\nMain wins for us:\n• Non-porous so raw chicken juices rinse straight off\n• Zero microplastic dust in kids' lunches\n• Keeps chef knives sharp\n\nFull breakdown + current ${offer.offerPriceText} link here: [PRESELL_LINK]`,
+            angle: '❌ vs ✅ Comparativo Visual (Higiene)',
+            headline: `❌ Plastic vs. 🪵 Wood vs. 🛡️ Pure Titanium — Honest 30-Second Kitchen Test`,
+            body: `Tested all three chopping boards side by side so you don't waste money replacing boards every year:\n\n❌ Plastic: Scratches immediately & sheds microplastics into food\n⚠️ Wood / Bamboo: Heavy, stains with turmeric/tomato & absorbs raw juices\n✅ 100% Pure Titanium: Non-porous, dishwasher safe, lasts decades & keeps knives sharp\n\nIf you want the exact ${offer.countryName} breakdown + current ${offer.offerPriceText} deal (${offer.discountText}):\n👉 [PRESELL_LINK]\n\nWhich board are you still using in your kitchen?`,
           },
           {
-            angle: 'Question + Value Hook',
-            headline: 'Has anyone else tossed their old plastic chopping boards?',
-            body: `After noticing tiny white scratches peeling off our old board, we did a proper side-by-side comparison before buying a replacement.\n\nPure titanium ended up beating both bamboo and plastic for hygiene and cleanup. Saved the notes & ${offer.countryName} offer link here in case it helps someone else upgrading their kitchen: [PRESELL_LINK]`,
+            angle: '💬 História Real + Pergunta (Engajamento)',
+            headline: `💬 Finally threw out every stained chopping board in our house (best ${offer.countryCode} swap this year)`,
+            body: `Honest confession: I didn't realise how gross our bamboo & plastic boards were until we chopped garlic and could still smell it two days later.\n\nWe switched to ${offer.productName} last month and cleanup takes literally 5 seconds — zero smell, zero plastic dust in kids' lunches, and super gentle on blades.\n\nSaved the quick pros/cons review & where we got the ${offer.countryName} discount (${offer.offerPriceText}) right here:\n👉 [PRESELL_LINK]\n\nWorth checking if you're upgrading your kitchen setup!`,
           },
         ],
         youtubeQueries: [
@@ -465,9 +601,14 @@ function buildStructuredTemplateKit(offer: GlobalOffer): GlobalGeneratedKit {
       ],
       fbGroupPosts: [
         {
-          angle: `Helpful Discovery (${offer.countryName})`,
-          headline: `Quick tip for ${offer.countryName} folks dealing with ${offer.nichePain}`,
-          body: `Hey everyone — saw several people asking about ${offer.nichePain}.\n\nI put together a short comparison on ${offer.productName} and linked the ${offer.countryName} page (${offer.offerPriceText}) here if anyone wants to check it out:\n[PRESELL_LINK]\n\nHope this saves someone research time!`,
+          angle: `🚨 Alerta & Comparativo (${offer.countryName})`,
+          headline: `⚠️ Quick warning if you're dealing with ${offer.nichePain} (${offer.countryName})`,
+          body: `Wanted to share a fast comparison before anyone wastes money on the wrong option 👇\n\n✅ Why ${offer.productName} stands out for ${offer.nichePain}\n✅ ${offer.offerPriceText} · ${offer.discountText}\n\n👉 Full comparison + ${offer.countryName} link:\n[PRESELL_LINK]\n\nHope this saves someone hours of research!`,
+        },
+        {
+          angle: `❌ vs ✅ Comparativo Direto (${offer.countryName})`,
+          headline: `❌ Regular options vs. ✅ ${offer.productName} — Honest ${offer.countryName} Comparison`,
+          body: `For anyone tired of dealing with ${offer.nichePain}, here is the quick side-by-side breakdown:\n\n❌ Standard options: Overpriced or fail to fix the root issue\n✅ ${offer.productName}: Built specifically to solve ${offer.nichePain}\n\n👉 Read the full notes & check ${offer.countryName} availability (${offer.offerPriceText}):\n[PRESELL_LINK]`,
         },
       ],
       youtubeQueries: [
@@ -548,10 +689,11 @@ export const GlobalMediaScalersTab: React.FC = () => {
       const pendingArr: any[] = pendingRaw ? JSON.parse(pendingRaw) : [];
       if (pendingArr.length > 0) {
         const mappedPending: GlobalInboxGroup[] = pendingArr.map((g, idx) => {
-          const det = detectScopeAndCountry(g.name || '', g.searchTerm);
+          const cleanName = sanitizeGlobalGroupName(g.name || '');
+          const det = detectScopeAndCountry(cleanName, g.searchTerm);
           return {
             id: g.id || `inbox-${Date.now()}-${idx}`,
-            name: g.name || 'Facebook Group',
+            name: cleanName,
             url: g.url || '',
             membersCount: Number(g.membersCount) || 0,
             suggestedScope: det.scope,
@@ -564,9 +706,11 @@ export const GlobalMediaScalersTab: React.FC = () => {
           (item, i, self) => item.url && i === self.findIndex((t) => t.url.toLowerCase() === item.url.toLowerCase())
         );
         localStorage.removeItem(STORAGE_KEYS.PENDING_BRIDGE);
-        return merged;
+        return merged.map((item) => ({ ...item, name: sanitizeGlobalGroupName(item.name) }));
       }
-      return Array.isArray(inboxArr) ? inboxArr : [];
+      return Array.isArray(inboxArr)
+        ? inboxArr.map((item) => ({ ...item, name: sanitizeGlobalGroupName(item.name) }))
+        : [];
     } catch {
       return [];
     }
@@ -576,7 +720,10 @@ export const GlobalMediaScalersTab: React.FC = () => {
   const [globalGroups, setGlobalGroups] = useState<GlobalGroupItem[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.GROUPS);
-      return saved ? JSON.parse(saved) : [];
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed)
+        ? parsed.map((g: GlobalGroupItem) => ({ ...g, name: sanitizeGlobalGroupName(g.name) }))
+        : [];
     } catch {
       return [];
     }
@@ -636,6 +783,15 @@ export const GlobalMediaScalersTab: React.FC = () => {
   const [logStatusFilter, setLogStatusFilter] = useState<'all' | 'published' | 'awaiting_admin' | 'join_requested' | 'not_member' | 'error'>('all');
   const [renamingAudienceId, setRenamingAudienceId] = useState<string | null>(null);
   const [renameAudienceInput, setRenameAudienceInput] = useState<string>('');
+  const [chamativaStyle, setChamativaStyle] = useState<ChamativaStyle>('alerta');
+  const [showFeedPreview, setShowFeedPreview] = useState<boolean>(true);
+  const [lastDispatchState, setLastDispatchState] = useState<{
+    groupName: string;
+    groupUrl: string;
+    phase: 'opening' | 'done';
+    statusLabel: string;
+    updatedAt: string;
+  } | null>(null);
   const [customPostHeadline, setCustomPostHeadline] = useState('');
   const [customPostBody, setCustomPostBody] = useState('');
   const [botLogs, setBotLogs] = useState<FacebookPostLog[]>(() => {
@@ -763,10 +919,11 @@ export const GlobalMediaScalersTab: React.FC = () => {
       const normalized: GlobalInboxGroup[] = incoming
         .filter((g) => g && g.url)
         .map((g, idx) => {
-          const det = detectScopeAndCountry(g.name || '', searchQuery || g.searchTerm);
+          const cleanName = sanitizeGlobalGroupName(String(g.name || 'Facebook Group'));
+          const det = detectScopeAndCountry(cleanName, searchQuery || g.searchTerm);
           return {
             id: g.id || `inbox-${Date.now()}-${idx}`,
-            name: String(g.name || 'Facebook Group').trim(),
+            name: cleanName,
             url: String(g.url).trim(),
             membersCount: Number(g.membersCount) || 0,
             suggestedScope: det.scope,
@@ -875,6 +1032,22 @@ export const GlobalMediaScalersTab: React.FC = () => {
           },
           ...prev,
         ];
+      });
+
+      const statusMap: Record<string, string> = {
+        published: 'Postagem Feita',
+        awaiting_admin: 'Aguardando Aprovação Admin',
+        join_requested: 'Entrada Solicitada',
+        not_member: 'Precisa Participar',
+        rate_limited: 'Limite Temporário FB',
+        unavailable: 'Grupo Indisponível',
+      };
+      setLastDispatchState({
+        groupName: sanitizeGlobalGroupName(groupName || 'Global Facebook Group'),
+        groupUrl: groupUrl || 'https://www.facebook.com/groups',
+        phase: 'done',
+        statusLabel: (normalizedStatus && statusMap[normalizedStatus]) || 'Verificado na Extensão',
+        updatedAt: formattedNow,
       });
 
       if (normalizedStatus === 'rate_limited') {
@@ -1154,7 +1327,7 @@ export const GlobalMediaScalersTab: React.FC = () => {
     const chosen = existingBrazilGroups.filter((g) => selectedBrazilIdsToCopy.includes(g.id));
     const pulled: GlobalInboxGroup[] = chosen.map((g) => ({
       id: `pulled-${g.id}`,
-      name: g.name,
+      name: sanitizeGlobalGroupName(g.name),
       url: g.url,
       membersCount: g.membersCount || 0,
       suggestedScope: 'global',
@@ -1391,6 +1564,15 @@ export const GlobalMediaScalersTab: React.FC = () => {
       )
     );
 
+    const cleanGroupName = sanitizeGlobalGroupName(group.name);
+    setLastDispatchState({
+      groupName: cleanGroupName,
+      groupUrl: group.url,
+      phase: 'opening',
+      statusLabel: autoJoinAndPostEnabled ? 'Abrindo aba → Entrando → Postando...' : 'Aberto para postagem manual',
+      updatedAt: now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+    });
+
     try {
       window.postMessage(
         {
@@ -1398,7 +1580,7 @@ export const GlobalMediaScalersTab: React.FC = () => {
           logId,
           groupId: group.id,
           groupUrl: group.url,
-          groupName: group.name,
+          groupName: cleanGroupName,
           fullText,
           autoJoinAndPost: autoJoinAndPostEnabled,
         },
@@ -1408,10 +1590,53 @@ export const GlobalMediaScalersTab: React.FC = () => {
 
     setBanner({
       message: autoJoinAndPostEnabled
-        ? `Grupo Global "${group.name}" aberto! Extensão v1.4.0 vai entrar (se precisar), postar e fechar a aba automaticamente.`
-        : `Grupo Global "${group.name}" aberto e texto copiado para postagem manual assistida.`,
+        ? `Grupo Global "${cleanGroupName}" aberto! Extensão v1.4.0 vai entrar (se precisar), postar e fechar a aba automaticamente.`
+        : `Grupo Global "${cleanGroupName}" aberto e texto copiado para postagem manual assistida.`,
       tone: 'success',
     });
+    setCurrentPostIndex((prev) => (prev + 1) % activeAudienceGroups.length);
+  };
+
+  const handleApplyChamativaPreset = (style: ChamativaStyle) => {
+    if (!activeOffer) return;
+    setChamativaStyle(style);
+    const presellLink = appendTrackingParam(
+      activeOffer.presellUrl || 'https://global-sell-beta.vercel.app/',
+      'utm_source',
+      'facebook_groups'
+    );
+    const built = buildEyeCatchingFbPost(activeOffer, style, presellLink);
+    setCustomPostHeadline(built.headline);
+    setCustomPostBody(built.body);
+  };
+
+  const handleRemovePortugueseFromGlobalQueue = () => {
+    const ptIds = activeAudienceGroups.filter((g) => isLikelyPortugueseGroup(g.name, g.url)).map((g) => g.id);
+    if (ptIds.length === 0) {
+      setBanner({
+        message: 'Nenhum grupo em português detectado nesta fila Global.',
+        tone: 'info',
+      });
+      return;
+    }
+    const ptSet = new Set(ptIds);
+    if (activeAudience) {
+      setGlobalAudiences((prev) =>
+        prev.map((a) =>
+          a.id === activeAudience.id ? { ...a, groupIds: a.groupIds.filter((id) => !ptSet.has(id)) } : a
+        )
+      );
+    }
+    setGlobalGroups((prev) => prev.filter((g) => !ptSet.has(g.id)));
+    setCurrentPostIndex(0);
+    setBanner({
+      message: `${ptIds.length} grupos em português removidos apenas desta fila Global! Seus dados do Robô Brasil continuam 100% intactos.`,
+      tone: 'success',
+    });
+  };
+
+  const handleSkipNextGroup = () => {
+    if (activeAudienceGroups.length <= 1) return;
     setCurrentPostIndex((prev) => (prev + 1) % activeAudienceGroups.length);
   };
 
@@ -2621,284 +2846,100 @@ export const GlobalMediaScalersTab: React.FC = () => {
           </div>
 
           {/* FACEBOOK GROUPS GLOBAL */}
-          {botChannel === 'facebook' && (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-              {/* Left: Search Launchers + Audience + Copy + Start/Pause */}
-              <div className="lg:col-span-7 space-y-5">
-                {/* 1-Click Search Launchers for Mapping */}
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <h4 className="text-sm font-bold text-white">
-                      1. Buscar & Mapear Grupos no Facebook ({activeOffer.countryName})
-                    </h4>
-                    <span className="text-xs text-slate-400">Extensão v1.4.0 envia p/ Caixa Geral</span>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {activeKit.organicSocialKit.fbGroupQueries.map((q, idx) => (
-                      <a
-                        key={idx}
-                        href={`https://www.facebook.com/search/groups/?q=${encodeURIComponent(q)}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs text-cyan-200 rounded-lg inline-flex items-center gap-1.5"
-                      >
-                        <Search className="w-3 h-3" />
-                        <span>{q}</span>
-                        <ExternalLink className="w-3 h-3 opacity-70" />
-                      </a>
-                    ))}
-                  </div>
-                </div>
+          {botChannel === 'facebook' && (() => {
+            const queueLen = activeAudienceGroups.length;
+            const currentQueueNum = queueLen > 0 ? (currentPostIndex % queueLen) + 1 : 0;
+            const nextGroup = queueLen > 0 ? activeAudienceGroups[currentPostIndex % queueLen] : null;
+            const nextGroupCleanName = nextGroup ? sanitizeGlobalGroupName(nextGroup.name) : '';
+            const queueProgressPct = queueLen > 0 ? Math.min(100, Math.round((currentQueueNum / queueLen) * 100)) : 0;
+            const ptCountInQueue = activeAudienceGroups.filter((g) => isLikelyPortugueseGroup(g.name, g.url)).length;
 
-                {/* Audience, Product & Copy Config */}
+            const publishedCount = botLogs.filter((l) => l.approvalStatus === 'published').length;
+            const adminCount = botLogs.filter((l) => l.approvalStatus === 'awaiting_admin').length;
+            const joinPendingCount = botLogs.filter(
+              (l) => l.approvalStatus === 'join_requested' || l.approvalStatus === 'not_member'
+            ).length;
+            const errorCount = botLogs.filter(
+              (l) => l.approvalStatus === 'rate_limited' || l.approvalStatus === 'unavailable' || l.status === 'error'
+            ).length;
+
+            const latestLog = botLogs[0] || null;
+            const activePresellTrackingUrl = appendTrackingParam(
+              activeOffer.presellUrl || 'https://global-sell-beta.vercel.app/',
+              'utm_source',
+              'facebook_groups'
+            );
+
+            return (
+              <div className="space-y-6">
+                {/* DISPLAY DE ACOMPANHAMENTO AO VIVO */}
                 <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <h4 className="text-sm font-bold text-white">2. Escolher Produto, Público Nomeado & Publicar</h4>
-                    <button
-                      type="button"
-                      onClick={() => setSubTab('triage')}
-                      className="text-xs text-cyan-400 hover:text-cyan-300 cursor-pointer"
-                    >
-                      Gerenciar Públicos ({globalAudiences.length})
-                    </button>
-                  </div>
-
-                  {/* Product Selector directly in Dispatch Panel */}
-                  <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 space-y-2">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="text-xs font-semibold text-cyan-300">
-                        Qual Produto / Oferta para Disparar
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setIsNewOfferOpen(true)}
-                        className="text-xs text-emerald-400 hover:text-emerald-300 font-medium cursor-pointer"
-                      >
-                        + Cadastrar Novo Produto
-                      </button>
-                    </div>
-                    <select
-                      value={activeOffer.id}
-                      onChange={(e) => setSelectedOfferId(e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs font-medium text-white"
-                    >
-                      {offers.map((offer) => (
-                        <option key={offer.id} value={offer.id}>
-                          {offer.productName} ({offer.countryName} · {offer.languageName} · {offer.offerPriceText})
-                        </option>
-                      ))}
-                    </select>
-                    <div className="text-[11px] text-slate-400 truncate">
-                      Link Presell injetado neste disparo:{' '}
-                      <span className="font-mono text-emerald-400">
-                        {appendTrackingParam(
-                          activeOffer.presellUrl || 'https://global-sell-beta.vercel.app/',
-                          'utm_source',
-                          'facebook_groups'
-                        )}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <label className="block space-y-1">
-                      <span className="text-xs text-slate-400">Público Selecionado</span>
-                      <select
-                        value={activeAudience?.id || ''}
-                        onChange={(e) => {
-                          setSelectedAudienceId(e.target.value);
-                          setCurrentPostIndex(0);
-                        }}
-                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white"
-                      >
-                        {globalAudiences.length === 0 && (
-                          <option value="">Todos os Grupos Globais ({globalGroups.length})</option>
-                        )}
-                        {globalAudiences.map((aud) => (
-                          <option key={aud.id} value={aud.id}>
-                            {aud.name} ({aud.countryName} · {aud.groupIds.length} grupos)
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <label className="block space-y-1">
-                      <span className="text-xs text-slate-400">Ângulo da Copy ({activeOffer.languageName})</span>
-                      <select
-                        onChange={(e) => {
-                          const post = activeKit.organicSocialKit.fbGroupPosts[Number(e.target.value)];
-                          if (post) {
-                            const presellLink = appendTrackingParam(
-                              activeOffer.presellUrl || 'https://global-sell-beta.vercel.app/',
-                              'utm_source',
-                              'facebook_groups'
-                            );
-                            setCustomPostHeadline(post.headline);
-                            setCustomPostBody(post.body.replace(/\[PRESELL_LINK\]/g, presellLink));
-                          }
-                        }}
-                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white"
-                      >
-                        {activeKit.organicSocialKit.fbGroupPosts.map((p, idx) => (
-                          <option key={idx} value={idx}>
-                            {p.angle}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-
-                  <label className="block space-y-1">
-                    <span className="text-xs text-slate-400">Título / Abertura do Post</span>
-                    <input
-                      type="text"
-                      value={customPostHeadline}
-                      onChange={(e) => setCustomPostHeadline(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white"
-                    />
-                  </label>
-
-                  <label className="block space-y-1">
-                    <span className="text-xs text-slate-400">Corpo da Postagem (com link da sua Global Presell rastreado)</span>
-                    <textarea
-                      rows={6}
-                      value={customPostBody}
-                      onChange={(e) => setCustomPostBody(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-xs text-slate-100 leading-relaxed"
-                    />
-                  </label>
-
-                  {/* Auto Join + Auto Post + Auto Close Tab Toggle (Same System as Brazil v1.4.0) */}
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5">
-                    <div className="text-xs">
-                      <div className="font-semibold text-white">
-                        Sistema Automático: Abrir → Entrar no Grupo → Postar → Fechar Aba (v1.4.0)
+                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                    <div className="space-y-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                        <span className={`font-semibold ${isBotRunning ? 'text-emerald-400' : 'text-slate-300'}`}>
+                          {isBotRunning ? 'Robô Global em Execução' : 'Robô Global Pausado'}
+                        </span>
+                        <span aria-hidden="true">·</span>
+                        <span className="truncate max-w-[260px]">
+                          Público: <strong className="text-slate-200">{activeAudience ? activeAudience.name : 'Todos Globais'}</strong>
+                        </span>
+                        <span aria-hidden="true">·</span>
+                        <span className="truncate max-w-[260px]">
+                          Oferta: <strong className="text-cyan-300">{activeOffer.productName}</strong>
+                        </span>
                       </div>
-                      <div className="text-[11px] text-slate-400">
-                        {autoJoinAndPostEnabled
-                          ? 'Ativado: entra automaticamente no grupo (se precisar), preenche, publica (Post/Postar) e fecha a aba em 4s.'
-                          : 'Desativado: apenas abre o grupo e copia o texto para você postar manualmente.'}
+
+                      <div className="text-sm font-semibold text-white truncate">
+                        {nextGroup ? (
+                          <span>
+                            Próximo (#{currentQueueNum} de {queueLen}): {nextGroupCleanName}
+                          </span>
+                        ) : (
+                          <span>Nenhum grupo na fila deste público</span>
+                        )}
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const next = !autoJoinAndPostEnabled;
-                        setAutoJoinAndPostEnabled(next);
-                        try {
-                          localStorage.setItem('autoviral_global_auto_join_post', String(next));
-                        } catch {}
-                      }}
-                      className={`px-3 py-1.5 text-xs font-semibold rounded-md cursor-pointer shrink-0 ${
-                        autoJoinAndPostEnabled ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-300'
-                      }`}
-                    >
-                      {autoJoinAndPostEnabled ? 'Auto-Post + Fechar Aba: ON' : 'Manual Assistido'}
-                    </button>
-                  </div>
 
-                  {/* Queue Preview Collapsible */}
-                  {activeAudienceGroups.length > 0 && (
-                    <div className="border border-slate-800 rounded-lg bg-slate-950">
-                      <button
-                        type="button"
-                        onClick={() => setShowQueuePreview((v) => !v)}
-                        className="w-full px-3 py-2 flex items-center justify-between text-xs text-slate-300 hover:text-white cursor-pointer"
-                      >
-                        <span className="truncate">
-                          Próximo da fila (#{(currentPostIndex % activeAudienceGroups.length) + 1} de{' '}
-                          {activeAudienceGroups.length}):{' '}
-                          <strong className="text-white">
-                            {activeAudienceGroups[currentPostIndex % activeAudienceGroups.length]?.name}
-                          </strong>
-                        </span>
-                        <span className="text-cyan-400 shrink-0 ml-2">
-                          {showQueuePreview ? 'Ocultar fila' : 'Ver / editar fila'}
-                        </span>
-                      </button>
-
-                      {showQueuePreview && (
-                        <div className="border-t border-slate-800 p-2.5 space-y-2">
-                          <input
-                            type="text"
-                            value={queueSearchFilter}
-                            onChange={(e) => setQueueSearchFilter(e.target.value)}
-                            placeholder="Filtrar grupo na fila..."
-                            className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white"
-                          />
-                          <div className="max-h-48 overflow-y-auto divide-y divide-slate-800">
-                            {activeAudienceGroups
-                              .filter((g) =>
-                                !queueSearchFilter.trim()
-                                  ? true
-                                  : g.name.toLowerCase().includes(queueSearchFilter.toLowerCase())
-                              )
-                              .slice(0, 60)
-                              .map((g, idx) => (
-                                <div key={g.id} className="py-1.5 px-1 flex items-center justify-between gap-2 text-xs">
-                                  <span className="text-slate-200 truncate">
-                                    {idx + 1}. {g.name}
-                                  </span>
-                                  <div className="flex items-center gap-2 shrink-0">
-                                    <span className="text-[11px] text-slate-400 tabular-nums">
-                                      {(g.membersCount || 0).toLocaleString('pt-BR')}
-                                    </span>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        if (activeAudience) {
-                                          setGlobalAudiences((prev) =>
-                                            prev.map((a) =>
-                                              a.id === activeAudience.id
-                                                ? { ...a, groupIds: a.groupIds.filter((id) => id !== g.id) }
-                                                : a
-                                            )
-                                          );
-                                        } else {
-                                          setGlobalGroups((prev) => prev.filter((item) => item.id !== g.id));
-                                        }
-                                      }}
-                                      className="text-slate-500 hover:text-rose-400 cursor-pointer"
-                                      title="Remover grupo deste público"
-                                    >
-                                      <Trash2 className="w-3 h-3" />
-                                    </button>
-                                  </div>
-                                </div>
-                              ))}
+                    {/* Countdown Clock + Primary Controls */}
+                    <div className="flex flex-wrap items-center gap-3 shrink-0">
+                      <div className="flex items-center gap-2.5 bg-slate-950 border border-slate-800 rounded-lg px-3.5 py-2">
+                        <Clock className={`w-4 h-4 ${isBotRunning ? 'text-emerald-400' : 'text-slate-500'}`} />
+                        <div>
+                          <div className="text-[10px] text-slate-400 leading-none">Próximo disparo</div>
+                          <div className="font-mono text-lg font-bold text-white tabular-nums leading-tight">
+                            {isBotRunning ? formatCountdownClock(secondsRemaining) : 'Pronto'}
                           </div>
                         </div>
+                      </div>
+
+                      {queueLen > 1 && (
+                        <button
+                          type="button"
+                          onClick={handleSkipNextGroup}
+                          className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 rounded-lg inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                          title="Pular para o próximo grupo da fila"
+                        >
+                          <SkipForward className="w-3.5 h-3.5" />
+                          <span>Pular</span>
+                        </button>
                       )}
-                    </div>
-                  )}
 
-                  {/* Bot Controls */}
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-800 pt-4">
-                    <div className="text-xs text-slate-400 tabular-nums">
-                      <div>
-                        Grupos na fila atual: <strong className="text-white">{activeAudienceGroups.length}</strong>
-                      </div>
-                      <div>
-                        {isBotRunning
-                          ? `Próximo disparo automático em ${secondsRemaining}s (cadência 300s–400s)`
-                          : 'Modo seguro 300s–400s · Pronto para iniciar'}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2">
                       <button
                         type="button"
                         onClick={executeSingleGlobalPost}
-                        disabled={activeAudienceGroups.length === 0}
-                        className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-xs font-medium text-white rounded-lg cursor-pointer"
+                        disabled={queueLen === 0}
+                        className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-xs font-medium text-white rounded-lg inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
                       >
-                        Disparar 1 Grupo Agora
+                        <Send className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>Disparar 1 Agora</span>
                       </button>
+
                       <button
                         type="button"
                         onClick={handleToggleGlobalBot}
-                        disabled={activeAudienceGroups.length === 0 && !isBotRunning}
-                        className={`px-4 py-2 text-xs font-semibold rounded-lg inline-flex items-center gap-2 cursor-pointer ${
+                        disabled={queueLen === 0 && !isBotRunning}
+                        className={`px-4 py-2 text-xs font-semibold rounded-lg inline-flex items-center gap-2 cursor-pointer whitespace-nowrap ${
                           isBotRunning
                             ? 'bg-amber-600 hover:bg-amber-500 text-white'
                             : 'bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white'
@@ -2909,8 +2950,427 @@ export const GlobalMediaScalersTab: React.FC = () => {
                       </button>
                     </div>
                   </div>
+
+                  {/* Queue Progress Bar */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-[11px] text-slate-400 tabular-nums">
+                      <span>Progresso da Fila ({currentQueueNum}/{queueLen} · {queueProgressPct}%)</span>
+                      <span>Cadência segura: 300s–400s · Auto-Post + Fechar Aba: {autoJoinAndPostEnabled ? 'Ativo' : 'Manual'}</span>
+                    </div>
+                    <div className="h-1.5 w-full bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+                      <div
+                        className="h-full bg-cyan-500 transition-all duration-300"
+                        style={{ width: `${queueProgressPct}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* 5-Column KPI Strip */}
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-3 border-t border-slate-800">
+                    <div>
+                      <div className="text-[11px] text-slate-400">Na Fila Atual</div>
+                      <div className="font-mono text-xl font-bold text-white tabular-nums">{queueLen}</div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] text-slate-400">Postagens Feitas</div>
+                      <div className="font-mono text-xl font-bold text-emerald-400 tabular-nums">{publishedCount}</div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] text-slate-400">Aguardando Admin</div>
+                      <div className="font-mono text-xl font-bold text-amber-300 tabular-nums">{adminCount}</div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] text-slate-400">Entrada / Participar</div>
+                      <div className="font-mono text-xl font-bold text-cyan-300 tabular-nums">{joinPendingCount}</div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] text-slate-400">Erros / Limite</div>
+                      <div className="font-mono text-xl font-bold text-rose-400 tabular-nums">{errorCount}</div>
+                    </div>
+                  </div>
+
+                  {/* Current / Last Action Telemetry Bar */}
+                  <div className="border-t border-slate-800 pt-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                    {lastDispatchState ? (
+                      <div className="flex flex-wrap items-center gap-2 min-w-0">
+                        {lastDispatchState.phase === 'opening' ? (
+                          <RefreshCw className="w-3.5 h-3.5 text-cyan-400 shrink-0 animate-spin" />
+                        ) : (
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        )}
+                        <span className="text-slate-400 shrink-0">Último disparo:</span>
+                        <span className="font-semibold text-white truncate max-w-[280px]">{lastDispatchState.groupName}</span>
+                        <span aria-hidden="true" className="text-slate-600">·</span>
+                        <span className="text-cyan-300">{lastDispatchState.statusLabel}</span>
+                        <span className="text-slate-500 font-mono tabular-nums">({lastDispatchState.updatedAt})</span>
+                      </div>
+                    ) : latestLog ? (
+                      <div className="flex flex-wrap items-center gap-2 min-w-0">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span className="text-slate-400 shrink-0">Último registrado:</span>
+                        <span className="font-semibold text-white truncate max-w-[280px]">
+                          {sanitizeGlobalGroupName(latestLog.groupName)}
+                        </span>
+                        <span className="text-slate-500 font-mono tabular-nums">({latestLog.postedAt})</span>
+                      </div>
+                    ) : (
+                      <div className="text-slate-400">
+                        Aguardando primeiro disparo neste navegador. Clique em "Disparar 1 Agora" ou "Iniciar Robô Global".
+                      </div>
+                    )}
+
+                    {ptCountInQueue > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleRemovePortugueseFromGlobalQueue}
+                        className="px-2.5 py-1 bg-amber-950/60 hover:bg-amber-900/70 border border-amber-700/60 text-amber-200 text-[11px] font-medium rounded-md inline-flex items-center gap-1.5 cursor-pointer shrink-0 whitespace-nowrap"
+                      >
+                        <Filter className="w-3 h-3" />
+                        <span>Limpar {ptCountInQueue} grupos BR/PT desta fila Global</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
+
+                {/* Main 2-Column Workspace */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                  {/* Left: Search Launchers + Audience + Chamativa Copy + Preview */}
+                  <div className="lg:col-span-7 space-y-5">
+                    {/* 1-Click Search Launchers for Mapping */}
+                    <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <h4 className="text-sm font-bold text-white">
+                          1. Buscar & Mapear Grupos no Facebook ({activeOffer.countryName})
+                        </h4>
+                        <span className="text-xs text-slate-400">Extensão v1.4.0 envia p/ Caixa Geral</span>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {activeKit.organicSocialKit.fbGroupQueries.map((q, idx) => (
+                          <a
+                            key={idx}
+                            href={`https://www.facebook.com/search/groups/?q=${encodeURIComponent(q)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs text-cyan-200 rounded-lg inline-flex items-center gap-1.5"
+                          >
+                            <Search className="w-3 h-3" />
+                            <span>{q}</span>
+                            <ExternalLink className="w-3 h-3 opacity-70" />
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Audience, Product & Copy Config */}
+                    <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <h4 className="text-sm font-bold text-white">2. Escolher Produto, Público & Postagem Chamativa</h4>
+                        <button
+                          type="button"
+                          onClick={() => setSubTab('triage')}
+                          className="text-xs text-cyan-400 hover:text-cyan-300 cursor-pointer"
+                        >
+                          Gerenciar Públicos ({globalAudiences.length})
+                        </button>
+                      </div>
+
+                      {/* Product Selector directly in Dispatch Panel */}
+                      <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 space-y-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="text-xs font-semibold text-cyan-300">
+                            Qual Produto / Oferta para Disparar
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setIsNewOfferOpen(true)}
+                            className="text-xs text-emerald-400 hover:text-emerald-300 font-medium cursor-pointer"
+                          >
+                            + Cadastrar Novo Produto
+                          </button>
+                        </div>
+                        <select
+                          value={activeOffer.id}
+                          onChange={(e) => setSelectedOfferId(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs font-medium text-white"
+                        >
+                          {offers.map((offer) => (
+                            <option key={offer.id} value={offer.id}>
+                              {offer.productName} ({offer.countryName} · {offer.languageName} · {offer.offerPriceText})
+                            </option>
+                          ))}
+                        </select>
+                        <div className="text-[11px] text-slate-400 truncate">
+                          Link Presell injetado neste disparo:{' '}
+                          <span className="font-mono text-emerald-400">{activePresellTrackingUrl}</span>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <label className="block space-y-1">
+                          <span className="text-xs text-slate-400">Público Selecionado</span>
+                          <select
+                            value={activeAudience?.id || ''}
+                            onChange={(e) => {
+                              setSelectedAudienceId(e.target.value);
+                              setCurrentPostIndex(0);
+                            }}
+                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white"
+                          >
+                            {globalAudiences.length === 0 && (
+                              <option value="">Todos os Grupos Globais ({globalGroups.length})</option>
+                            )}
+                            {globalAudiences.map((aud) => (
+                              <option key={aud.id} value={aud.id}>
+                                {aud.name} ({aud.countryName} · {aud.groupIds.length} grupos)
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <label className="block space-y-1">
+                          <span className="text-xs text-slate-400">Ângulo Salvo do Kit ({activeOffer.languageName})</span>
+                          <select
+                            onChange={(e) => {
+                              const post = activeKit.organicSocialKit.fbGroupPosts[Number(e.target.value)];
+                              if (post) {
+                                setCustomPostHeadline(post.headline);
+                                setCustomPostBody(post.body.replace(/\[PRESELL_LINK\]/g, activePresellTrackingUrl));
+                              }
+                            }}
+                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white"
+                          >
+                            {activeKit.organicSocialKit.fbGroupPosts.map((p, idx) => (
+                              <option key={idx} value={idx}>
+                                {p.angle}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+
+                      {/* 1-Click Postagem Chamativa Style Bar */}
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-semibold text-white">
+                            Gerar Postagem Chamativa em 1 Clique ({activeOffer.languageName})
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setShowFeedPreview((v) => !v)}
+                            className="text-xs text-cyan-400 hover:text-cyan-300 inline-flex items-center gap-1 cursor-pointer"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>{showFeedPreview ? 'Ocultar Prévia Visual' : 'Ver Prévia no Feed'}</span>
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                          {[
+                            { id: 'alerta' as const, label: '⚠️ Alerta / Dor' },
+                            { id: 'comparativo' as const, label: '❌ vs ✅ Comparativo' },
+                            { id: 'historia' as const, label: '💬 História + Pergunta' },
+                            { id: 'oferta' as const, label: '🔥 Oferta Direta' },
+                          ].map((preset) => (
+                            <button
+                              key={preset.id}
+                              type="button"
+                              onClick={() => handleApplyChamativaPreset(preset.id)}
+                              className={`px-2.5 py-2 text-xs font-medium rounded-lg border transition-colors cursor-pointer whitespace-nowrap ${
+                                chamativaStyle === preset.id
+                                  ? 'bg-cyan-600/20 border-cyan-500 text-cyan-200'
+                                  : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700 hover:text-white'
+                              }`}
+                            >
+                              {preset.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <label className="block space-y-1">
+                        <span className="text-xs text-slate-400">Título / Gancho Chamativo do Post</span>
+                        <input
+                          type="text"
+                          value={customPostHeadline}
+                          onChange={(e) => setCustomPostHeadline(e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs font-semibold text-white"
+                        />
+                      </label>
+
+                      <label className="block space-y-1">
+                        <span className="text-xs text-slate-400">Corpo da Postagem (formatação visual + link Presell rastreado)</span>
+                        <textarea
+                          rows={7}
+                          value={customPostBody}
+                          onChange={(e) => setCustomPostBody(e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-xs text-slate-100 leading-relaxed"
+                        />
+                      </label>
+
+                      {/* Live Facebook Feed Preview */}
+                      {showFeedPreview && (
+                        <div className="border border-slate-800 rounded-xl bg-slate-950 p-4 space-y-3">
+                          <div className="flex items-center justify-between gap-2 text-[11px] text-slate-400">
+                            <span>Prévia Real no Feed do Grupo</span>
+                            <span className="truncate max-w-[260px]">
+                              {nextGroupCleanName || `${activeOffer.countryName} Community Group`}
+                            </span>
+                          </div>
+
+                          <div className="bg-slate-900 border border-slate-800 rounded-lg p-3.5 space-y-3">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-8 h-8 rounded-full bg-cyan-600/25 border border-cyan-500/40 flex items-center justify-center text-xs font-bold text-cyan-300 shrink-0">
+                                {activeOffer.countryCode}
+                              </div>
+                              <div className="min-w-0">
+                                <div className="text-xs font-semibold text-white truncate">
+                                  Publicação no Grupo · {nextGroupCleanName || activeOffer.countryName}
+                                </div>
+                                <div className="text-[11px] text-slate-400">Agora mesmo · Público</div>
+                              </div>
+                            </div>
+
+                            <div className="space-y-2 text-xs text-slate-100 leading-relaxed whitespace-pre-line break-words">
+                              {customPostHeadline && (
+                                <div className="font-bold text-white text-[13px]">{customPostHeadline}</div>
+                              )}
+                              <div>{customPostBody}</div>
+                            </div>
+
+                            <div className="border border-slate-800 bg-slate-950 rounded-lg p-2.5 flex items-center justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="text-[10px] text-emerald-400 font-mono truncate">
+                                  {activePresellTrackingUrl.replace(/^https?:\/\//, '')}
+                                </div>
+                                <div className="text-xs font-semibold text-white truncate">
+                                  {activeOffer.productName} · {activeOffer.offerPriceText}
+                                </div>
+                                <div className="text-[11px] text-slate-400 truncate">{activeOffer.discountText}</div>
+                              </div>
+                              <ExternalLink className="w-4 h-4 text-slate-500 shrink-0" />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Auto Join + Auto Post + Auto Close Tab Toggle (Same System as Brazil v1.4.0) */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5">
+                        <div className="text-xs">
+                          <div className="font-semibold text-white">
+                            Sistema Automático: Abrir → Entrar no Grupo → Postar → Fechar Aba (v1.4.0)
+                          </div>
+                          <div className="text-[11px] text-slate-400">
+                            {autoJoinAndPostEnabled
+                              ? 'Ativado: entra automaticamente no grupo (se precisar), preenche, publica (Post/Postar) e fecha a aba em 4s.'
+                              : 'Desativado: apenas abre o grupo e copia o texto para você postar manualmente.'}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = !autoJoinAndPostEnabled;
+                            setAutoJoinAndPostEnabled(next);
+                            try {
+                              localStorage.setItem('autoviral_global_auto_join_post', String(next));
+                            } catch {}
+                          }}
+                          className={`px-3 py-1.5 text-xs font-semibold rounded-md cursor-pointer shrink-0 ${
+                            autoJoinAndPostEnabled ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-300'
+                          }`}
+                        >
+                          {autoJoinAndPostEnabled ? 'Auto-Post + Fechar Aba: ON' : 'Manual Assistido'}
+                        </button>
+                      </div>
+
+                      {/* Queue Preview Collapsible */}
+                      {activeAudienceGroups.length > 0 && (
+                        <div className="border border-slate-800 rounded-lg bg-slate-950">
+                          <button
+                            type="button"
+                            onClick={() => setShowQueuePreview((v) => !v)}
+                            className="w-full px-3 py-2 flex items-center justify-between text-xs text-slate-300 hover:text-white cursor-pointer"
+                          >
+                            <span className="truncate">
+                              Próximo da fila (#{currentQueueNum} de {queueLen}):{' '}
+                              <strong className="text-white">{nextGroupCleanName}</strong>
+                            </span>
+                            <span className="text-cyan-400 shrink-0 ml-2">
+                              {showQueuePreview ? 'Ocultar fila' : 'Ver / limpar fila'}
+                            </span>
+                          </button>
+
+                          {showQueuePreview && (
+                            <div className="border-t border-slate-800 p-2.5 space-y-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <input
+                                  type="text"
+                                  value={queueSearchFilter}
+                                  onChange={(e) => setQueueSearchFilter(e.target.value)}
+                                  placeholder="Filtrar grupo na fila..."
+                                  className="flex-1 min-w-[180px] bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white"
+                                />
+                                {ptCountInQueue > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={handleRemovePortugueseFromGlobalQueue}
+                                    className="px-2.5 py-1.5 bg-amber-950/60 hover:bg-amber-900/70 border border-amber-700/60 text-amber-200 text-xs rounded cursor-pointer whitespace-nowrap"
+                                  >
+                                    Remover {ptCountInQueue} BR/PT desta fila
+                                  </button>
+                                )}
+                              </div>
+                              <div className="max-h-48 overflow-y-auto divide-y divide-slate-800">
+                                {activeAudienceGroups
+                                  .filter((g) => {
+                                    const clean = sanitizeGlobalGroupName(g.name);
+                                    return !queueSearchFilter.trim()
+                                      ? true
+                                      : clean.toLowerCase().includes(queueSearchFilter.toLowerCase());
+                                  })
+                                  .slice(0, 60)
+                                  .map((g, idx) => {
+                                    const clean = sanitizeGlobalGroupName(g.name);
+                                    const isPt = isLikelyPortugueseGroup(clean, g.url);
+                                    return (
+                                      <div key={g.id} className="py-1.5 px-1 flex items-center justify-between gap-2 text-xs">
+                                        <span className="text-slate-200 truncate">
+                                          {idx + 1}. {clean}{' '}
+                                          {isPt && <span className="text-[10px] text-amber-400">(PT/BR)</span>}
+                                        </span>
+                                        <div className="flex items-center gap-2 shrink-0">
+                                          <span className="text-[11px] text-slate-400 tabular-nums">
+                                            {(g.membersCount || 0).toLocaleString('pt-BR')}
+                                          </span>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              if (activeAudience) {
+                                                setGlobalAudiences((prev) =>
+                                                  prev.map((a) =>
+                                                    a.id === activeAudience.id
+                                                      ? { ...a, groupIds: a.groupIds.filter((id) => id !== g.id) }
+                                                      : a
+                                                  )
+                                                );
+                                              } else {
+                                                setGlobalGroups((prev) => prev.filter((item) => item.id !== g.id));
+                                              }
+                                            }}
+                                            className="text-slate-500 hover:text-rose-400 cursor-pointer"
+                                            title="Remover grupo deste público"
+                                          >
+                                            <Trash2 className="w-3 h-3" />
+                                          </button>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
 
               {/* Right: Isolated Global Logs with Filters + Retry Action */}
               <div className="lg:col-span-5 bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
@@ -2997,7 +3457,9 @@ export const GlobalMediaScalersTab: React.FC = () => {
                       .map((log) => (
                         <div key={log.id} className="p-3 space-y-1.5 text-xs">
                           <div className="flex items-center justify-between gap-2">
-                            <span className="font-semibold text-white truncate">{log.groupName}</span>
+                            <span className="font-semibold text-white truncate">
+                              {sanitizeGlobalGroupName(log.groupName)}
+                            </span>
                             <span
                               className={`font-medium shrink-0 ${
                                 log.approvalStatus === 'published'
@@ -3055,7 +3517,9 @@ export const GlobalMediaScalersTab: React.FC = () => {
                 )}
               </div>
             </div>
-          )}
+          </div>
+            );
+          })()}
 
           {/* YOUTUBE GLOBAL */}
           {botChannel === 'youtube' && (

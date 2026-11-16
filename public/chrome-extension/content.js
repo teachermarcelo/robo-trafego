@@ -382,23 +382,45 @@
       return 'Geral & Comunidades';
     }
 
-    // Auto-Scroll Listener: Scan whenever user scrolls down to see more groups
+    function isGroupDirectoryOrSearchPage() {
+      const p = (window.location.pathname || '').toLowerCase();
+      return (
+        p.includes('/search') ||
+        p.includes('/groups/discover') ||
+        p.includes('/groups/joins') ||
+        p.includes('/groups/feed') ||
+        p === '/groups/' ||
+        p === '/groups'
+      );
+    }
+
+    // Auto-Scroll Listener: Scan whenever user scrolls down on search/directory pages
     let scrollTimeout = null;
     window.addEventListener('scroll', () => {
+      if (!isGroupDirectoryOrSearchPage()) return;
       if (scrollTimeout) clearTimeout(scrollTimeout);
       scrollTimeout = setTimeout(() => {
         scanVisibleGroups();
-      }, 400);
+      }, 500);
     }, { passive: true });
 
-    // MutationObserver to detect new DOM elements when Facebook injects more results
+    // Debounced MutationObserver ONLY on search/directory pages (never hog main thread during group posting)
+    let mutScanTimeout = null;
     const observer = new MutationObserver(() => {
-      scanVisibleGroups();
+      if (!isGroupDirectoryOrSearchPage()) return;
+      if (mutScanTimeout) clearTimeout(mutScanTimeout);
+      mutScanTimeout = setTimeout(() => {
+        scanVisibleGroups();
+      }, 750);
     });
-    observer.observe(document.body, { childList: true, subtree: true });
+    if (document.body) {
+      observer.observe(document.body, { childList: true, subtree: true });
+    }
 
-    // Initial scan
-    setTimeout(scanVisibleGroups, 1200);
+    // Initial scan (only on search/directory pages)
+    if (isGroupDirectoryOrSearchPage()) {
+      setTimeout(scanVisibleGroups, 1200);
+    }
 
     // Create Floating AutoViral Widget on Facebook screen
     function createFloatingWidget() {
@@ -645,18 +667,43 @@
 
     function findComposerTrigger() {
       const composerTriggers = Array.from(document.querySelectorAll('div[role="button"], span'));
-      return composerTriggers.find((el) => {
+      const matched = composerTriggers.find((el) => {
         const rect = el.getBoundingClientRect();
-        if (rect.width === 0 || rect.height === 0) return false;
+        if (rect.width < 60 || rect.height < 16) return false;
+        if (el.closest('div[role="dialog"]')) return false;
         const t = (el.innerText || '').trim().toLowerCase();
         return (
           t === 'escreva algo...' ||
           t.includes('escreva algo') ||
           t === 'write something...' ||
           t.includes('write something') ||
-          t.includes('criar publicação pública')
+          t.includes('criar publicação pública') ||
+          t.includes('create a public post')
         );
       });
+      if (!matched) return null;
+      return matched.closest('div[role="button"]') || matched;
+    }
+
+    function openComposerWithPreload(trigger) {
+      if (!trigger) return;
+      try {
+        trigger.scrollIntoView({ behavior: 'instant', block: 'center' });
+      } catch (e) {}
+      try {
+        trigger.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }));
+        trigger.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+        trigger.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+      } catch (e) {}
+      setTimeout(() => {
+        try {
+          trigger.focus();
+          trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+          trigger.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+          trigger.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+        } catch (e) {}
+        trigger.click();
+      }, 550);
     }
 
     function clearStoredPendingGroupPost(slug) {
@@ -1054,7 +1101,7 @@
             return;
           }
 
-          trigger.click();
+          openComposerWithPreload(trigger);
           if (msgEl) {
             msgEl.textContent = '⏳ Aguardando janela "Criar post" terminar de carregar... NÃO feche esta aba!';
             msgEl.style.color = '#38bdf8';
@@ -1062,13 +1109,14 @@
 
           let boxTries = 0;
           let retriedSkeleton = false;
-          let reopenPauseUntil = 0;
+          let reopenPauseUntil = Date.now() + 900;
           const waitTextbox = setInterval(() => {
             if (Date.now() < reopenPauseUntil) return;
             boxTries++;
             const dlg = findCreatePostDialog();
             const textbox = findCreatePostTextbox(dlg);
             if (textbox) {
+              try { sessionStorage.removeItem(`av_skel_reload_${currentSlug}`); } catch (e) {}
               clearInterval(waitTextbox);
               setTimeout(() => {
                 textbox.click();
@@ -1135,15 +1183,31 @@
             } else if (boxTries === 16 && !retriedSkeleton) {
               retriedSkeleton = true;
               if (msgEl) {
-                msgEl.textContent = '🔄 Facebook travou ao abrir "Criar post". Reabrindo automaticamente...';
+                msgEl.textContent = '🔄 Facebook travou ao abrir "Criar post". Tentando destravar...';
                 msgEl.style.color = '#fbbf24';
               }
               closeStuckCreatePostDialog(dlg);
-              reopenPauseUntil = Date.now() + 2000;
+              reopenPauseUntil = Date.now() + 2200;
               setTimeout(() => {
                 const retryTrigger = findComposerTrigger();
-                if (retryTrigger) retryTrigger.click();
+                if (retryTrigger) openComposerWithPreload(retryTrigger);
               }, 1400);
+            } else if (boxTries === 30) {
+              let alreadyReloaded = false;
+              try {
+                alreadyReloaded = sessionStorage.getItem(`av_skel_reload_${currentSlug}`) === '1';
+              } catch (e) {}
+              if (!alreadyReloaded) {
+                clearInterval(waitTextbox);
+                try {
+                  sessionStorage.setItem(`av_skel_reload_${currentSlug}`, '1');
+                } catch (e) {}
+                if (msgEl) {
+                  msgEl.textContent = '🔄 Recarregando grupo 1x para destravar janela "Criar post" do Facebook...';
+                  msgEl.style.color = '#fbbf24';
+                }
+                setTimeout(() => window.location.reload(), 900);
+              }
             } else if (boxTries >= 42) {
               clearInterval(waitTextbox);
               if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
@@ -1153,10 +1217,10 @@
                 groupUrl: window.location.href,
                 groupName: pending.groupName,
                 approvalStatus: 'not_member',
-                note: 'Janela Criar post travou no carregamento do Facebook'
+                note: 'Facebook não carregou a janela Criar post (verifique bloqueador/AdBlock)'
               });
               if (msgEl) {
-                msgEl.textContent = '⚠️ Janela "Criar post" demorou para carregar no Facebook. Clique em "Solicitar Entrada / Preencher Post Agora" ou cole com Ctrl+V.';
+                msgEl.textContent = '⚠️ Facebook não carregou "Criar post" (tela cinza). Pause o AdBlock em facebook.com ou teste clicar manualmente em "Escreva algo...".';
                 msgEl.style.color = '#fbbf24';
               }
             }

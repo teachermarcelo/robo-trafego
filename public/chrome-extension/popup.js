@@ -453,7 +453,7 @@ document.addEventListener('DOMContentLoaded', () => {
     chrome.tabs.query({}, (tabs) => {
       tabs.forEach(tab => {
         const url = tab.url || '';
-        if (url.includes('ais-') || url.includes('localhost') || url.includes('vercel.app') || url.includes('run.app')) {
+        if (url.includes('ais-') || url.includes('localhost') || url.includes('run.app') || (tab.title && tab.title.includes('AutoViral'))) {
           chrome.tabs.sendMessage(tab.id, { action: 'AUTOVIRAL_RESET_MAPPED_GROUPS' });
         }
       });
@@ -523,7 +523,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (
           url.includes('ais-') ||
           url.includes('localhost') ||
-          url.includes('vercel.app') ||
           url.includes('run.app') ||
           (tab.title && tab.title.includes('AutoViral'))
         ) {
@@ -563,6 +562,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function sanitizeGroupName(rawName) {
     return (rawName || '')
       .replace(/\u00a0/g, ' ')
+      .replace(/^(não\s+lida\s*|unread\s*)+(aproveite\s+sua\s+participação\s+no\s+grupo\s*|enjoy\s+your\s+membership\s+in\s*)?/i, '')
       .replace(/^(foto\s+do\s+perfil\s+de|foto\s+da\s+capa\s+de|profile\s+picture\s+of|cover\s+photo\s+of)\s+/i, '')
       .replace(/\s+/g, ' ')
       .trim();

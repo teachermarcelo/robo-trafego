@@ -1938,14 +1938,16 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
         approvalStatus === 'not_member' ||
         approvalStatus === 'join_requested' ||
         approvalStatus === 'rate_limited' ||
-        approvalStatus === 'unavailable'
+        approvalStatus === 'unavailable' ||
+        approvalStatus === 'composer_stuck'
           ? approvalStatus
           : 'pending_verification';
 
       const isErrorResult =
         normalizedStatus === 'not_member' ||
         normalizedStatus === 'rate_limited' ||
-        normalizedStatus === 'unavailable';
+        normalizedStatus === 'unavailable' ||
+        normalizedStatus === 'composer_stuck';
 
       setBotLogs(prev => {
         const matchIdx = prev.findIndex(
@@ -2018,6 +2020,11 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       } else if (normalizedStatus === 'not_member') {
         setExtensionSyncBanner({
           message: `⚠️ Grupo "${groupName || 'Facebook'}" ainda precisa de entrada. Clique em "🔄 Entrar / Postar Agora" para a extensão v1.4.0 solicitar entrada e postar automaticamente.`,
+          tone: 'warning'
+        });
+      } else if (normalizedStatus === 'composer_stuck') {
+        setExtensionSyncBanner({
+          message: `⚠️ O Facebook travou ao abrir "Criar post" em "${groupName || 'grupo'}". Pause o AdBlock em facebook.com e clique em "🔄 Entrar / Postar Agora".`,
           tone: 'warning'
         });
       } else if (normalizedStatus === 'awaiting_admin') {
@@ -2645,13 +2652,13 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       zip.file('README.md', readmeText);
       zip.file(
         'COMO-INSTALAR.txt',
-        `INSTRUÇÕES DE INSTALAÇÃO NO GOOGLE CHROME (AutoViral AI v1.4.0):\n\n1. Extraia este arquivo ZIP em uma pasta nova.\n2. No Chrome, abra chrome://extensions e REMOVA extensões AutoViral antigas (deixe APENAS UMA v1.4.0).\n3. Ative a chave "Modo do desenvolvedor" (topo direito).\n4. Clique em "Carregar sem compactação" (topo esquerdo) e escolha a pasta extraída.\n5. Abra o Facebook (grupos), role a busca, clique em "Mapear Grupos" e depois em "Enviar para o Painel".`
+        `INSTRUÇÕES DE INSTALAÇÃO NO GOOGLE CHROME (AutoViral AI v1.4.1):\n\n1. Extraia este arquivo ZIP em uma pasta nova.\n2. No Chrome, abra chrome://extensions e REMOVA extensões AutoViral antigas (deixe APENAS UMA v1.4.1).\n3. Ative a chave "Modo do desenvolvedor" (topo direito).\n4. Clique em "Carregar sem compactação" (topo esquerdo) e escolha a pasta extraída.\n5. Abra o Facebook (grupos), role a busca, clique em "Mapear Grupos" e depois em "Enviar para o Painel".`
       );
 
       const blob = await zip.generateAsync({ type: 'blob' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = 'extensao-autoviral-v1.4.0.zip';
+      link.download = 'extensao-autoviral-v1.4.1.zip';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -2659,7 +2666,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       console.error('Error generating extension zip:', err);
       const fallbackLink = document.createElement('a');
       fallbackLink.href = '/api/extension/download';
-      fallbackLink.download = 'extensao-autoviral-v1.4.0.zip';
+      fallbackLink.download = 'extensao-autoviral-v1.4.1.zip';
       document.body.appendChild(fallbackLink);
       fallbackLink.click();
       document.body.removeChild(fallbackLink);
@@ -6159,10 +6166,11 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                     const isJoinRequested = log.approvalStatus === 'join_requested';
                     const isRateLimited = log.approvalStatus === 'rate_limited';
                     const isUnavailable = log.approvalStatus === 'unavailable';
+                    const isComposerStuck = log.approvalStatus === 'composer_stuck';
                     const isNotMember = log.approvalStatus === 'not_member';
                     const isPendingVerification = log.approvalStatus === 'pending_verification';
                     const isVerifiedPublished = log.isVerifiedReal === true && log.approvalStatus === 'published';
-                    const isLegacyUnverified = log.isVerifiedReal !== true && !isPendingVerification && !isNotMember && !isJoinRequested && !isRateLimited && !isUnavailable;
+                    const isLegacyUnverified = log.isVerifiedReal !== true && !isPendingVerification && !isNotMember && !isJoinRequested && !isRateLimited && !isUnavailable && !isComposerStuck;
                     return (
                       <div key={log.id} className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs hover:bg-slate-950/60 px-2 rounded-lg transition">
                         <div className="space-y-1 min-w-0">
@@ -6184,6 +6192,10 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                             ) : isRateLimited ? (
                               <span className="px-2 py-0.5 rounded bg-rose-950 text-rose-200 border border-rose-700 text-[11px] font-semibold">
                                 Limite Temporário FB (Aguarde 15–30 min)
+                              </span>
+                            ) : isComposerStuck ? (
+                              <span className="px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-700/70 text-[11px] font-semibold">
+                                Janela Criar Post Travou no FB (Pause AdBlock)
                               </span>
                             ) : isNotMember ? (
                               <span className="px-2 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-800/60 text-[11px] font-semibold">
@@ -6227,7 +6239,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                         </div>
 
                         <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-                          {(isJoinRequested || isNotMember || isRateLimited) && (
+                          {(isJoinRequested || isNotMember || isRateLimited || isComposerStuck) && (
                             <button
                               type="button"
                               onClick={() => handleRetryJoinOrPost(log)}

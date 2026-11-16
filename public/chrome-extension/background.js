@@ -1,7 +1,7 @@
 // AutoViral AI Chrome Extension - Background Service Worker (Manifest V3)
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('[AutoViral AI] Extensão v1.4.0 instalada com sucesso!');
+  console.log('[AutoViral AI] Extensão v1.4.1 instalada com sucesso!');
   chrome.storage.local.get(['autoviral_interval', 'autoviral_mapped_groups'], (res) => {
     chrome.storage.local.set({
       autoviral_interval: res.autoviral_interval || 350,
@@ -17,7 +17,6 @@ function isAutoViralTab(tab) {
     url.includes('ais-') ||
     url.includes('localhost') ||
     url.includes('run.app') ||
-    url.includes('vercel.app') ||
     url.includes('aistudio.google.com') ||
     title.includes('AutoViral')
   );

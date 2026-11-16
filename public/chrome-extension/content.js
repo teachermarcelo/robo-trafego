@@ -1,5 +1,5 @@
-// AutoViral AI Chrome Extension - Content Script V1.1.0
-// Runs on Facebook, YouTube and AutoViral AI Web Platform
+// AutoViral AI Chrome Extension - Content Script V1.4.1
+// Runs on Facebook, YouTube, Instagram, Pinterest and AutoViral AI Web Platform
 
 (function () {
   if (window.__AUTOVIRAL_CONTENT_SCRIPT_INITIALIZED__) {
@@ -11,7 +11,7 @@
   const isFacebook = currentHost.includes('facebook.com');
   const isYouTube = currentHost.includes('youtube.com');
   const isAutoViral = currentHost.includes('localhost') ||
-                      currentHost.includes('vercel.app') ||
+                      currentHost.includes('ais-') ||
                       currentHost.includes('run.app') ||
                       document.title.includes('AutoViral');
 
@@ -144,6 +144,7 @@
     function sanitizeGroupName(rawName) {
       return (rawName || '')
         .replace(/\u00a0/g, ' ')
+        .replace(/^(não\s+lida\s*|unread\s*)+(aproveite\s+sua\s+participação\s+no\s+grupo\s*|enjoy\s+your\s+membership\s+in\s*)?/i, '')
         .replace(/^(foto\s+do\s+perfil\s+de|foto\s+da\s+capa\s+de|profile\s+picture\s+of|cover\s+photo\s+of)\s+/i, '')
         .replace(/\s+/g, ' ')
         .trim();
@@ -170,9 +171,9 @@
         const q = url.searchParams.get('q');
         if (q) return decodeURIComponent(q).trim();
       } catch (e) {}
-      const searchInput = document.querySelector('input[type="search"], input[aria-label*="Pesquisar"], input[placeholder*="Pesquisar"]');
+      const searchInput = document.querySelector('input[type="search"], input[aria-label*="Pesquisar"], input[aria-label*="Search"], input[placeholder*="Pesquisar"], input[placeholder*="Search"]');
       if (searchInput && searchInput.value) return searchInput.value.trim();
-      return 'psicopedagogia';
+      return 'grupos';
     }
 
     // Derive clean folder slug from search query
@@ -259,9 +260,9 @@
             .filter(s =>
               s.length >= 3 &&
               !BAD_LABELS.has(s.toLowerCase()) &&
-              !/^(público|privado)(\s*·|$)/i.test(s) &&
-              !/^\d[\d.,\s]*(mil|k|m)?\s*membros?/i.test(s) &&
-              !/posts?\s*(por|ao)\s*dia/i.test(s)
+              !/^(público|public|privado|private)(\s*·|$)/i.test(s) &&
+              !/^\d[\d.,\s]*(mil|k|mi|m)?\s*(membros?|members?)/i.test(s) &&
+              !/posts?\s*(por|ao|a|per)\s*(dia|day)/i.test(s)
             );
           if (cardLines.length > 0) {
             nameCandidate = cardLines[0];
@@ -276,27 +277,27 @@
           let postsPerDay = '10+ posts/dia';
           let isPublic = true;
 
-          const memberMatch = rawCardText.match(/([0-9]+(?:[.,][0-9]+)?)\s*(mil|k|mi)?\s*membros?/i);
+          const memberMatch = rawCardText.match(/([0-9]+(?:[.,][0-9]+)*)\s*(mil|k|mi|m)?\s*(membros?|members?)/i);
           if (memberMatch) {
             let numStr = memberMatch[1];
             const suffix = (memberMatch[2] || '').toLowerCase();
             if (suffix === 'mil' || suffix === 'k') {
               numStr = numStr.replace(',', '.');
               membersCount = Math.round(parseFloat(numStr) * 1000);
-            } else if (suffix === 'mi') {
+            } else if (suffix === 'mi' || suffix === 'm') {
               numStr = numStr.replace(',', '.');
               membersCount = Math.round(parseFloat(numStr) * 1000000);
             } else {
-              membersCount = Math.round(parseFloat(numStr.replace(/\./g, '').replace(',', '.')));
+              membersCount = Math.round(parseFloat(numStr.replace(/[.,](?=\d{3}(?:[^\d]|$))/g, '').replace(',', '.')));
             }
           }
 
-          const postsMatch = rawCardText.match(/([0-9]+(\+)?\s*(post|publicação|publicações)\s*(por|ao)\s*dia)/i);
+          const postsMatch = rawCardText.match(/([0-9]+(\+)?\s*(post|posts|publicação|publicações)\s*(por|ao|a|per)\s*(dia|day|semana|week))/i);
           if (postsMatch) {
             postsPerDay = postsMatch[0];
           }
 
-          if (/privado/i.test(rawCardText)) {
+          if (/\b(privado|private)\b/i.test(rawCardText)) {
             isPublic = false;
           }
 
@@ -666,17 +667,22 @@
     }
 
     function findComposerTrigger() {
-      const composerTriggers = Array.from(document.querySelectorAll('div[role="button"], span'));
+      const composerTriggers = Array.from(
+        document.querySelectorAll('[data-pagelet="GroupInlineComposer"] div[role="button"], div[role="button"], span')
+      );
       const matched = composerTriggers.find((el) => {
         const rect = el.getBoundingClientRect();
         if (rect.width < 60 || rect.height < 16) return false;
         if (el.closest('div[role="dialog"]')) return false;
-        const t = (el.innerText || '').trim().toLowerCase();
+        if (el.closest('[aria-busy="true"]')) return false;
+        const t = (el.innerText || el.getAttribute('aria-label') || '').trim().toLowerCase();
         return (
           t === 'escreva algo...' ||
           t.includes('escreva algo') ||
+          t.includes('no que você está pensando') ||
           t === 'write something...' ||
           t.includes('write something') ||
+          t.includes("what's on your mind") ||
           t.includes('criar publicação pública') ||
           t.includes('create a public post')
         );
@@ -726,7 +732,19 @@
     }
 
     function insertTextIntoFacebookComposer(textbox, text) {
+      if (!textbox) return;
       textbox.focus();
+      try {
+        const sel = window.getSelection();
+        if (sel) {
+          const range = document.createRange();
+          range.selectNodeContents(textbox);
+          range.collapse(false);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+      } catch (e) {}
+
       try {
         const dt = new DataTransfer();
         dt.setData('text/plain', text);
@@ -740,8 +758,11 @@
 
       setTimeout(() => {
         const current = (textbox.innerText || '').trim();
-        if (!current || current.length < Math.min(10, text.length)) {
+        if (!current || current.length < Math.min(8, text.trim().length)) {
           textbox.focus();
+          try {
+            textbox.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, data: text, inputType: 'insertText' }));
+          } catch (e) {}
           try {
             document.execCommand('insertText', false, text);
           } catch (e) {}
@@ -749,7 +770,7 @@
             textbox.dispatchEvent(new InputEvent('input', { bubbles: true, data: text, inputType: 'insertText' }));
           } catch (e) {}
         }
-      }, 250);
+      }, 280);
     }
 
     function findCreatePostDialog() {
@@ -797,15 +818,30 @@
     function closeStuckCreatePostDialog(dlg) {
       try {
         if (dlg) {
-          const closeBtn = dlg.querySelector(
+          const searchScope = dlg.parentElement || dlg;
+          const closeBtn = searchScope.querySelector(
             'div[role="button"][aria-label="Fechar"], div[role="button"][aria-label="Close"], button[aria-label="Fechar"], button[aria-label="Close"]'
           );
           if (closeBtn) {
             closeBtn.click();
             return;
           }
+          try {
+            dlg.focus && dlg.focus();
+            dlg.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+          } catch (e) {}
         }
         document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+        setTimeout(() => {
+          const stillOpen = findCreatePostDialog();
+          if (stillOpen) {
+            const cornerEl = document.elementFromPoint(16, 90);
+            if (cornerEl && !stillOpen.contains(cornerEl)) {
+              cornerEl.click();
+            }
+          }
+        }, 160);
       } catch (e) {}
     }
 
@@ -928,8 +964,14 @@
           bodyTxt.includes('aguardando aprovação de um administrador') ||
           bodyTxt.includes('pendente de aprovação do administrador') ||
           bodyTxt.includes('enviada para aprovação do administrador') ||
+          bodyTxt.includes('sua publicação foi enviada') ||
           bodyTxt.includes('pending admin approval') ||
-          bodyTxt.includes('sent for admin approval')
+          bodyTxt.includes('sent for admin approval') ||
+          bodyTxt.includes('waiting for admin approval') ||
+          bodyTxt.includes('submitted for approval') ||
+          bodyTxt.includes('your post is pending') ||
+          bodyTxt.includes('thanks for your post') ||
+          bodyTxt.includes('your post has been submitted')
         ) {
           finished = true;
           clearInterval(checkInterval);
@@ -1075,7 +1117,7 @@
           return;
         }
         const trigger = findComposerTrigger();
-        if (trigger || triggerTries >= 12) {
+        if (trigger || triggerTries >= 16) {
           clearInterval(waitTrigger);
           if (!trigger) {
             if (isFacebookGroupUnavailable()) {
@@ -1101,132 +1143,153 @@
             return;
           }
 
-          openComposerWithPreload(trigger);
           if (msgEl) {
-            msgEl.textContent = '⏳ Aguardando janela "Criar post" terminar de carregar... NÃO feche esta aba!';
+            msgEl.textContent = '⏳ Aguardando Facebook estabilizar antes de abrir "Criar post"...';
             msgEl.style.color = '#38bdf8';
           }
 
-          let boxTries = 0;
-          let retriedSkeleton = false;
-          let reopenPauseUntil = Date.now() + 900;
-          const waitTextbox = setInterval(() => {
-            if (Date.now() < reopenPauseUntil) return;
-            boxTries++;
-            const dlg = findCreatePostDialog();
-            const textbox = findCreatePostTextbox(dlg);
-            if (textbox) {
-              try { sessionStorage.removeItem(`av_skel_reload_${currentSlug}`); } catch (e) {}
-              clearInterval(waitTextbox);
-              setTimeout(() => {
-                textbox.click();
-                textbox.focus();
-                insertTextIntoFacebookComposer(textbox, pending.fullText);
+          // Give Facebook Relay an extra 1.1s after trigger appears so it doesn't open a grey loading skeleton
+          setTimeout(() => {
+            openComposerWithPreload(trigger);
+            if (msgEl) {
+              msgEl.textContent = '⏳ Aguardando janela "Criar post" terminar de carregar... NÃO feche esta aba!';
+              msgEl.style.color = '#38bdf8';
+            }
 
-                if (!autoSubmit) {
-                  if (msgEl) {
-                    msgEl.textContent = '✅ Texto inserido em "Criar post"! Revise e clique em Publicar.';
-                    msgEl.style.color = '#34d399';
-                  }
-                  startSubmissionMonitor(pending, currentSlug, msgEl, false, cancelAutoBtn);
-                  return;
-                }
-
-                if (msgEl) {
-                  msgEl.textContent = '✅ Texto inserido em "Criar post"! Publicando em 2.5s...';
-                  msgEl.style.color = '#34d399';
-                }
-
+            let boxTries = 0;
+            let retriedSkeleton = false;
+            let reopenPauseUntil = Date.now() + 1000;
+            const waitTextbox = setInterval(() => {
+              if (Date.now() < reopenPauseUntil) return;
+              boxTries++;
+              const dlg = findCreatePostDialog();
+              const textbox = findCreatePostTextbox(dlg);
+              if (textbox) {
+                try { sessionStorage.removeItem(`av_skel_reload_${currentSlug}`); } catch (e) {}
+                clearInterval(waitTextbox);
                 setTimeout(() => {
-                  if (cancelled) {
+                  textbox.click();
+                  textbox.focus();
+                  insertTextIntoFacebookComposer(textbox, pending.fullText);
+
+                  if (!autoSubmit) {
+                    if (msgEl) {
+                      msgEl.textContent = '✅ Texto inserido em "Criar post"! Revise e clique em Publicar.';
+                      msgEl.style.color = '#34d399';
+                    }
                     startSubmissionMonitor(pending, currentSlug, msgEl, false, cancelAutoBtn);
                     return;
                   }
-                  const activeDlg = findCreatePostDialog() || textbox.closest('div[role="dialog"]');
-                  let pubTries = 0;
-                  const waitPubBtn = setInterval(() => {
-                    pubTries++;
+
+                  if (msgEl) {
+                    msgEl.textContent = '✅ Texto inserido em "Criar post"! Verificando conteúdo antes de publicar...';
+                    msgEl.style.color = '#34d399';
+                  }
+
+                  setTimeout(() => {
                     if (cancelled) {
-                      clearInterval(waitPubBtn);
+                      startSubmissionMonitor(pending, currentSlug, msgEl, false, cancelAutoBtn);
                       return;
                     }
-                    const currentContent = (textbox.innerText || '').trim();
-                    if (currentContent.length < 5 && pubTries === 1) {
-                      insertTextIntoFacebookComposer(textbox, pending.fullText);
-                    }
-                    const pubBtn = findPublishButtonInDialog(activeDlg);
-                    if (pubBtn) {
-                      clearInterval(waitPubBtn);
-                      if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
-                      if (msgEl) {
-                        msgEl.textContent = '🚀 Publicando no grupo... NÃO feche esta aba ainda!';
-                        msgEl.style.color = '#34d399';
+                    const activeDlg = findCreatePostDialog() || textbox.closest('div[role="dialog"]');
+                    let pubTries = 0;
+                    const waitPubBtn = setInterval(() => {
+                      pubTries++;
+                      if (cancelled) {
+                        clearInterval(waitPubBtn);
+                        return;
                       }
-                      try {
-                        pubBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-                        pubBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
-                      } catch (e) {}
-                      pubBtn.click();
-                      startSubmissionMonitor(pending, currentSlug, msgEl, true, cancelAutoBtn);
-                    } else if (pubTries >= 16) {
-                      clearInterval(waitPubBtn);
-                      if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
-                      if (msgEl) {
-                        msgEl.textContent = '✅ Texto colado em "Criar post"! Clique no botão azul "Postar / Publicar" acima para finalizar.';
-                        msgEl.style.color = '#38bdf8';
+                      const currentContent = (textbox.innerText || '').trim();
+                      if (currentContent.length < 5) {
+                        if (pubTries <= 3) {
+                          insertTextIntoFacebookComposer(textbox, pending.fullText);
+                          return;
+                        }
+                        clearInterval(waitPubBtn);
+                        if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
+                        if (msgEl) {
+                          msgEl.textContent = '📋 Texto copiado na memória! Cole (Ctrl+V) dentro da caixa acima e clique em Postar.';
+                          msgEl.style.color = '#fbbf24';
+                        }
+                        startSubmissionMonitor(pending, currentSlug, msgEl, false, cancelAutoBtn);
+                        return;
                       }
-                      startSubmissionMonitor(pending, currentSlug, msgEl, false, cancelAutoBtn);
-                    }
-                  }, 450);
-                }, 2200);
-              }, 450);
-            } else if (boxTries === 16 && !retriedSkeleton) {
-              retriedSkeleton = true;
-              if (msgEl) {
-                msgEl.textContent = '🔄 Facebook travou ao abrir "Criar post". Tentando destravar...';
-                msgEl.style.color = '#fbbf24';
-              }
-              closeStuckCreatePostDialog(dlg);
-              reopenPauseUntil = Date.now() + 2200;
-              setTimeout(() => {
-                const retryTrigger = findComposerTrigger();
-                if (retryTrigger) openComposerWithPreload(retryTrigger);
-              }, 1400);
-            } else if (boxTries === 30) {
-              let alreadyReloaded = false;
-              try {
-                alreadyReloaded = sessionStorage.getItem(`av_skel_reload_${currentSlug}`) === '1';
-              } catch (e) {}
-              if (!alreadyReloaded) {
-                clearInterval(waitTextbox);
-                try {
-                  sessionStorage.setItem(`av_skel_reload_${currentSlug}`, '1');
-                } catch (e) {}
+                      const pubBtn = findPublishButtonInDialog(activeDlg);
+                      if (pubBtn) {
+                        clearInterval(waitPubBtn);
+                        if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
+                        if (msgEl) {
+                          msgEl.textContent = '🚀 Publicando no grupo... NÃO feche esta aba ainda!';
+                          msgEl.style.color = '#34d399';
+                        }
+                        try {
+                          pubBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+                          pubBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+                        } catch (e) {}
+                        pubBtn.click();
+                        startSubmissionMonitor(pending, currentSlug, msgEl, true, cancelAutoBtn);
+                      } else if (pubTries >= 16) {
+                        clearInterval(waitPubBtn);
+                        if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
+                        if (msgEl) {
+                          msgEl.textContent = '✅ Texto colado em "Criar post"! Clique no botão azul "Postar / Publicar" acima para finalizar.';
+                          msgEl.style.color = '#38bdf8';
+                        }
+                        startSubmissionMonitor(pending, currentSlug, msgEl, false, cancelAutoBtn);
+                      }
+                    }, 480);
+                  }, 2200);
+                }, 480);
+              } else if (boxTries === 16 && !retriedSkeleton) {
+                retriedSkeleton = true;
                 if (msgEl) {
-                  msgEl.textContent = '🔄 Recarregando grupo 1x para destravar janela "Criar post" do Facebook...';
+                  msgEl.textContent = '🔄 Facebook travou ao abrir "Criar post". Tentando destravar...';
                   msgEl.style.color = '#fbbf24';
                 }
-                setTimeout(() => window.location.reload(), 900);
+                closeStuckCreatePostDialog(dlg);
+                reopenPauseUntil = Date.now() + 2600;
+                setTimeout(() => {
+                  const retryTrigger = findComposerTrigger();
+                  if (retryTrigger) openComposerWithPreload(retryTrigger);
+                }, 1600);
+              } else if (boxTries === 30) {
+                const reloadKey = `av_skel_reload_${currentSlug}`;
+                const targetTag = String(pending.logId || '1');
+                let prevReloadTag = '';
+                try {
+                  prevReloadTag = sessionStorage.getItem(reloadKey) || '';
+                } catch (e) {}
+                if (prevReloadTag !== targetTag) {
+                  clearInterval(waitTextbox);
+                  try {
+                    sessionStorage.setItem(reloadKey, targetTag);
+                  } catch (e) {}
+                  if (msgEl) {
+                    msgEl.textContent = '🔄 Recarregando grupo 1x para destravar janela "Criar post" do Facebook...';
+                    msgEl.style.color = '#fbbf24';
+                  }
+                  setTimeout(() => window.location.reload(), 900);
+                }
+              } else if (boxTries >= 44) {
+                clearInterval(waitTextbox);
+                if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
+                sendRealPostResultToPlatform({
+                  logId: pending.logId,
+                  groupId: pending.groupId,
+                  groupUrl: window.location.href,
+                  groupName: pending.groupName,
+                  approvalStatus: 'composer_stuck',
+                  note: 'Facebook travou ao abrir "Criar post" (tela cinza). Pause o AdBlock em facebook.com e tente novamente.'
+                });
+                if (msgEl) {
+                  msgEl.textContent = '⚠️ Facebook travou "Criar post" (tela cinza). Pause o AdBlock em facebook.com e clique em "Solicitar Entrada / Preencher Post Agora".';
+                  msgEl.style.color = '#fbbf24';
+                }
               }
-            } else if (boxTries >= 42) {
-              clearInterval(waitTextbox);
-              if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
-              sendRealPostResultToPlatform({
-                logId: pending.logId,
-                groupId: pending.groupId,
-                groupUrl: window.location.href,
-                groupName: pending.groupName,
-                approvalStatus: 'not_member',
-                note: 'Facebook não carregou a janela Criar post (verifique bloqueador/AdBlock)'
-              });
-              if (msgEl) {
-                msgEl.textContent = '⚠️ Facebook não carregou "Criar post" (tela cinza). Pause o AdBlock em facebook.com ou teste clicar manualmente em "Escreva algo...".';
-                msgEl.style.color = '#fbbf24';
-              }
-            }
-          }, 450);
+            }, 480);
+          }, 1100);
         }
-      }, 450);
+      }, 480);
     }
 
     function initGroupPostAssistant() {
@@ -1504,11 +1567,17 @@
     }
 
     const scheduleGroupPostAssistant = () => {
+      let didInit = false;
+      const runOnce = () => {
+        if (didInit) return;
+        didInit = true;
+        initGroupPostAssistant();
+      };
       if (document.readyState === 'complete') {
-        setTimeout(initGroupPostAssistant, 2200);
+        setTimeout(runOnce, 3000);
       } else {
-        window.addEventListener('load', () => setTimeout(initGroupPostAssistant, 2000), { once: true });
-        setTimeout(initGroupPostAssistant, 3200);
+        window.addEventListener('load', () => setTimeout(runOnce, 3000), { once: true });
+        setTimeout(runOnce, 6500);
       }
     };
     scheduleGroupPostAssistant();

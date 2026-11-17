@@ -128,6 +128,14 @@ CREATE POLICY "Acesso público anônimo workspace AutoViral"
 ON autoviral_workspace_store FOR ALL
 USING (true)
 WITH CHECK (true);
+
+-- Garantir permissões e atualizar imediatamente o schema cache da API do Supabase
+GRANT USAGE ON SCHEMA public TO anon, authenticated;
+GRANT ALL ON TABLE public.autoviral_campaigns TO anon, authenticated;
+GRANT ALL ON TABLE public.autoviral_tracking_events TO anon, authenticated;
+GRANT ALL ON TABLE public.autoviral_workspace_store TO anon, authenticated;
+
+NOTIFY pgrst, 'reload schema';
 `;
 
   function normalizeSupabaseUrl(input: string): string {
@@ -186,17 +194,34 @@ WITH CHECK (true);
         auth: { persistSession: false },
       });
 
-      const { error: campErr } = await client.from('autoviral_campaigns').select('id').limit(1);
+      let campCheck = await client.from('autoviral_campaigns').select('id').limit(1);
+      if (
+        campCheck.error &&
+        (campCheck.error.code === 'PGRST205' || campCheck.error.message?.includes('schema cache'))
+      ) {
+        // PostgREST schema cache may still be refreshing right after CREATE TABLE
+        await new Promise((r) => setTimeout(r, 2200));
+        campCheck = await client.from('autoviral_campaigns').select('id').limit(1);
+      }
+
+      const campErr = campCheck.error;
       if (
         campErr &&
-        (campErr.code === '42P01' || campErr.message?.includes('does not exist') || campErr.message?.includes('not exist'))
+        (campErr.code === '42P01' ||
+          campErr.code === 'PGRST205' ||
+          campErr.message?.includes('does not exist') ||
+          campErr.message?.includes('not exist') ||
+          campErr.message?.includes('schema cache'))
       ) {
         localStorage.setItem('autoviral_supabase_url', cleanUrl);
         localStorage.setItem('autoviral_supabase_key', supabaseKey.trim());
-        localStorage.setItem('autoviral_supabase_connected', 'true');
+        localStorage.setItem('autoviral_supabase_connected', 'false');
         setConnectionStatus('error');
+        const isSchemaCache = campErr.code === 'PGRST205' || campErr.message?.includes('schema cache');
         setStatusMessage(
-          'Conexão OK, mas faltam as tabelas! Copie o Script SQL do Passo 1 acima, cole no SQL Editor do seu projeto no Supabase (Run) e clique em "Testar, Migrar Tudo & Ativar" novamente.'
+          isSchemaCache
+            ? 'As tabelas existem ou foram criadas, mas o cache da API do Supabase ainda não atualizou (ou a Project URL é de outro projeto)! Confira se a URL em "Project URL" bate com o projeto onde você rodou o SQL, copie o Script SQL atualizado acima (agora inclui NOTIFY pgrst, \'reload schema\'), rode no SQL Editor e clique em Testar novamente.'
+            : 'Conexão OK, mas faltam as tabelas! Copie o Script SQL do Passo 1 acima, cole no SQL Editor do seu projeto no Supabase (Run) e clique em "Testar, Migrar Tudo & Ativar" novamente.'
         );
         return;
       }

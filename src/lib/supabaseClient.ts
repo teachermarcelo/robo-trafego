@@ -236,7 +236,9 @@ export async function saveWorkspaceJsonToSupabase(
     if (error) {
       const missingTable =
         error.code === '42P01' ||
+        error.code === 'PGRST205' ||
         error.message?.includes('does not exist') ||
+        error.message?.includes('schema cache') ||
         error.message?.includes('autoviral_workspace_store');
       return { ok: false, missingTable, error: error.message };
     }
@@ -363,7 +365,9 @@ export async function fetchAllAutoViralFromSupabase(): Promise<{
   if (storeRes.error) {
     if (
       storeRes.error.code === '42P01' ||
+      storeRes.error.code === 'PGRST205' ||
       storeRes.error.message?.includes('does not exist') ||
+      storeRes.error.message?.includes('schema cache') ||
       storeRes.error.message?.includes('autoviral_workspace_store')
     ) {
       missingStoreTable = true;

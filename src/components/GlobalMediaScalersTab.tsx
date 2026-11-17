@@ -271,6 +271,7 @@ const STORAGE_KEYS = {
   AUDIENCES: 'autoviral_global_audiences_v1',
   TRASH_AUDIENCES: 'autoviral_global_audiences_trash_v1',
   BACKUP_AUDIENCES: 'autoviral_global_audiences_backup_v1',
+  DISMISSED_RECOVERY: 'autoviral_global_dismissed_recovery_v1',
   SELECTED_AUDIENCE: 'autoviral_global_selected_audience_v1',
   KITS_BY_OFFER: 'autoviral_global_kits_by_offer_v1',
   LOGS: 'autoviral_global_bot_logs_v1',
@@ -1224,6 +1225,15 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
   const [cloudScannedGroups, setCloudScannedGroups] = useState<GlobalGroupItem[]>([]);
   const [cloudScannedAudiences, setCloudScannedAudiences] = useState<GlobalAudience[]>([]);
   const [isRecoveryPanelOpen, setIsRecoveryPanelOpen] = useState<boolean>(false);
+  const [dismissedRecoveryKeys, setDismissedRecoveryKeys] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.DISMISSED_RECOVERY);
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed.map((k) => String(k).toLowerCase()) : [];
+    } catch {
+      return [];
+    }
+  });
   const [silentBackgroundMode, setSilentBackgroundMode] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem('autoviral_global_silent_mode');
@@ -1381,6 +1391,30 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
       localStorage.setItem(STORAGE_KEYS.TRASH_AUDIENCES, JSON.stringify(trashAudiences.slice(0, 60)));
     } catch {}
   }, [trashAudiences]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.DISMISSED_RECOVERY, JSON.stringify(dismissedRecoveryKeys.slice(-400)));
+    } catch {}
+  }, [dismissedRecoveryKeys]);
+
+  const markRecoveryDismissed = (...keys: Array<string | undefined | null>) => {
+    const normalized = keys
+      .map((k) => (k || '').trim().toLowerCase())
+      .filter(Boolean);
+    if (normalized.length === 0) return;
+    setDismissedRecoveryKeys((prev) => {
+      const set = new Set(prev.map((p) => p.toLowerCase()));
+      let changed = false;
+      normalized.forEach((k) => {
+        if (!set.has(k)) {
+          set.add(k);
+          changed = true;
+        }
+      });
+      return changed ? Array.from(set) : prev;
+    });
+  };
 
   // Debounced cloud sync for Global Audiences, Trash, Groups & Offers so nothing is ever lost between sessions/URLs
   const hasMountedGlobalSyncRef = useRef(false);
@@ -2672,11 +2706,20 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
             ...replaced.map((r) => ({ ...r, deletedAt: nowIso, deletedReason: `Substituído na fusão "${finalName}"` })),
             ...tr.filter((t) => !replaced.some((r) => r.id === t.id)),
           ]);
+          markRecoveryDismissed(
+            ...replaced.flatMap((r) => [
+              `orphan:${(r.name || '').trim().toLowerCase()}`,
+              `backup:${r.id.toLowerCase()}`,
+              `brazil:${(r.name || '').trim().toLowerCase()}`,
+              `trash:${r.id.toLowerCase()}`,
+            ])
+          );
         }
       }
       const remaining = mergeReplaceOriginals ? prev.filter((a) => !mergeAudienceIds.includes(a.id)) : prev;
       return [newAud, ...remaining];
     });
+    markRecoveryDismissed(`orphan:${finalName.trim().toLowerCase()}`);
     setSelectedAudienceId(newId);
     setMergeAudienceIds([]);
     setMergeNewName('');
@@ -2709,6 +2752,12 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
     };
     setTrashAudiences((prev) => [enrichedAud, ...prev.filter((t) => t.id !== aud.id)]);
     setGlobalAudiences((prev) => prev.filter((a) => a.id !== aud.id));
+    markRecoveryDismissed(
+      `orphan:${(aud.name || '').trim().toLowerCase()}`,
+      `backup:${aud.id.toLowerCase()}`,
+      `brazil:${(aud.name || '').trim().toLowerCase()}`,
+      `trash:${aud.id.toLowerCase()}`
+    );
     setConfirmDeleteAudienceId(null);
     setBanner({
       message: `🗑️ Público "${aud.name}" movido para a Lixeira (nenhum grupo foi apagado — restaure em 1 clique quando quiser).`,
@@ -2781,7 +2830,16 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
       if (prev.some((a) => a.id === cleanAud.id)) return prev;
       return [cleanAud, ...prev];
     });
-    setTrashAudiences((prev) => prev.filter((t) => t.id !== cleanAud.id));
+    setTrashAudiences((prev) =>
+      prev.filter((t) => t.id !== cleanAud.id && (t.name || '').trim().toLowerCase() !== cleanAud.name.trim().toLowerCase())
+    );
+    markRecoveryDismissed(
+      `orphan:${cleanAud.name.trim().toLowerCase()}`,
+      `backup:${cleanAud.id.toLowerCase()}`,
+      `brazil:${cleanAud.name.trim().toLowerCase()}`,
+      `trash:${cleanAud.id.toLowerCase()}`,
+      `cloud:${cleanAud.id.toLowerCase()}`
+    );
     setSelectedAudienceId(cleanAud.id);
     setCurrentPostIndex(0);
     setBanner({
@@ -2792,35 +2850,44 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
 
   // Auto-discover orphaned niches in globalGroups, missing audiences in backup, and Brazil-redirected audiences
   const recoverableDiscovery = useMemo(() => {
+    const dismissedSet = new Set(dismissedRecoveryKeys.map((k) => k.toLowerCase()));
     const activeNames = new Set(globalAudiences.map((a) => (a.name || '').trim().toLowerCase()));
+    const trashNames = new Set(trashAudiences.map((t) => (t.name || '').trim().toLowerCase()));
     const activeIds = new Set(globalAudiences.map((a) => a.id));
 
-    // 1. Orphaned niche groups in globalGroups whose niche doesn't belong to any active audience
+    // 1. Orphaned niche groups in globalGroups whose niche doesn't belong to any active audience and was NOT already restored/dismissed
     const orphanByNiche = new Map<string, GlobalGroupItem[]>();
     globalGroups.forEach((g) => {
       const n = (g.niche || '').trim();
-      if (!n || activeNames.has(n.toLowerCase())) return;
+      const nLower = n.toLowerCase();
+      if (!n || activeNames.has(nLower) || trashNames.has(nLower) || dismissedSet.has(`orphan:${nLower}`)) return;
       const belongsToAnyActive = globalAudiences.some((a) => {
         if (a.groupIds?.includes(g.id)) return true;
         const gKey = normalizeGroupUrlKey(g.url);
         return Boolean(gKey && a.groupUrls?.some((u) => normalizeGroupUrlKey(u) === gKey));
       });
       if (!belongsToAnyActive) {
-        const key = n.toLowerCase();
-        const arr = orphanByNiche.get(key) || [];
+        const arr = orphanByNiche.get(nLower) || [];
         arr.push(g);
-        orphanByNiche.set(key, arr);
+        orphanByNiche.set(nLower, arr);
       }
     });
 
-    // 2. Missing from rolling localStorage backup
+    // 2. Missing from rolling localStorage backup (excluding restored/dismissed/trashed)
     let backupMissing: GlobalAudience[] = [];
     try {
       const raw = localStorage.getItem(STORAGE_KEYS.BACKUP_AUDIENCES);
       const parsed: GlobalAudience[] = raw ? JSON.parse(raw) : [];
       if (Array.isArray(parsed)) {
         backupMissing = parsed.filter(
-          (a) => a?.id && a?.name && !activeIds.has(a.id) && !activeNames.has(a.name.trim().toLowerCase())
+          (a) =>
+            a?.id &&
+            a?.name &&
+            !activeIds.has(a.id) &&
+            !activeNames.has(a.name.trim().toLowerCase()) &&
+            !trashNames.has(a.name.trim().toLowerCase()) &&
+            !dismissedSet.has(`backup:${String(a.id).toLowerCase()}`) &&
+            !dismissedSet.has(`orphan:${a.name.trim().toLowerCase()}`)
         );
       }
     } catch {}
@@ -2835,7 +2902,16 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
       if (Array.isArray(brAuds)) {
         brAuds.forEach((ba) => {
           const nm = (ba?.name || '').trim();
-          if (!nm || activeNames.has(nm.toLowerCase())) return;
+          const nmLower = nm.toLowerCase();
+          if (
+            !nm ||
+            activeNames.has(nmLower) ||
+            trashNames.has(nmLower) ||
+            dismissedSet.has(`brazil:${nmLower}`) ||
+            dismissedSet.has(`orphan:${nmLower}`)
+          ) {
+            return;
+          }
           if (/oracion|spain|españa|usa|uk|au|health|cook|dieta|pray|biblia/i.test(nm)) {
             const setIds = new Set(ba.groupIds || []);
             const setUrls = new Set((ba.groupUrls || []).map((u: string) => normalizeGroupUrlKey(u)));
@@ -2875,7 +2951,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
       backupMissing,
       brazilMatches,
     };
-  }, [globalAudiences, globalGroups]);
+  }, [globalAudiences, globalGroups, trashAudiences, dismissedRecoveryKeys]);
 
   const deepMatchedRecoveryGroups = useMemo(() => {
     const q = recoverySearchInput.trim().toLowerCase();
@@ -3072,10 +3148,19 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
     setGlobalAudiences((prev) =>
       existing ? prev.map((a) => (a.id === audId ? rebuilt : a)) : [rebuilt, ...prev]
     );
+    setTrashAudiences((prev) =>
+      prev.filter((t) => t.id !== audId && (t.name || '').trim().toLowerCase() !== cleanName.toLowerCase())
+    );
+    markRecoveryDismissed(
+      `orphan:${cleanName.toLowerCase()}`,
+      `brazil:${cleanName.toLowerCase()}`,
+      `backup:${audId.toLowerCase()}`,
+      `trash:${audId.toLowerCase()}`
+    );
     setSelectedAudienceId(audId);
     setCurrentPostIndex(0);
     setBanner({
-      message: `🛟 Público "${cleanName}" reconstruído com ${cleanItems.length} grupos recuperados!`,
+      message: `🛟 Público "${cleanName}" restaurado com ${cleanItems.length} grupos! Ele não voltará mais a aparecer na barra de recuperação.`,
       tone: 'success',
     });
   };
@@ -3884,68 +3969,90 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
         </div>
       </div>
 
-      {/* Auto-Discovery Banner if any Trash / Orphan Niche / Backup Audience exists */}
-      {(recoverableDiscovery.orphanNiches.length > 0 ||
-        recoverableDiscovery.backupMissing.length > 0 ||
-        recoverableDiscovery.brazilMatches.length > 0 ||
-        trashAudiences.length > 0) && (
-        <div className="rounded-xl border border-emerald-500/50 bg-emerald-950/30 px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div className="space-y-0.5">
-            <div className="font-bold text-emerald-200 flex items-center gap-1.5">
-              <RotateCcw className="w-4 h-4 text-emerald-400" />
-              <span>
-                Recuperação Automática Disponível! Encontramos dados salvos neste navegador que você pode restaurar em 1 clique:
-              </span>
+      {/* Auto-Discovery Banner if any un-dismissed Trash / Orphan Niche / Backup Audience exists */}
+      {(() => {
+        const dismissedSet = new Set(dismissedRecoveryKeys.map((k) => k.toLowerCase()));
+        const visibleTrash = trashAudiences.filter((t) => !dismissedSet.has(`trash:${t.id.toLowerCase()}`));
+        const hasVisibleRecovery =
+          recoverableDiscovery.orphanNiches.length > 0 ||
+          recoverableDiscovery.backupMissing.length > 0 ||
+          recoverableDiscovery.brazilMatches.length > 0 ||
+          visibleTrash.length > 0;
+        if (!hasVisibleRecovery) return null;
+        return (
+          <div className="rounded-xl border border-emerald-500/50 bg-emerald-950/30 px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="space-y-0.5">
+              <div className="font-bold text-emerald-200 flex items-center gap-1.5">
+                <RotateCcw className="w-4 h-4 text-emerald-400" />
+                <span>
+                  Recuperação Automática Disponível! Encontramos dados salvos neste navegador que você pode restaurar em 1 clique:
+                </span>
+              </div>
+              <div className="text-[11px] text-emerald-100/80 flex flex-wrap gap-x-3 gap-y-1">
+                {visibleTrash.map((t) => (
+                  <span key={`tr-top-${t.id}`}>🗑️ Lixeira: <strong>{t.name}</strong> ({t.groupIds?.length || t.groupSnapshots?.length || 0} grupos)</span>
+                ))}
+                {recoverableDiscovery.orphanNiches.map((o) => (
+                  <span key={`or-top-${o.name}`}>🛟 Órfão encontrado: <strong>{o.name}</strong> ({o.groups.length} grupos)</span>
+                ))}
+                {recoverableDiscovery.backupMissing.map((b) => (
+                  <span key={`bk-top-${b.id}`}>💾 Backup: <strong>{b.name}</strong> ({b.groupIds?.length || b.groupSnapshots?.length || 0} grupos)</span>
+                ))}
+                {recoverableDiscovery.brazilMatches.map((bm) => (
+                  <span key={`br-top-${bm.audName}`}>🇧🇷 Na aba Brasil: <strong>{bm.audName}</strong> ({bm.groups.length} grupos)</span>
+                ))}
+              </div>
             </div>
-            <div className="text-[11px] text-emerald-100/80 flex flex-wrap gap-x-3 gap-y-1">
-              {trashAudiences.map((t) => (
-                <span key={`tr-top-${t.id}`}>🗑️ Lixeira: <strong>{t.name}</strong> ({t.groupIds?.length || t.groupSnapshots?.length || 0} grupos)</span>
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              {recoverableDiscovery.orphanNiches.slice(0, 2).map((o) => (
+                <button
+                  key={`btn-rec-${o.name}`}
+                  type="button"
+                  onClick={() => handleRebuildAudienceFromList(o.name, o.groups)}
+                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg cursor-pointer"
+                >
+                  Restaurar "{o.name}" ({o.groups.length})
+                </button>
               ))}
-              {recoverableDiscovery.orphanNiches.map((o) => (
-                <span key={`or-top-${o.name}`}>🛟 Órfão encontrado: <strong>{o.name}</strong> ({o.groups.length} grupos)</span>
+              {visibleTrash.slice(0, 2).map((t) => (
+                <button
+                  key={`btn-tr-${t.id}`}
+                  type="button"
+                  onClick={() => handleRestoreAudienceFromTrashOrBackup(t)}
+                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg cursor-pointer"
+                >
+                  Restaurar "{t.name}"
+                </button>
               ))}
-              {recoverableDiscovery.backupMissing.map((b) => (
-                <span key={`bk-top-${b.id}`}>💾 Backup: <strong>{b.name}</strong> ({b.groupIds?.length || b.groupSnapshots?.length || 0} grupos)</span>
-              ))}
-              {recoverableDiscovery.brazilMatches.map((bm) => (
-                <span key={`br-top-${bm.audName}`}>🇧🇷 Na aba Brasil: <strong>{bm.audName}</strong> ({bm.groups.length} grupos)</span>
-              ))}
+              <button
+                type="button"
+                onClick={() => {
+                  setSubTab('triage');
+                  setIsRecoveryPanelOpen(true);
+                }}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-cyan-200 border border-cyan-500/40 font-semibold rounded-lg cursor-pointer"
+              >
+                Abrir Central de Recuperação →
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  markRecoveryDismissed(
+                    ...recoverableDiscovery.orphanNiches.map((o) => `orphan:${o.name.trim().toLowerCase()}`),
+                    ...recoverableDiscovery.backupMissing.map((b) => `backup:${b.id.toLowerCase()}`),
+                    ...recoverableDiscovery.brazilMatches.map((bm) => `brazil:${bm.audName.trim().toLowerCase()}`),
+                    ...visibleTrash.map((t) => `trash:${t.id.toLowerCase()}`)
+                  );
+                }}
+                className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 font-semibold rounded-lg cursor-pointer"
+                title="Ocultar este aviso definitivamente (já restaurei ou não quero restaurar)"
+              >
+                ✕ Não voltar
+              </button>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
-            {recoverableDiscovery.orphanNiches.slice(0, 2).map((o) => (
-              <button
-                key={`btn-rec-${o.name}`}
-                type="button"
-                onClick={() => handleRebuildAudienceFromList(o.name, o.groups)}
-                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg cursor-pointer"
-              >
-                Restaurar "{o.name}" ({o.groups.length})
-              </button>
-            ))}
-            {trashAudiences.slice(0, 2).map((t) => (
-              <button
-                key={`btn-tr-${t.id}`}
-                type="button"
-                onClick={() => handleRestoreAudienceFromTrashOrBackup(t)}
-                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg cursor-pointer"
-              >
-                Restaurar "{t.name}"
-              </button>
-            ))}
-            <button
-              type="button"
-              onClick={() => {
-                setSubTab('triage');
-                setIsRecoveryPanelOpen(true);
-              }}
-              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-cyan-200 border border-cyan-500/40 font-semibold rounded-lg cursor-pointer"
-            >
-              Abrir Central de Recuperação →
-            </button>
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Contextual Status Banner */}
       {banner && (
@@ -5173,13 +5280,30 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                                   {t.countryName} · {t.groupIds?.length || t.groupSnapshots?.length || 0} grupos · {t.deletedReason || 'Na Lixeira'}
                                 </div>
                               </div>
-                              <button
-                                type="button"
-                                onClick={() => handleRestoreAudienceFromTrashOrBackup(t)}
-                                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold rounded cursor-pointer shrink-0"
-                              >
-                                Restaurar
-                              </button>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => handleRestoreAudienceFromTrashOrBackup(t)}
+                                  className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold rounded cursor-pointer"
+                                >
+                                  Restaurar
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    markRecoveryDismissed(
+                                      `trash:${t.id.toLowerCase()}`,
+                                      `orphan:${(t.name || '').trim().toLowerCase()}`,
+                                      `backup:${t.id.toLowerCase()}`
+                                    );
+                                    setTrashAudiences((prev) => prev.filter((item) => item.id !== t.id));
+                                  }}
+                                  className="px-2 py-1 bg-slate-800 hover:bg-rose-900/70 text-slate-300 hover:text-rose-200 text-[11px] rounded cursor-pointer"
+                                  title="Remover definitivamente da Lixeira (não voltar mais)"
+                                >
+                                  Excluir
+                                </button>
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -5190,7 +5314,11 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                     {(recoverableDiscovery.orphanNiches.length > 0 ||
                       recoverableDiscovery.backupMissing.length > 0 ||
                       recoverableDiscovery.brazilMatches.length > 0 ||
-                      cloudScannedAudiences.filter((ca) => !globalAudiences.some((ga) => ga.id === ca.id)).length > 0) && (
+                      cloudScannedAudiences.filter(
+                        (ca) =>
+                          !globalAudiences.some((ga) => ga.id === ca.id) &&
+                          !dismissedRecoveryKeys.includes(`cloud:${ca.id.toLowerCase()}`)
+                      ).length > 0) && (
                       <div className="space-y-1.5">
                         <div className="text-[10px] uppercase font-bold text-emerald-300">🛟 Públicos Encontrados Automaticamente</div>
                         <div className="space-y-1">
@@ -5200,13 +5328,23 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                                 <div className="font-semibold text-emerald-200 truncate">{o.name} (Grupos Órfãos neste Navegador)</div>
                                 <div className="text-[10px] text-slate-400">{o.groups.length} grupos preservados em cache local</div>
                               </div>
-                              <button
-                                type="button"
-                                onClick={() => handleRebuildAudienceFromList(o.name, o.groups)}
-                                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold rounded cursor-pointer shrink-0"
-                              >
-                                Reconstruir ({o.groups.length})
-                              </button>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => handleRebuildAudienceFromList(o.name, o.groups)}
+                                  className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold rounded cursor-pointer"
+                                >
+                                  Reconstruir ({o.groups.length})
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => markRecoveryDismissed(`orphan:${o.name.trim().toLowerCase()}`)}
+                                  className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] rounded cursor-pointer"
+                                  title="Dispensar e não mostrar mais"
+                                >
+                                  ✕
+                                </button>
+                              </div>
                             </div>
                           ))}
                           {recoverableDiscovery.backupMissing.map((b) => (
@@ -5215,30 +5353,59 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                                 <div className="font-semibold text-cyan-200 truncate">{b.name} (Backup Automático Local)</div>
                                 <div className="text-[10px] text-slate-400">{b.groupIds?.length || b.groupSnapshots?.length || 0} grupos</div>
                               </div>
-                              <button
-                                type="button"
-                                onClick={() => handleRestoreAudienceFromTrashOrBackup(b)}
-                                className="px-2.5 py-1 bg-cyan-600 hover:bg-cyan-500 text-white text-[11px] font-bold rounded cursor-pointer shrink-0"
-                              >
-                                Restaurar Backup
-                              </button>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => handleRestoreAudienceFromTrashOrBackup(b)}
+                                  className="px-2.5 py-1 bg-cyan-600 hover:bg-cyan-500 text-white text-[11px] font-bold rounded cursor-pointer"
+                                >
+                                  Restaurar Backup
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    markRecoveryDismissed(
+                                      `backup:${b.id.toLowerCase()}`,
+                                      `orphan:${(b.name || '').trim().toLowerCase()}`
+                                    )
+                                  }
+                                  className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] rounded cursor-pointer"
+                                  title="Dispensar e não mostrar mais"
+                                >
+                                  ✕
+                                </button>
+                              </div>
                             </div>
                           ))}
                           {cloudScannedAudiences
-                            .filter((ca) => !globalAudiences.some((ga) => ga.id === ca.id))
+                            .filter(
+                              (ca) =>
+                                !globalAudiences.some((ga) => ga.id === ca.id) &&
+                                !dismissedRecoveryKeys.includes(`cloud:${ca.id.toLowerCase()}`)
+                            )
                             .map((ca) => (
                               <div key={`cl-${ca.id}`} className="flex items-center justify-between gap-2 bg-slate-950/90 border border-indigo-500/40 rounded-lg px-2.5 py-1.5 text-xs">
                                 <div className="min-w-0">
-                                  <div className="font-semibold text-indigo-200 truncate">{ca.name} (Nuvem Firebase)</div>
+                                  <div className="font-semibold text-indigo-200 truncate">{ca.name} (Nuvem)</div>
                                   <div className="text-[10px] text-slate-400">{ca.groupIds?.length || ca.groupSnapshots?.length || 0} grupos</div>
                                 </div>
-                                <button
-                                  type="button"
-                                  onClick={() => handleRestoreAudienceFromTrashOrBackup(ca)}
-                                  className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold rounded cursor-pointer shrink-0"
-                                >
-                                  Baixar da Nuvem
-                                </button>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRestoreAudienceFromTrashOrBackup(ca)}
+                                    className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold rounded cursor-pointer"
+                                  >
+                                    Baixar da Nuvem
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => markRecoveryDismissed(`cloud:${ca.id.toLowerCase()}`)}
+                                    className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] rounded cursor-pointer"
+                                    title="Dispensar e não mostrar mais"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
                               </div>
                             ))}
                           {recoverableDiscovery.brazilMatches.map((bm) => (
@@ -5247,13 +5414,23 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                                 <div className="font-semibold text-amber-200 truncate">{bm.audName} ({bm.country})</div>
                                 <div className="text-[10px] text-slate-400">{bm.groups.length} grupos encontrados na aba Brasil</div>
                               </div>
-                              <button
-                                type="button"
-                                onClick={() => handleRebuildAudienceFromList(bm.audName, bm.groups)}
-                                className="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-bold rounded cursor-pointer shrink-0"
-                              >
-                                Copiar para Global ({bm.groups.length})
-                              </button>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => handleRebuildAudienceFromList(bm.audName, bm.groups)}
+                                  className="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-bold rounded cursor-pointer"
+                                >
+                                  Copiar para Global ({bm.groups.length})
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => markRecoveryDismissed(`brazil:${bm.audName.trim().toLowerCase()}`)}
+                                  className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] rounded cursor-pointer"
+                                  title="Dispensar e não mostrar mais"
+                                >
+                                  ✕
+                                </button>
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -5420,9 +5597,12 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                                     type="button"
                                     onClick={() => {
                                       if (renameAudienceInput.trim()) {
+                                        const oldLower = (aud.name || '').trim().toLowerCase();
+                                        const nextName = renameAudienceInput.trim();
+                                        markRecoveryDismissed(`orphan:${oldLower}`, `brazil:${oldLower}`, `backup:${aud.id.toLowerCase()}`);
                                         setGlobalAudiences((prev) =>
                                           prev.map((a) =>
-                                            a.id === aud.id ? { ...a, name: renameAudienceInput.trim() } : a
+                                            a.id === aud.id ? { ...a, name: nextName } : a
                                           )
                                         );
                                       }

@@ -1510,7 +1510,7 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'global_mediascalers' && <GlobalMediaScalersTab />}
+        {activeTab === 'global_mediascalers' && <GlobalMediaScalersTab campaigns={campaigns} />}
 
         {activeTab === 'robo_cidades' && (
           <RoboDivulgadorCidades
@@ -1563,6 +1563,7 @@ export default function App() {
             onUpdateCampaign={handleUpdateCampaign}
             onAddCampaign={handleAddCampaign}
             onPreviewBridge={(c) => setBridgeModalCampaign(c)}
+            onNavigateTab={(tab) => setActiveTab(tab)}
           />
         )}
 

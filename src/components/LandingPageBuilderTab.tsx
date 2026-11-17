@@ -26,6 +26,7 @@ import {
   FolderOpen,
   Trash2,
   X,
+  Globe,
 } from 'lucide-react';
 import { Campaign } from '../types';
 import { saveLandingPageSettingsToFirebase } from '../lib/firebase';
@@ -37,6 +38,7 @@ interface LandingPageBuilderTabProps {
   onUpdateCampaign: (updatedCampaign: Campaign) => void;
   onAddCampaign?: (newCampaign: Campaign) => void;
   onPreviewBridge: (campaign: Campaign) => void;
+  onNavigateTab?: (tab: string) => void;
 }
 
 export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
@@ -44,6 +46,7 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
   onUpdateCampaign,
   onAddCampaign,
   onPreviewBridge,
+  onNavigateTab,
 }) => {
   const [selectedCampaignId, setSelectedCampaignId] = useState<string>(() => {
     try {
@@ -55,6 +58,7 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
   const [previewDevice, setPreviewDevice] = useState<'mobile' | 'desktop'>('mobile');
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [globalSyncNotice, setGlobalSyncNotice] = useState<string | null>(null);
 
   // Modal to create brand new landing page from scratch
   const [isNewLandingModalOpen, setIsNewLandingModalOpen] = useState(false);
@@ -260,6 +264,7 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
     onUpdateCampaign(updated);
     try {
       localStorage.setItem('autoviral_selected_landing_id', updated.id);
+      window.dispatchEvent(new CustomEvent('autoviral-landing-synced', { detail: { campaignId: updated.id } }));
       saveLandingPageSettingsToFirebase({
         campaignId: updated.id,
         title: updated.title,
@@ -276,6 +281,7 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
       }, updated.id).catch(console.warn);
     } catch {}
     setSavedSuccess(true);
+    setGlobalSyncNotice(`"${updated.title}" atualizada aqui e sincronizada automaticamente no Modo Global!`);
     setTimeout(() => setSavedSuccess(false), 3000);
   };
 
@@ -338,8 +344,64 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
             <Eye className="w-4 h-4" />
             <span>Abrir Página Real</span>
           </a>
+
+          {onNavigateTab && (
+            <button
+              type="button"
+              onClick={() => {
+                if (activeCamp) {
+                  try {
+                    localStorage.setItem('autoviral_global_selected_offer_v1', `landing-${activeCamp.id}`);
+                    window.dispatchEvent(new CustomEvent('autoviral-landing-synced', { detail: { campaignId: activeCamp.id } }));
+                  } catch {}
+                }
+                onNavigateTab('global_mediascalers');
+              }}
+              className="flex items-center gap-2 px-4 py-2.5 bg-cyan-600/20 hover:bg-cyan-600/35 border border-cyan-500/40 text-cyan-200 rounded-xl text-xs sm:text-sm font-bold transition cursor-pointer"
+            >
+              <Globe className="w-4 h-4" />
+              <span>Usar na Global</span>
+            </button>
+          )}
         </div>
       </div>
+
+      {globalSyncNotice && (
+        <div className="p-3.5 bg-cyan-950/50 border border-cyan-500/40 rounded-2xl flex flex-wrap items-center justify-between gap-3 text-xs text-cyan-100">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{globalSyncNotice}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            {onNavigateTab && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (activeCamp) {
+                    try {
+                      localStorage.setItem('autoviral_global_selected_offer_v1', `landing-${activeCamp.id}`);
+                      window.dispatchEvent(new CustomEvent('autoviral-landing-synced', { detail: { campaignId: activeCamp.id } }));
+                    } catch {}
+                  }
+                  onNavigateTab('global_mediascalers');
+                }}
+                className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-lg inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <Globe className="w-3.5 h-3.5" />
+                <span>Abrir no Modo Global</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setGlobalSyncNotice(null)}
+              className="text-slate-400 hover:text-white p-1 cursor-pointer"
+              aria-label="Fechar aviso"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Main Grid: Left Editor Form, Right Live Preview */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
@@ -1008,6 +1070,7 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
                 setSelectedCampaignId(newCamp.id);
                 try {
                   localStorage.setItem('autoviral_selected_landing_id', newCamp.id);
+                  window.dispatchEvent(new CustomEvent('autoviral-landing-synced', { detail: { campaignId: newCamp.id } }));
                   saveLandingPageSettingsToFirebase(newCamp, newCamp.id).catch(console.warn);
                 } catch {}
 
@@ -1025,7 +1088,7 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
                 setNewLandingTitle('');
                 setNewLandingCheckoutUrl('');
                 setNewLandingPain('');
-                alert(`✅ Nova Landing Page "${newCamp.title}" criada com sucesso! O link exclusivo já está pronto.`);
+                setGlobalSyncNotice(`Nova Landing Page "${newCamp.title}" criada e já disponível automaticamente no Modo Global!`);
               }}
               className="space-y-4 text-xs"
             >

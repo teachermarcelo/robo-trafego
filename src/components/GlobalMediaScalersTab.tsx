@@ -39,11 +39,13 @@ import {
   Upload,
 } from 'lucide-react';
 import JSZip from 'jszip';
-import { FacebookGroup, FacebookPostLog } from '../types';
+import { Campaign, FacebookGroup, FacebookPostLog } from '../types';
 import { globalEnBotRunner } from '../utils/globalEnBotRunner';
+import { getCampaignLandingUrl } from '../utils/campaignSlug';
 
 export interface GlobalOffer {
   id: string;
+  sourceCampaignId?: string;
   productName: string;
   nichePain: string;
   countryCode: string;
@@ -165,6 +167,7 @@ const STORAGE_KEYS = {
   LOGS: 'autoviral_global_bot_logs_v1',
   YT_ITEMS: 'autoviral_global_yt_videos_v1',
   PIN_ITEMS: 'autoviral_global_pin_items_v1',
+  HIDDEN_LANDING_OFFERS: 'autoviral_global_hidden_landing_ids_v1',
 };
 
 const COUNTRY_PRESETS = [
@@ -374,6 +377,61 @@ function generateOfferPromoImageDataUrl(offer: GlobalOffer, headline?: string): 
   return canvas.toDataURL('image/jpeg', 0.88);
 }
 
+function campaignToGlobalOffer(camp: Campaign, existing?: GlobalOffer): GlobalOffer {
+  const sampleText = `${camp.title || ''} ${camp.headline || ''} ${camp.painPointTargeted || ''} ${camp.nicheLabel || ''}`;
+  const looksPortuguese =
+    /[ãõçáéíóúâêô]/i.test(sampleText) ||
+    /\b(para|crian[cç]a|atividades|renda|loja|milhas|m[eé]todo|garantia|comunidade|curso|acesso|suporte|sa[uú]de|emagrecer)\b/i.test(
+      sampleText
+    );
+  const looksSpanish = /\b(paso|descuento|soluci[oó]n|garant[ií]a|comprar|oferta especial)\b/i.test(sampleText) && !looksPortuguese;
+
+  const landingUrl = getCampaignLandingUrl(camp);
+  const defaultCountryCode = looksPortuguese ? 'BR' : looksSpanish ? 'ES' : 'US';
+  const defaultCountryName = looksPortuguese ? 'Brasil' : looksSpanish ? 'España' : 'United States';
+  const defaultLanguage = looksPortuguese ? 'Português' : looksSpanish ? 'Español' : 'English';
+  const defaultCurrency = looksPortuguese ? 'BRL' : looksSpanish ? 'EUR' : 'USD';
+
+  const priceNum = Number(camp.price) || 0;
+  const oldPriceNum = Number(camp.oldPrice) || 0;
+  const formattedPrice =
+    defaultCurrency === 'BRL'
+      ? `R$ ${priceNum.toFixed(2).replace('.', ',')}`
+      : `$${priceNum.toFixed(2)}`;
+  const formattedDiscount =
+    oldPriceNum > priceNum
+      ? defaultCurrency === 'BRL'
+        ? `De R$ ${oldPriceNum.toFixed(2).replace('.', ',')} por ${formattedPrice} · Garantia ${camp.guaranteeDays || 7} dias`
+        : `Was $${oldPriceNum.toFixed(2)} → ${formattedPrice} · ${camp.guaranteeDays || 7}-Day Guarantee`
+      : defaultCurrency === 'BRL'
+      ? `Garantia ${camp.guaranteeDays || 7} dias · Acesso imediato`
+      : `${camp.guaranteeDays || 7}-Day Guarantee · Instant Access`;
+
+  const resolvedAffiliate = (camp.checkoutUrl || '').trim() || existing?.affiliateUrl || landingUrl;
+  const resolvedPresell =
+    existing?.presellUrl && !existing.presellUrl.includes('?camp=')
+      ? existing.presellUrl
+      : landingUrl;
+
+  return {
+    id: `landing-${camp.id}`,
+    sourceCampaignId: camp.id,
+    productName: camp.title || existing?.productName || 'Landing Page',
+    nichePain: camp.painPointTargeted || camp.subheadline || camp.nicheLabel || existing?.nichePain || 'Benefício principal',
+    countryCode: existing?.countryCode || defaultCountryCode,
+    countryName: existing?.countryName || defaultCountryName,
+    languageName: existing?.languageName || defaultLanguage,
+    currencyCode: existing?.currencyCode || defaultCurrency,
+    offerPriceText: formattedPrice,
+    discountText: formattedDiscount,
+    affiliateUrl: resolvedAffiliate,
+    trackingParamName: existing?.trackingParamName || 'utm_source',
+    presellUrl: resolvedPresell,
+    postImageUrl: (camp.imageUrl || '').trim() || existing?.postImageUrl || '',
+    createdAt: camp.createdAt || existing?.createdAt || new Date().toISOString(),
+  };
+}
+
 function detectScopeAndCountry(name: string, searchTerm?: string): { scope: 'global' | 'brazil'; country: string } {
   const text = `${name} ${searchTerm || ''}`.toLowerCase();
   if (
@@ -502,9 +560,27 @@ function buildEyeCatchingFbPost(
   }
 
   if (isPortuguese) {
+    if (style === 'comparativo') {
+      return {
+        headline: `❌ Opções comuns vs. ✅ ${offer.productName} — Comparativo honesto`,
+        body: `Para quem está cansado de tentar resolver ${offer.nichePain} sem resultado:\n\n❌ Soluções genéricas: Caras, confusas ou não resolvem na prática\n✅ ${offer.productName}: Feito passo a passo para resolver ${offer.nichePain}\n\n👉 Veja os detalhes e a condição atual (${offer.offerPriceText}):\n${presellLink}`,
+      };
+    }
+    if (style === 'historia') {
+      return {
+        headline: `💬 Compartilhando o que finalmente resolveu "${offer.nichePain}" aqui`,
+        body: `Vi várias pessoas aqui no grupo perguntando sobre ${offer.nichePain}.\n\nSeparei o resumo completo sobre ${offer.productName} (${offer.offerPriceText} · ${offer.discountText}) para quem quiser conferir:\n👉 ${presellLink}\n\nAlguém aqui do grupo já usa ou conhece?`,
+      };
+    }
+    if (style === 'oferta') {
+      return {
+        headline: `🔥 Condição Liberada: ${offer.productName} (${offer.offerPriceText})`,
+        body: `Passando para avisar enquanto essa condição ainda está ativa 👇\n\n✅ Resolve: ${offer.nichePain}\n✅ Valor: ${offer.offerPriceText} (${offer.discountText})\n\n👉 Acesse a página com todos os detalhes aqui:\n${presellLink}`,
+      };
+    }
     return {
       headline: `⚠️ Atenção antes de gastar à toa com ${offer.nichePain}`,
-      body: `Compartilhando rápido com o grupo 👇\n\n✅ Comparativo completo sobre ${offer.productName}\n✅ Condição atual: ${offer.offerPriceText} (${offer.discountText})\n\n👉 Confira os detalhes e o link oficial aqui:\n${presellLink}`,
+      body: `Compartilhando rápido com o grupo 👇\n\n✅ Conheça ${offer.productName}\n✅ Condição atual: ${offer.offerPriceText} (${offer.discountText})\n\n👉 Confira os detalhes e o link oficial aqui:\n${presellLink}`,
     };
   }
 
@@ -777,46 +853,89 @@ function buildStructuredTemplateKit(offer: GlobalOffer): GlobalGeneratedKit {
       ],
     },
     organicSocialKit: {
-      fbGroupQueries: [
-        `${offer.productName.split(' ').slice(0, 2).join(' ')} ${offer.countryName}`,
-        `${offer.nichePain.split(' ').slice(0, 3).join(' ')} ${offer.countryName}`,
-        `${offer.countryName} deals & recommendations`,
-      ],
-      fbGroupPosts: [
-        {
-          angle: `🚨 Alerta & Comparativo (${offer.countryName})`,
-          headline: `⚠️ Quick warning if you're dealing with ${offer.nichePain} (${offer.countryName})`,
-          body: `Wanted to share a fast comparison before anyone wastes money on the wrong option 👇\n\n✅ Why ${offer.productName} stands out for ${offer.nichePain}\n✅ ${offer.offerPriceText} · ${offer.discountText}\n\n👉 Full comparison + ${offer.countryName} link:\n[PRESELL_LINK]\n\nHope this saves someone hours of research!`,
-        },
-        {
-          angle: `❌ vs ✅ Comparativo Direto (${offer.countryName})`,
-          headline: `❌ Regular options vs. ✅ ${offer.productName} — Honest ${offer.countryName} Comparison`,
-          body: `For anyone tired of dealing with ${offer.nichePain}, here is the quick side-by-side breakdown:\n\n❌ Standard options: Overpriced or fail to fix the root issue\n✅ ${offer.productName}: Built specifically to solve ${offer.nichePain}\n\n👉 Read the full notes & check ${offer.countryName} availability (${offer.offerPriceText}):\n[PRESELL_LINK]`,
-        },
-      ],
+      fbGroupQueries: isPortuguese
+        ? [
+            `${offer.productName.split(' ').slice(0, 2).join(' ')} ${offer.countryName}`,
+            `${offer.nichePain.split(' ').slice(0, 3).join(' ')}`,
+            `Ofertas e dicas ${offer.countryName}`,
+          ]
+        : [
+            `${offer.productName.split(' ').slice(0, 2).join(' ')} ${offer.countryName}`,
+            `${offer.nichePain.split(' ').slice(0, 3).join(' ')} ${offer.countryName}`,
+            `${offer.countryName} deals & recommendations`,
+          ],
+      fbGroupPosts: isPortuguese
+        ? [
+            {
+              angle: `🚨 Alerta & Comparativo (${offer.countryName})`,
+              headline: `⚠️ Atenção antes de tentar resolver ${offer.nichePain} do jeito errado`,
+              body: `Compartilhando uma dica rápida antes que mais alguém perca tempo ou dinheiro 👇\n\n✅ Como ${offer.productName} ajuda em ${offer.nichePain}\n✅ ${offer.offerPriceText} · ${offer.discountText}\n\n👉 Página com todos os detalhes:\n[PRESELL_LINK]\n\nAlguém aqui do grupo já conhecia?`,
+            },
+            {
+              angle: `❌ vs ✅ Comparativo Direto (${offer.countryName})`,
+              headline: `❌ Jeito comum vs. ✅ ${offer.productName} — Comparativo rápido`,
+              body: `Para quem cansou de bater cabeça com ${offer.nichePain}:\n\n❌ Alternativas comuns: Tomam tempo e não entregam resultado direto\n✅ ${offer.productName}: Pensado exatamente para resolver ${offer.nichePain}\n\n👉 Confira os detalhes (${offer.offerPriceText}):\n[PRESELL_LINK]`,
+            },
+          ]
+        : [
+            {
+              angle: `🚨 Alerta & Comparativo (${offer.countryName})`,
+              headline: `⚠️ Quick warning if you're dealing with ${offer.nichePain} (${offer.countryName})`,
+              body: `Wanted to share a fast comparison before anyone wastes money on the wrong option 👇\n\n✅ Why ${offer.productName} stands out for ${offer.nichePain}\n✅ ${offer.offerPriceText} · ${offer.discountText}\n\n👉 Full comparison + ${offer.countryName} link:\n[PRESELL_LINK]\n\nHope this saves someone hours of research!`,
+            },
+            {
+              angle: `❌ vs ✅ Comparativo Direto (${offer.countryName})`,
+              headline: `❌ Regular options vs. ✅ ${offer.productName} — Honest ${offer.countryName} Comparison`,
+              body: `For anyone tired of dealing with ${offer.nichePain}, here is the quick side-by-side breakdown:\n\n❌ Standard options: Overpriced or fail to fix the root issue\n✅ ${offer.productName}: Built specifically to solve ${offer.nichePain}\n\n👉 Read the full notes & check ${offer.countryName} availability (${offer.offerPriceText}):\n[PRESELL_LINK]`,
+            },
+          ],
       youtubeQueries: [
         `${offer.productName} review`,
         `${offer.nichePain.split(',')[0]} solution`,
       ],
-      youtubeComments: [
-        `Helpful video! For anyone in ${offer.countryName} researching ${offer.productName}, I left a quick comparison and current ${offer.offerPriceText} link here: [PRESELL_LINK]`,
-      ],
+      youtubeComments: isPortuguese
+        ? [
+            `Excelente vídeo! Para quem está pesquisando sobre ${offer.productName} (${offer.offerPriceText}), deixei o link com todos os detalhes aqui: [PRESELL_LINK]`,
+          ]
+        : [
+            `Helpful video! For anyone in ${offer.countryName} researching ${offer.productName}, I left a quick comparison and current ${offer.offerPriceText} link here: [PRESELL_LINK]`,
+          ],
       pinterestQueries: [
         `${offer.productName} ${offer.countryCode}`,
         `${offer.nichePain.split(',')[0]} tips`,
       ],
-      pinterestPins: [
-        {
-          title: `${offer.productName} — ${offer.countryName} Guide (${offer.offerPriceText})`,
-          description: `Solving ${offer.nichePain}. Read the comparison and claim ${offer.offerPriceText} here: [PRESELL_LINK]`,
-        },
-      ],
+      pinterestPins: isPortuguese
+        ? [
+            {
+              title: `${offer.productName} (${offer.offerPriceText})`,
+              description: `Solução prática para ${offer.nichePain}. Veja os detalhes aqui: [PRESELL_LINK]`,
+            },
+          ]
+        : [
+            {
+              title: `${offer.productName} — ${offer.countryName} Guide (${offer.offerPriceText})`,
+              description: `Solving ${offer.nichePain}. Read the comparison and claim ${offer.offerPriceText} here: [PRESELL_LINK]`,
+            },
+          ],
     },
   };
 }
 
-export const GlobalMediaScalersTab: React.FC = () => {
+interface GlobalMediaScalersTabProps {
+  campaigns?: Campaign[];
+}
+
+export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ campaigns = [] }) => {
   const [subTab, setSubTab] = useState<'offers' | 'kit' | 'triage' | 'bot'>('offers');
+
+  const [hiddenLandingIds, setHiddenLandingIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.HIDDEN_LANDING_OFFERS);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
 
   // Offers state
   const [offers, setOffers] = useState<GlobalOffer[]>(() => {
@@ -1097,6 +1216,66 @@ export const GlobalMediaScalersTab: React.FC = () => {
       localStorage.setItem('autoviral_global_waiting_approvals_v1', JSON.stringify(waitingApprovals));
     } catch {}
   }, [waitingApprovals]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.HIDDEN_LANDING_OFFERS, JSON.stringify(hiddenLandingIds));
+    } catch {}
+  }, [hiddenLandingIds]);
+
+  // Listen for direct Landing Page creation/edits to auto-unhide & focus if created from Landing tab
+  useEffect(() => {
+    const onLandingSynced = (ev: Event) => {
+      const campId = (ev as CustomEvent)?.detail?.campaignId;
+      if (campId) {
+        setHiddenLandingIds((prev) => prev.filter((id) => id !== campId));
+      }
+    };
+    window.addEventListener('autoviral-landing-synced', onLandingSynced);
+    return () => window.removeEventListener('autoviral-landing-synced', onLandingSynced);
+  }, []);
+
+  // Automatically sync Landing Page campaigns into Global Offers
+  useEffect(() => {
+    if (!campaigns || campaigns.length === 0) return;
+    const hiddenSet = new Set(hiddenLandingIds);
+    const activeLandings = campaigns.filter((c) => c && c.id && !hiddenSet.has(c.id));
+    if (activeLandings.length === 0) return;
+
+    setOffers((prev) => {
+      let changed = false;
+      const byId = new Map(prev.map((o) => [o.id, o]));
+      const next = [...prev];
+
+      for (const camp of activeLandings) {
+        const offerId = `landing-${camp.id}`;
+        const existing = byId.get(offerId);
+        const converted = campaignToGlobalOffer(camp, existing);
+
+        if (!existing) {
+          next.push(converted);
+          byId.set(offerId, converted);
+          changed = true;
+        } else if (
+          existing.productName !== converted.productName ||
+          existing.nichePain !== converted.nichePain ||
+          existing.offerPriceText !== converted.offerPriceText ||
+          existing.discountText !== converted.discountText ||
+          existing.affiliateUrl !== converted.affiliateUrl ||
+          existing.presellUrl !== converted.presellUrl ||
+          (camp.imageUrl && existing.postImageUrl !== converted.postImageUrl)
+        ) {
+          const idx = next.findIndex((o) => o.id === offerId);
+          if (idx >= 0) {
+            next[idx] = converted;
+            changed = true;
+          }
+        }
+      }
+
+      return changed ? next : prev;
+    });
+  }, [campaigns, hiddenLandingIds]);
 
   // Sync default headline/body when activeOffer/kit changes
   useEffect(() => {
@@ -1394,11 +1573,54 @@ export const GlobalMediaScalersTab: React.FC = () => {
 
   const handleDeleteOffer = (id: string) => {
     if (offers.length <= 1) return;
+    const target = offers.find((o) => o.id === id);
+    if (target?.sourceCampaignId) {
+      setHiddenLandingIds((prev) => (prev.includes(target.sourceCampaignId!) ? prev : [...prev, target.sourceCampaignId!]));
+    } else if (id.startsWith('landing-')) {
+      const rawCampId = id.replace(/^landing-/, '');
+      setHiddenLandingIds((prev) => (prev.includes(rawCampId) ? prev : [...prev, rawCampId]));
+    }
     const remaining = offers.filter((o) => o.id !== id);
     setOffers(remaining);
     if (selectedOfferId === id && remaining[0]) {
       setSelectedOfferId(remaining[0].id);
     }
+  };
+
+  const handleResyncLandingOffers = () => {
+    if (!campaigns || campaigns.length === 0) {
+      setBanner({
+        message: 'Nenhuma Landing Page encontrada na aba Landing para sincronizar.',
+        tone: 'info',
+      });
+      return;
+    }
+    setHiddenLandingIds([]);
+    let firstLandingOfferId: string | null = null;
+    setOffers((prev) => {
+      const byId = new Map(prev.map((o) => [o.id, o]));
+      const next = [...prev];
+      for (const camp of campaigns) {
+        if (!camp?.id) continue;
+        const offerId = `landing-${camp.id}`;
+        if (!firstLandingOfferId) firstLandingOfferId = offerId;
+        const converted = campaignToGlobalOffer(camp, byId.get(offerId));
+        const idx = next.findIndex((o) => o.id === offerId);
+        if (idx >= 0) {
+          next[idx] = converted;
+        } else {
+          next.push(converted);
+        }
+      }
+      return next;
+    });
+    if (firstLandingOfferId && !offers.some((o) => o.id === selectedOfferId)) {
+      setSelectedOfferId(firstLandingOfferId);
+    }
+    setBanner({
+      message: `${campaigns.length} página(s) da aba Landing sincronizada(s) com o Modo Global!`,
+      tone: 'success',
+    });
   };
 
   // Generate Kit via Gemini Backend (safe text parsing avoids Unexpected end of JSON input)
@@ -2280,20 +2502,34 @@ export const GlobalMediaScalersTab: React.FC = () => {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           {/* Offers List */}
           <div className="lg:col-span-4 bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-semibold text-white">Ofertas Cadastradas ({offers.length})</h3>
-              <button
-                type="button"
-                onClick={() => setIsNewOfferOpen(true)}
-                className="text-xs text-cyan-400 hover:text-cyan-300 font-medium cursor-pointer"
-              >
-                + Adicionar
-              </button>
+              <div className="flex items-center gap-2">
+                {campaigns.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleResyncLandingOffers}
+                    className="text-[11px] text-emerald-400 hover:text-emerald-300 font-medium inline-flex items-center gap-1 cursor-pointer"
+                    title="Puxar e atualizar todas as páginas criadas na aba Landing"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    <span>Sincronizar Landings</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setIsNewOfferOpen(true)}
+                  className="text-xs text-cyan-400 hover:text-cyan-300 font-medium cursor-pointer"
+                >
+                  + Adicionar
+                </button>
+              </div>
             </div>
 
             <div className="divide-y divide-slate-800">
               {offers.map((offer) => {
                 const isSelected = activeOffer?.id === offer.id;
+                const isFromLanding = Boolean(offer.sourceCampaignId || offer.id.startsWith('landing-'));
                 return (
                   <div
                     key={offer.id}
@@ -2311,6 +2547,12 @@ export const GlobalMediaScalersTab: React.FC = () => {
                           <span>{offer.languageName}</span>
                           <span aria-hidden="true">·</span>
                           <span className="tabular-nums">{offer.currencyCode}</span>
+                          {isFromLanding && (
+                            <>
+                              <span aria-hidden="true">·</span>
+                              <span className="text-emerald-400 font-semibold">Aba Landing</span>
+                            </>
+                          )}
                         </div>
                       </div>
                       {offers.length > 1 && (
@@ -2338,7 +2580,20 @@ export const GlobalMediaScalersTab: React.FC = () => {
             <div className="lg:col-span-8 bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-5">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
                 <div>
-                  <h3 className="text-base font-bold text-white">{activeOffer.productName}</h3>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-base font-bold text-white">{activeOffer.productName}</h3>
+                    {(activeOffer.sourceCampaignId || activeOffer.id.startsWith('landing-')) && (
+                      <a
+                        href={activeOffer.presellUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[11px] font-semibold text-emerald-400 hover:text-emerald-300 inline-flex items-center gap-1"
+                      >
+                        <span>Ver Landing Page</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
+                  </div>
                   <p className="text-xs text-slate-400 mt-0.5">
                     {activeOffer.countryName} · {activeOffer.languageName} · {activeOffer.offerPriceText}
                   </p>
@@ -3722,13 +3977,25 @@ export const GlobalMediaScalersTab: React.FC = () => {
                           <span className="text-xs font-semibold text-cyan-300">
                             Qual Produto / Oferta para Disparar
                           </span>
-                          <button
-                            type="button"
-                            onClick={() => setIsNewOfferOpen(true)}
-                            className="text-xs text-emerald-400 hover:text-emerald-300 font-medium cursor-pointer"
-                          >
-                            + Cadastrar Novo Produto
-                          </button>
+                          <div className="flex items-center gap-3">
+                            {campaigns.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={handleResyncLandingOffers}
+                                className="text-xs text-sky-400 hover:text-sky-300 font-medium inline-flex items-center gap-1 cursor-pointer"
+                              >
+                                <RefreshCw className="w-3 h-3" />
+                                <span>Atualizar da Aba Landing</span>
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setIsNewOfferOpen(true)}
+                              className="text-xs text-emerald-400 hover:text-emerald-300 font-medium cursor-pointer"
+                            >
+                              + Cadastrar Novo Produto
+                            </button>
+                          </div>
                         </div>
                         <select
                           value={activeOffer.id}
@@ -3738,6 +4005,7 @@ export const GlobalMediaScalersTab: React.FC = () => {
                           {offers.map((offer) => (
                             <option key={offer.id} value={offer.id}>
                               {offer.productName} ({offer.countryName} · {offer.languageName} · {offer.offerPriceText})
+                              {offer.sourceCampaignId || offer.id.startsWith('landing-') ? ' [Landing]' : ''}
                             </option>
                           ))}
                         </select>

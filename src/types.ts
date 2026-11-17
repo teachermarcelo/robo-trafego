@@ -11,6 +11,7 @@ export interface Campaign {
   whatsappNumber?: string;
   price: number;
   oldPrice?: number;
+  currency?: string;
   headline?: string;
   subheadline?: string;
   copy?: string;

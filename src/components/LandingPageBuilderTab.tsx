@@ -37,6 +37,11 @@ import {
   generateViralFlyerAsync,
   ViralFlyerThemeId,
 } from '../utils/viralFlyerGenerator';
+import {
+  CURRENCY_OPTIONS,
+  formatCurrencyPrice,
+  getCurrencySymbol,
+} from '../utils/currency';
 
 interface LandingPageBuilderTabProps {
   campaigns: Campaign[];
@@ -54,23 +59,25 @@ function generateLandingCoverDataUrl(params: {
   targetAudience?: string;
   price?: number;
   oldPrice?: number;
+  currency?: string;
   badgeText?: string;
   nicheLabel?: string;
   theme?: ViralFlyerThemeId;
 }): string {
   const priceNum = Number(params.price) || 0;
   const oldNum = Number(params.oldPrice) || 0;
+  const cur = params.currency || 'BRL';
   return generateViralFlyerSync({
     productName: params.title,
     headline: params.headline || params.title,
     subheadline: params.subheadline,
     nichePain: params.nichePain,
     targetAudience: params.targetAudience,
-    priceText: priceNum > 0 ? `R$ ${priceNum.toFixed(2).replace('.', ',')}` : undefined,
-    oldPriceText: oldNum > priceNum ? `R$ ${oldNum.toFixed(2).replace('.', ',')}` : undefined,
+    priceText: priceNum > 0 ? formatCurrencyPrice(priceNum, cur) : undefined,
+    oldPriceText: oldNum > priceNum ? formatCurrencyPrice(oldNum, cur) : undefined,
     discountBadge: params.badgeText,
     countryLabel: params.nicheLabel,
-    language: 'pt',
+    language: cur === 'BRL' ? 'pt' : undefined,
     theme: params.theme || 'purple_gold',
     aspect: 'og',
   });
@@ -99,6 +106,7 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
   const [isNewLandingModalOpen, setIsNewLandingModalOpen] = useState(false);
   const [newLandingTitle, setNewLandingTitle] = useState('');
   const [newLandingPrice, setNewLandingPrice] = useState('37.00');
+  const [newLandingCurrency, setNewLandingCurrency] = useState('BRL');
   const [newLandingNiche, setNewLandingNiche] = useState<NicheType>('renda_extra');
   const [newLandingNicheLabel, setNewLandingNicheLabel] = useState('Renda Extra & Afiliados');
   const [newLandingCheckoutUrl, setNewLandingCheckoutUrl] = useState('');
@@ -116,12 +124,14 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
       activeCamp?.painPointTargeted ||
       'Acesso imediato com método passo a passo, garantia incondicional e suporte via WhatsApp.'
   );
+  const [currency, setCurrency] = useState(activeCamp?.currency || 'BRL');
   const [price, setPrice] = useState(
     activeCamp?.price != null ? activeCamp.price.toString() : '9.90'
   );
   const [oldPrice, setOldPrice] = useState(
     activeCamp?.oldPrice != null ? activeCamp.oldPrice.toString() : '47.00'
   );
+  const [copiedManualPost, setCopiedManualPost] = useState(false);
   const [checkoutUrl, setCheckoutUrl] = useState(activeCamp?.checkoutUrl || '');
   const [whatsappNumber, setWhatsappNumber] = useState(
     activeCamp?.whatsappNumber || '5541998778348'
@@ -263,6 +273,7 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
       setTitle(c.title);
       setHeadline(c.headline || c.title);
       setSubheadline(c.subheadline || c.painPointTargeted || '');
+      setCurrency(c.currency || 'BRL');
       setPrice(c.price != null ? c.price.toString() : '9.90');
       setOldPrice(c.oldPrice ? c.oldPrice.toString() : (c.price * 2.2).toFixed(2));
       setCheckoutUrl(c.checkoutUrl || '');
@@ -287,6 +298,7 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
       targetAudience: activeCamp?.targetAudience,
       price: parsedPrice,
       oldPrice: parsedOldPrice,
+      currency,
       badgeText: badgeText.trim(),
       nicheLabel: activeCamp?.nicheLabel,
       theme: overrideTheme || flyerTheme,
@@ -300,6 +312,7 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
         title: title.trim() || activeCamp.title,
         price: parsedPrice,
         oldPrice: parsedOldPrice,
+        currency,
         headline: headline.trim(),
         subheadline: subheadline.trim(),
         checkoutUrl: checkoutUrl.trim() || undefined,
@@ -333,11 +346,11 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
         subheadline: subheadline.trim(),
         nichePain: activeCamp?.painPointTargeted,
         targetAudience: activeCamp?.targetAudience,
-        priceText: parsedPrice > 0 ? `R$ ${parsedPrice.toFixed(2).replace('.', ',')}` : undefined,
-        oldPriceText: parsedOldPrice > parsedPrice ? `R$ ${parsedOldPrice.toFixed(2).replace('.', ',')}` : undefined,
+        priceText: parsedPrice > 0 ? formatCurrencyPrice(parsedPrice, currency) : undefined,
+        oldPriceText: parsedOldPrice > parsedPrice ? formatCurrencyPrice(parsedOldPrice, currency) : undefined,
         discountBadge: badgeText.trim(),
         countryLabel: activeCamp?.nicheLabel,
-        language: 'pt',
+        language: currency === 'BRL' ? 'pt' : undefined,
         theme: flyerTheme,
         embeddedImageUrl: imageUrl.trim(),
         aspect: 'og',
@@ -369,6 +382,7 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
         targetAudience: activeCamp.targetAudience,
         price: parsedPrice,
         oldPrice: parsedOldPrice,
+        currency,
         badgeText: badgeText.trim(),
         nicheLabel: activeCamp.nicheLabel,
         theme: flyerTheme,
@@ -384,6 +398,7 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
       title: title.trim() || activeCamp.title,
       price: parsedPrice,
       oldPrice: parsedOldPrice,
+      currency,
       headline: headline.trim(),
       subheadline: subheadline.trim(),
       checkoutUrl: checkoutUrl.trim() || undefined,
@@ -403,6 +418,7 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
         title: updated.title,
         price: updated.price,
         oldPrice: updated.oldPrice,
+        currency: updated.currency,
         headline: updated.headline,
         subheadline: updated.subheadline,
         checkoutUrl: updated.checkoutUrl,
@@ -414,7 +430,7 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
       }, updated.id).catch(console.warn);
     } catch {}
     setSavedSuccess(true);
-    setGlobalSyncNotice(`"${updated.title}" atualizada aqui (com imagem OG no link!) e sincronizada no Modo Global!`);
+    setGlobalSyncNotice(`"${updated.title}" (${formatCurrencyPrice(updated.price, updated.currency)}) atualizada e sincronizada no Modo Global!`);
     setTimeout(() => setSavedSuccess(false), 3000);
   };
 
@@ -428,6 +444,17 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
   };
 
   const parsedCurrentPrice = parseFloat(price.replace(',', '.')) || 9.9;
+  const formattedCurrentPrice = formatCurrencyPrice(parsedCurrentPrice, currency);
+  const currencySymbol = getCurrencySymbol(currency);
+
+  const copyManualPostFull = () => {
+    const postHeadline = (headline || title || activeCamp?.title || '').trim();
+    const postSub = (subheadline || activeCamp?.painPointTargeted || '').trim();
+    const fullPost = `${postHeadline}\n\n${postSub}\n\n✅ ${ctaText || 'Ver detalhes agora'} (${formattedCurrentPrice}):\n👉 ${publicLandingUrl}`;
+    navigator.clipboard.writeText(fullPost);
+    setCopiedManualPost(true);
+    setTimeout(() => setCopiedManualPost(false), 2500);
+  };
   const isTarefinhas =
     activeCamp?.id === 'camp-tarefinhas-autismo' ||
     title.toLowerCase().includes('tarefinha');
@@ -572,7 +599,7 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
                       {camp.title}
                     </p>
                     <p className="text-[11px] text-emerald-400 font-semibold">
-                      Preço Atual: R$ {camp.price.toFixed(2).replace('.', ',')}
+                      Preço Atual: {formatCurrencyPrice(camp.price, camp.currency || 'BRL')} ({camp.currency || 'BRL'})
                     </p>
                   </div>
                   {selectedCampaignId === camp.id && (
@@ -594,12 +621,12 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
                 </span>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <input
                   type="text"
                   readOnly
                   value={publicLandingUrl}
-                  className="flex-1 px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-emerald-400 font-mono text-xs focus:outline-none"
+                  className="flex-1 min-w-[180px] px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-emerald-400 font-mono text-xs focus:outline-none"
                 />
                 <button
                   type="button"
@@ -608,6 +635,15 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
                 >
                   {copiedLink ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                   <span>{copiedLink ? 'Copiado!' : 'Copiar Link'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={copyManualPostFull}
+                  className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs rounded-lg transition flex items-center gap-1 cursor-pointer shrink-0"
+                  title="Copia Título + Texto + Preço + Link pronto para colar manualmente no Facebook ou WhatsApp"
+                >
+                  {copiedManualPost ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedManualPost ? 'Post Copiado!' : 'Copiar Postagem Manual'}</span>
                 </button>
                 <a
                   href={publicLandingUrl}
@@ -621,7 +657,7 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
                 </a>
               </div>
               <p className="text-[11px] text-slate-400">
-                🚀 Cada criação tem seu próprio link exclusivo. Quem abrir esse link verá exatamente <strong>{title || activeCamp?.title}</strong>, a capa do produto e o preço de <strong>R$ {parsedCurrentPrice.toFixed(2).replace('.', ',')}</strong>!
+                🚀 Cada criação tem seu próprio link exclusivo. Quem abrir esse link verá exatamente <strong>{title || activeCamp?.title}</strong>, a capa do produto e o preço de <strong>{formattedCurrentPrice}</strong>!
               </p>
 
               {/* Live Facebook / WhatsApp Clickable Link Card Preview (og:image) */}
@@ -687,48 +723,74 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
           >
             {/* Section: Pricing & Checkout */}
             <div className="space-y-4 border-b border-slate-800 pb-6">
-              <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm">
-                <DollarSign className="w-4 h-4" />
-                <span>Preços, Pagamento e Checkout</span>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm">
+                  <DollarSign className="w-4 h-4" />
+                  <span>Preços, Moeda, Pagamento e Checkout</span>
+                </div>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs rounded-xl shadow transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>{savedSuccess ? 'Salvo!' : 'Salvar Alterações'}</span>
+                </button>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Moeda da Venda (Brasil ou Vendas para o Exterior):
+                </label>
+                <select
+                  value={currency}
+                  onChange={(e) => setCurrency(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-cyan-600/50 rounded-xl text-white text-xs sm:text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-cyan-500 cursor-pointer"
+                >
+                  {CURRENCY_OPTIONS.map((opt) => (
+                    <option key={opt.code} value={opt.code}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Preço Final Promocional (R$):
+                    Preço Final Promocional ({currencySymbol}):
                   </label>
                   <div className="relative">
                     <span className="absolute left-3 top-2.5 text-xs text-slate-400 font-bold">
-                      R$
+                      {currencySymbol}
                     </span>
                     <input
                       type="text"
                       value={price}
                       onChange={(e) => setPrice(e.target.value)}
-                      placeholder="9,90"
-                      className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-emerald-600/60 rounded-xl text-white text-base font-black focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      placeholder={currency === 'BRL' ? '9,90' : '9.90'}
+                      className="w-full pl-11 pr-3 py-2 bg-slate-950 border border-emerald-600/60 rounded-xl text-white text-base font-black focus:outline-none focus:ring-2 focus:ring-emerald-500"
                       required
                     />
                   </div>
                   <span className="text-[11px] text-emerald-400 mt-1 block">
-                    Esse é o valor exato que o visitante vê e paga na Hotmart.
+                    Esse é o valor exato exibido ao comprador em {currency}.
                   </span>
                 </div>
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Preço Riscado Anterior (De R$):
+                    Preço Riscado Anterior (De {currencySymbol}):
                   </label>
                   <div className="relative">
                     <span className="absolute left-3 top-2.5 text-xs text-slate-400 font-bold">
-                      R$
+                      {currencySymbol}
                     </span>
                     <input
                       type="text"
                       value={oldPrice}
                       onChange={(e) => setOldPrice(e.target.value)}
-                      placeholder="47,00"
-                      className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-300 text-sm font-semibold focus:outline-none focus:ring-1 focus:ring-slate-500"
+                      placeholder={currency === 'BRL' ? '47,00' : '47.00'}
+                      className="w-full pl-11 pr-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-300 text-sm font-semibold focus:outline-none focus:ring-1 focus:ring-slate-500"
                     />
                   </div>
                   <span className="text-[11px] text-slate-400 mt-1 block">
@@ -1077,7 +1139,7 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
               {savedSuccess && (
                 <div className="flex items-center gap-2 text-emerald-400 text-xs font-bold animate-pulse">
                   <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                  <span>Página atualizada com sucesso! Preço ajustado para R$ {parsedCurrentPrice.toFixed(2).replace('.', ',')}</span>
+                  <span>Página atualizada com sucesso! Preço ajustado para {formattedCurrentPrice}</span>
                 </div>
               )}
             </div>
@@ -1198,13 +1260,15 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
               <div className="p-4 bg-slate-900 border border-emerald-800/60 rounded-2xl space-y-3 shadow-xl">
                 <div>
                   <span className="text-[11px] text-slate-400 line-through">
-                    De R$ {oldPrice}
+                    De {formatCurrencyPrice(parseFloat(oldPrice.replace(',', '.')) || parsedCurrentPrice * 2, currency)}
                   </span>
                   <div className="text-3xl font-black text-emerald-400">
-                    R$ {parsedCurrentPrice.toFixed(2).replace('.', ',')}
+                    {formattedCurrentPrice}
                   </div>
                   <span className="text-[10px] text-slate-300 block">
-                    Pagamento único via Pix ou Cartão • Acesso imediato no e-mail
+                    {currency === 'BRL'
+                      ? 'Pagamento único via Pix ou Cartão • Acesso imediato no e-mail'
+                      : `Pagamento seguro em ${currency} • Acesso imediato`}
                   </span>
                 </div>
 
@@ -1277,6 +1341,7 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
                   nichePain: newLandingPain.trim(),
                   price: parsedNewPrice,
                   oldPrice: parsedNewOldPrice,
+                  currency: newLandingCurrency,
                   badgeText: newBadge,
                   nicheLabel: newLandingNicheLabel,
                   theme: flyerTheme,
@@ -1293,6 +1358,7 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
                   whatsappNumber: newLandingWhatsapp.trim() || '5541998778348',
                   price: parsedNewPrice,
                   oldPrice: parsedNewOldPrice,
+                  currency: newLandingCurrency,
                   headline: newHeadline,
                   subheadline: newLandingPain.trim() || 'Método prático e mastigado para aplicar no seu celular com suporte dedicado.',
                   badgeText: newBadge,
@@ -1322,6 +1388,7 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
                 setTitle(newCamp.title);
                 setHeadline(newCamp.headline || newCamp.title);
                 setSubheadline(newCamp.subheadline || '');
+                setCurrency(newCamp.currency || 'BRL');
                 setPrice(newCamp.price.toString());
                 setOldPrice(newCamp.oldPrice ? newCamp.oldPrice.toString() : '74.00');
                 setCheckoutUrl(newCamp.checkoutUrl || '');
@@ -1333,7 +1400,7 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
                 setNewLandingTitle('');
                 setNewLandingCheckoutUrl('');
                 setNewLandingPain('');
-                setGlobalSyncNotice(`Nova Landing Page "${newCamp.title}" criada com Imagem OG automática e já disponível no Modo Global!`);
+                setGlobalSyncNotice(`Nova Landing Page "${newCamp.title}" criada (${formatCurrencyPrice(newCamp.price, newCamp.currency)}) com Imagem OG automática e já disponível no Modo Global!`);
               }}
               className="space-y-4 text-xs"
             >
@@ -1351,10 +1418,27 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
                 />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-slate-300 font-semibold mb-1">
-                    Preço de Venda (R$):
+                    Moeda:
+                  </label>
+                  <select
+                    value={newLandingCurrency}
+                    onChange={(e) => setNewLandingCurrency(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-2 text-xs text-cyan-300 font-semibold focus:outline-none focus:border-emerald-500"
+                  >
+                    {CURRENCY_OPTIONS.map((opt) => (
+                      <option key={opt.code} value={opt.code}>
+                        {opt.code} ({opt.symbol})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">
+                    Preço ({getCurrencySymbol(newLandingCurrency)}):
                   </label>
                   <input
                     type="number"

@@ -1510,7 +1510,9 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'global_mediascalers' && <GlobalMediaScalersTab campaigns={campaigns} />}
+        {activeTab === 'global_mediascalers' && (
+          <GlobalMediaScalersTab campaigns={campaigns} onUpdateCampaign={handleUpdateCampaign} />
+        )}
 
         {activeTab === 'robo_cidades' && (
           <RoboDivulgadorCidades

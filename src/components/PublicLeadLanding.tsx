@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { Campaign, TrackingEvent } from '../types';
 import { subscribeLandingPageSettings } from '../lib/firebase';
+import { formatCurrencyPrice } from '../utils/currency';
 
 interface PublicLeadLandingProps {
   campaign: Campaign;
@@ -59,6 +60,8 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
     return () => unsub();
   }, [campaign.id]);
 
+  const effectiveCurrency = liveSettings?.currency || campaign.currency || 'BRL';
+
   const effectivePrice =
     liveSettings?.price != null
       ? parseFloat(String(liveSettings.price).replace(',', '.')) || campaign.price
@@ -68,6 +71,12 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
     liveSettings?.oldPrice != null
       ? parseFloat(String(liveSettings.oldPrice).replace(',', '.')) || campaign.oldPrice || (campaign.price * 2.2)
       : campaign.oldPrice || (campaign.price * 2.2);
+
+  const formattedPrice = formatCurrencyPrice(effectivePrice, effectiveCurrency);
+  const formattedOldPrice = formatCurrencyPrice(
+    effectiveOldPrice || effectivePrice * 2.2,
+    effectiveCurrency
+  );
 
   const effectiveHeadline = liveSettings?.headline || campaign.headline || campaign.title;
   const effectiveSubheadline =
@@ -238,11 +247,14 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
     if (question.includes('Como recebo') || question.includes('acesso')) {
       reply = `O acesso ao ${campaign.title} é enviado imediatamente para o seu e-mail logo após a aprovação do pagamento. É rápido, automático e 100% seguro!`;
     } else if (question.includes('pagamento') || question.includes('Pix') || question.includes('cartão')) {
-      reply = `Você pode pagar via Pix instantâneo ou em até 12x no cartão de crédito pelo valor promocional de apenas R$ ${effectivePrice.toFixed(2).replace('.', ',')}!`;
+      reply =
+        effectiveCurrency === 'BRL'
+          ? `Você pode pagar via Pix instantâneo ou em até 12x no cartão de crédito pelo valor promocional de apenas ${formattedPrice}!`
+          : `Você pode finalizar com segurança no cartão internacional pelo valor promocional de apenas ${formattedPrice}!`;
     } else if (question.includes('garantia')) {
       reply = `Você tem ${effectiveGuaranteeDays} dias de garantia incondicional assegurada pela plataforma de pagamento ${checkoutPlatform}. Se não gostar, 100% do seu dinheiro é devolvido com 1 clique!`;
     } else {
-      reply = `O produto "${campaign.title}" está com valor promocional liberado por apenas R$ ${effectivePrice.toFixed(2).replace('.', ',')}. Se preferir, pode também tirar dúvidas direto no WhatsApp pelo botão da página!`;
+      reply = `O produto "${campaign.title}" está com valor promocional liberado por apenas ${formattedPrice}. Se preferir, pode também tirar dúvidas direto no WhatsApp pelo botão da página!`;
     }
 
     setChatMessages((prev) => [
@@ -403,7 +415,7 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
               <h3 className="text-base font-black text-white">{campaign.title}</h3>
               <p className="text-xs text-slate-300">{campaign.targetAudience}</p>
               <div className="inline-block px-3 py-1 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-700/60 text-xs font-bold">
-                Liberado por apenas R$ {effectivePrice.toFixed(2).replace('.', ',')}
+                Liberado por apenas {formattedPrice}
               </div>
             </div>
           </div>
@@ -426,13 +438,15 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
         <div className="p-6 bg-slate-900/90 border border-emerald-900/60 rounded-3xl shadow-2xl space-y-4 max-w-xl mx-auto">
           <div className="space-y-1">
             <span className="text-xs text-slate-400 line-through">
-              De R$ {effectiveOldPrice ? effectiveOldPrice.toFixed(2).replace('.', ',') : (effectivePrice * 2.2).toFixed(2).replace('.', ',')}
+              De {formattedOldPrice}
             </span>
             <div className="text-4xl font-black text-emerald-400">
-              R$ {effectivePrice.toFixed(2).replace('.', ',')}
+              {formattedPrice}
             </div>
             <span className="text-xs text-slate-300">
-              ou em até 12x no cartão de crédito / Pix com liberação imediata
+              {effectiveCurrency === 'BRL'
+                ? 'ou em até 12x no cartão de crédito / Pix com liberação imediata'
+                : `Pagamento seguro em ${effectiveCurrency} com acesso imediato`}
             </span>
           </div>
 
@@ -504,7 +518,7 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
             className="w-full py-3.5 px-6 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-base rounded-xl transition flex items-center justify-center gap-2 cursor-pointer"
           >
             <Download className="w-5 h-5 text-slate-950" />
-            <span>GARANTIR POR APENAS R$ {effectivePrice.toFixed(2).replace('.', ',')}</span>
+            <span>GARANTIR POR APENAS {formattedPrice}</span>
           </button>
         </div>
       </div>
@@ -585,7 +599,7 @@ export const PublicLeadLanding: React.FC<PublicLeadLandingProps> = ({
                 onClick={handleCheckoutClick}
                 className="flex-1 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl transition text-center shadow-md shadow-emerald-500/20 cursor-pointer"
               >
-                Garantir Vaga (R$ {effectivePrice.toFixed(2).replace('.', ',')})
+                Garantir Vaga ({formattedPrice})
               </button>
               <button
                 onClick={handleWhatsAppClick}

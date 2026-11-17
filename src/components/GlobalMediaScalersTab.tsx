@@ -48,6 +48,11 @@ import {
   generateViralFlyerAsync,
   ViralFlyerThemeId,
 } from '../utils/viralFlyerGenerator';
+import {
+  CURRENCY_OPTIONS,
+  formatCurrencyPrice,
+  replacePriceCurrencyPrefix,
+} from '../utils/currency';
 
 export interface GlobalOffer {
   id: string;
@@ -365,31 +370,66 @@ function generateOfferPromoImageDataUrl(
 
 function campaignToGlobalOffer(camp: Campaign, existing?: GlobalOffer): GlobalOffer {
   const sampleText = `${camp.title || ''} ${camp.headline || ''} ${camp.painPointTargeted || ''} ${camp.nicheLabel || ''}`;
-  const looksPortuguese =
-    /[ãõçáéíóúâêô]/i.test(sampleText) ||
-    /\b(para|crian[cç]a|atividades|renda|loja|milhas|m[eé]todo|garantia|comunidade|curso|acesso|suporte|sa[uú]de|emagrecer)\b/i.test(
+  const looksSpanish =
+    /\b(es un|material exclusivo|toda la|historia|paso|descuento|soluci[oó]n|garant[ií]a|comprar|oferta especial|para ti|descarga)\b/i.test(
       sampleText
-    );
-  const looksSpanish = /\b(paso|descuento|soluci[oó]n|garant[ií]a|comprar|oferta especial)\b/i.test(sampleText) && !looksPortuguese;
+    ) || /\/es\//i.test(camp.checkoutUrl || '');
+  const looksPortuguese =
+    !looksSpanish &&
+    (/[ãõçáéíóúâêô]/i.test(sampleText) ||
+      /\b(para|crian[cç]a|atividades|renda|loja|milhas|m[eé]todo|garantia|comunidade|curso|acesso|suporte|sa[uú]de|emagrecer)\b/i.test(
+        sampleText
+      ));
 
   const landingUrl = getCampaignLandingUrl(camp);
-  const defaultCountryCode = looksPortuguese ? 'BR' : looksSpanish ? 'ES' : 'US';
-  const defaultCountryName = looksPortuguese ? 'Brasil' : looksSpanish ? 'España' : 'United States';
-  const defaultLanguage = looksPortuguese ? 'Português' : looksSpanish ? 'Español' : 'English';
-  const defaultCurrency = looksPortuguese ? 'BRL' : looksSpanish ? 'EUR' : 'USD';
+  const explicitCurrency = (camp.currency || '').trim().toUpperCase();
+  const defaultCurrency =
+    explicitCurrency || (looksPortuguese ? 'BRL' : looksSpanish ? 'USD' : 'USD');
+  const defaultCountryCode =
+    defaultCurrency === 'BRL' && looksPortuguese
+      ? 'BR'
+      : looksSpanish
+      ? 'ES'
+      : defaultCurrency === 'EUR'
+      ? 'EU'
+      : defaultCurrency === 'GBP'
+      ? 'UK'
+      : defaultCurrency === 'AUD'
+      ? 'AU'
+      : defaultCurrency === 'CAD'
+      ? 'CA'
+      : 'US';
+  const defaultCountryName =
+    defaultCurrency === 'BRL' && looksPortuguese
+      ? 'Brasil'
+      : looksSpanish
+      ? 'España / LATAM'
+      : defaultCurrency === 'EUR'
+      ? 'Europa'
+      : defaultCurrency === 'GBP'
+      ? 'United Kingdom'
+      : defaultCurrency === 'AUD'
+      ? 'Australia'
+      : defaultCurrency === 'CAD'
+      ? 'Canada'
+      : 'United States';
+  const defaultLanguage = looksSpanish
+    ? 'Español'
+    : looksPortuguese && defaultCurrency === 'BRL'
+    ? 'Português'
+    : 'English';
 
+  const resolvedCurrency = existing?.currencyCode || defaultCurrency;
   const priceNum = Number(camp.price) || 0;
   const oldPriceNum = Number(camp.oldPrice) || 0;
-  const formattedPrice =
-    defaultCurrency === 'BRL'
-      ? `R$ ${priceNum.toFixed(2).replace('.', ',')}`
-      : `$${priceNum.toFixed(2)}`;
+  const formattedPrice = formatCurrencyPrice(priceNum, resolvedCurrency);
+  const formattedOldPrice = formatCurrencyPrice(oldPriceNum, resolvedCurrency);
   const formattedDiscount =
     oldPriceNum > priceNum
-      ? defaultCurrency === 'BRL'
-        ? `De R$ ${oldPriceNum.toFixed(2).replace('.', ',')} por ${formattedPrice} · Garantia ${camp.guaranteeDays || 7} dias`
-        : `Was $${oldPriceNum.toFixed(2)} → ${formattedPrice} · ${camp.guaranteeDays || 7}-Day Guarantee`
-      : defaultCurrency === 'BRL'
+      ? resolvedCurrency === 'BRL'
+        ? `De ${formattedOldPrice} por ${formattedPrice} · Garantia ${camp.guaranteeDays || 7} dias`
+        : `Was ${formattedOldPrice} → ${formattedPrice} · ${camp.guaranteeDays || 7}-Day Guarantee`
+      : resolvedCurrency === 'BRL'
       ? `Garantia ${camp.guaranteeDays || 7} dias · Acesso imediato`
       : `${camp.guaranteeDays || 7}-Day Guarantee · Instant Access`;
 
@@ -407,7 +447,7 @@ function campaignToGlobalOffer(camp: Campaign, existing?: GlobalOffer): GlobalOf
     countryCode: existing?.countryCode || defaultCountryCode,
     countryName: existing?.countryName || defaultCountryName,
     languageName: existing?.languageName || defaultLanguage,
-    currencyCode: existing?.currencyCode || defaultCurrency,
+    currencyCode: resolvedCurrency,
     offerPriceText: formattedPrice,
     discountText: formattedDiscount,
     affiliateUrl: resolvedAffiliate,
@@ -909,9 +949,13 @@ function buildStructuredTemplateKit(offer: GlobalOffer): GlobalGeneratedKit {
 
 interface GlobalMediaScalersTabProps {
   campaigns?: Campaign[];
+  onUpdateCampaign?: (updatedCampaign: Campaign) => void;
 }
 
-export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ campaigns = [] }) => {
+export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
+  campaigns = [],
+  onUpdateCampaign,
+}) => {
   const [subTab, setSubTab] = useState<'offers' | 'kit' | 'triage' | 'bot'>('offers');
 
   const [hiddenLandingIds, setHiddenLandingIds] = useState<string[]>(() => {
@@ -1117,6 +1161,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
   const [attachImageInComposer, setAttachImageInComposer] = useState<boolean>(true);
   const [flyerTheme, setFlyerTheme] = useState<ViralFlyerThemeId>('purple_gold');
   const [framingFlyerPhoto, setFramingFlyerPhoto] = useState<boolean>(false);
+  const [offerSavedToast, setOfferSavedToast] = useState<boolean>(false);
 
   const [customPostHeadline, setCustomPostHeadline] = useState('');
   const [customPostBody, setCustomPostBody] = useState('');
@@ -1271,6 +1316,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
         } else if (
           existing.productName !== converted.productName ||
           existing.nichePain !== converted.nichePain ||
+          existing.currencyCode !== converted.currencyCode ||
           existing.offerPriceText !== converted.offerPriceText ||
           existing.discountText !== converted.discountText ||
           existing.affiliateUrl !== converted.affiliateUrl ||
@@ -1707,10 +1753,76 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
 
   const handleUpdateOfferField = (field: keyof GlobalOffer, value: string) => {
     if (!activeOffer) return;
-    setOffers((prev) => prev.map((o) => (o.id === activeOffer.id ? { ...o, [field]: value } : o)));
+    setOffers((prev) =>
+      prev.map((o) => {
+        if (o.id !== activeOffer.id) return o;
+        if (field === 'currencyCode') {
+          const nextCode = String(value || 'USD').toUpperCase();
+          const nextPriceText = replacePriceCurrencyPrefix(o.offerPriceText, nextCode);
+          return {
+            ...o,
+            currencyCode: nextCode,
+            offerPriceText: nextPriceText || o.offerPriceText,
+          };
+        }
+        return { ...o, [field]: value };
+      })
+    );
     if (field === 'postImageUrl') {
       syncLandingCampaignImageOnServer(activeOffer, value);
     }
+  };
+
+  const handleSaveOfferChanges = () => {
+    if (!activeOffer) return;
+    try {
+      localStorage.setItem(STORAGE_KEYS.OFFERS, JSON.stringify(offers));
+    } catch {}
+
+    // Rebuild structured template kit for this offer so copy reflects updated currency, language and price
+    const updatedTpl = buildStructuredTemplateKit(activeOffer);
+    setKitsByOffer((prev) => ({
+      ...prev,
+      [activeOffer.id]: updatedTpl,
+    }));
+
+    // Sync changes back to linked Landing Page campaign if linked
+    const linkedId =
+      activeOffer.sourceCampaignId ||
+      (activeOffer.id.startsWith('landing-') ? activeOffer.id.replace(/^landing-/, '') : undefined);
+    if (linkedId) {
+      const match = campaigns.find((c) => c.id === linkedId);
+      if (match) {
+        const priceNumMatch = String(activeOffer.offerPriceText || '').match(/(\d+(?:[.,]\d{1,2})?)/);
+        const parsedPrice = priceNumMatch ? parseFloat(priceNumMatch[1].replace(',', '.')) : match.price;
+        const updatedCampaign: Campaign = {
+          ...match,
+          title: activeOffer.productName.trim() || match.title,
+          painPointTargeted: activeOffer.nichePain.trim() || match.painPointTargeted,
+          currency: activeOffer.currencyCode || match.currency || 'BRL',
+          price: Number.isFinite(parsedPrice) && parsedPrice > 0 ? parsedPrice : match.price,
+          checkoutUrl: activeOffer.affiliateUrl.trim() || match.checkoutUrl,
+          imageUrl: activeOffer.postImageUrl || match.imageUrl,
+        };
+        if (onUpdateCampaign) {
+          onUpdateCampaign(updatedCampaign);
+        }
+        try {
+          fetch('/api/campaigns', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updatedCampaign),
+          }).catch(() => {});
+        } catch {}
+      }
+    }
+
+    setOfferSavedToast(true);
+    setTimeout(() => setOfferSavedToast(false), 2600);
+    setBanner({
+      message: `Alterações em "${activeOffer.productName}" (${activeOffer.currencyCode} · ${activeOffer.offerPriceText}) salvas e sincronizadas!`,
+      tone: 'success',
+    });
   };
 
   const handleDeleteOffer = (id: string) => {
@@ -2991,16 +3103,26 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
                     )}
                   </div>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    {activeOffer.countryName} · {activeOffer.languageName} · {activeOffer.offerPriceText}
+                    {activeOffer.countryName} · {activeOffer.languageName} · {activeOffer.currencyCode} · {activeOffer.offerPriceText}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setSubTab('kit')}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-                >
-                  Abrir Kit Google Ads & Presell
-                </button>
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleSaveOfferChanges}
+                    className="px-3.5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold rounded-lg transition-colors inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer shadow"
+                  >
+                    {offerSavedToast ? <Check className="w-3.5 h-3.5 text-emerald-300" /> : <Save className="w-3.5 h-3.5" />}
+                    <span>{offerSavedToast ? 'Salvo!' : 'Salvar Alterações'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSubTab('kit')}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    Abrir Kit Google Ads & Presell
+                  </button>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -3037,6 +3159,43 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
                 </label>
 
                 <label className="block space-y-1.5">
+                  <span className="text-xs font-medium text-slate-300">Moeda da Oferta (Brasil ou Exterior)</span>
+                  <select
+                    value={activeOffer.currencyCode || 'USD'}
+                    onChange={(e) => handleUpdateOfferField('currencyCode', e.target.value)}
+                    className="w-full bg-slate-950 border border-cyan-600/50 rounded-lg px-3 py-2 text-xs text-cyan-200 font-semibold focus:outline-none focus:border-cyan-400 cursor-pointer"
+                  >
+                    {CURRENCY_OPTIONS.map((opt) => (
+                      <option key={opt.code} value={opt.code}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="block space-y-1.5">
+                  <span className="text-xs font-medium text-slate-300">Preço / Valor na Moeda (vai no Post &amp; Arte)</span>
+                  <input
+                    type="text"
+                    value={activeOffer.offerPriceText}
+                    onChange={(e) => handleUpdateOfferField('offerPriceText', e.target.value)}
+                    placeholder="Ex: $ 27.90, € 19,90, Up to 75% Off..."
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-emerald-300 font-bold focus:outline-none focus:border-cyan-500"
+                  />
+                </label>
+
+                <label className="block space-y-1.5">
+                  <span className="text-xs font-medium text-slate-300">Destaque / Garantia / Desconto</span>
+                  <input
+                    type="text"
+                    value={activeOffer.discountText}
+                    onChange={(e) => handleUpdateOfferField('discountText', e.target.value)}
+                    placeholder="Ex: 30-Day Guarantee · Fast Shipping"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500"
+                  />
+                </label>
+
+                <label className="block space-y-1.5 md:col-span-2">
                   <span className="text-xs font-medium text-slate-300">Dor Principal / Ângulo de Venda</span>
                   <input
                     type="text"
@@ -3190,6 +3349,67 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
                       </div>
                     </div>
                   )}
+                </div>
+              </div>
+
+              {/* Save Bar + Quick Copy Full Manual Post Box */}
+              <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-950/90 border border-cyan-500/30 rounded-xl p-3.5">
+                <div className="text-xs text-slate-300">
+                  Atualizou país, moeda, preço, dor ou links? Clique em salvar para gravar tudo e atualizar os textos.
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSaveOfferChanges}
+                  className="px-4 py-2 bg-gradient-to-r from-cyan-600 to-emerald-600 hover:from-cyan-500 hover:to-emerald-500 text-white text-xs font-bold rounded-lg inline-flex items-center gap-1.5 cursor-pointer shadow-lg shrink-0"
+                >
+                  {offerSavedToast ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
+                  <span>{offerSavedToast ? 'Alterações Salvas!' : 'Salvar Alterações da Oferta'}</span>
+                </button>
+              </div>
+
+              <div className="bg-slate-950 border border-emerald-500/35 rounded-xl p-4 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h4 className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>Copiar Postagem Pronta para Postagem Manual (Opcional)</span>
+                    </h4>
+                    <p className="text-[11px] text-slate-400">
+                      Copie título + texto persuasivo + link clicável rastreado e baixe a imagem para colar manualmente onde quiser.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleCycleCopyAngle}
+                      className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-cyan-200 text-[11px] font-semibold rounded-lg inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      <Shuffle className="w-3 h-3" />
+                      <span>Mudar Ângulo</span>
+                    </button>
+                    {activeOffer.postImageUrl && (
+                      <button
+                        type="button"
+                        onClick={handleDownloadOfferPostImage}
+                        className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-semibold rounded-lg inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        <Download className="w-3 h-3" />
+                        <span>Baixar Imagem</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleCopyFullManualPost}
+                      className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg inline-flex items-center gap-1.5 cursor-pointer shadow"
+                    >
+                      {copiedId === 'full-manual-preview' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedId === 'full-manual-preview' ? 'Postagem Copiada!' : 'Copiar Postagem Inteira'}</span>
+                    </button>
+                  </div>
+                </div>
+                <div className="bg-slate-900 border border-slate-800 rounded-lg p-3 text-[11px] text-slate-200 space-y-1.5 max-h-40 overflow-y-auto whitespace-pre-line">
+                  {customPostHeadline && <div className="font-bold text-white">{customPostHeadline}</div>}
+                  <div>{customPostBody}</div>
                 </div>
               </div>
 
@@ -4829,18 +5049,28 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
 
                       {/* 1-Click Postagem Chamativa Style Bar */}
                       <div className="space-y-2">
-                        <div className="flex items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
                           <span className="text-xs font-semibold text-white">
                             Gerar Postagem Chamativa em 1 Clique ({activeOffer.languageName})
                           </span>
-                          <button
-                            type="button"
-                            onClick={() => setShowFeedPreview((v) => !v)}
-                            className="text-xs text-cyan-400 hover:text-cyan-300 inline-flex items-center gap-1 cursor-pointer"
-                          >
-                            <Eye className="w-3.5 h-3.5" />
-                            <span>{showFeedPreview ? 'Ocultar Prévia Visual' : 'Ver Prévia no Feed'}</span>
-                          </button>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={handleCopyFullManualPost}
+                              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold rounded-md inline-flex items-center gap-1 cursor-pointer shadow"
+                            >
+                              {copiedId === 'full-manual-preview' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                              <span>{copiedId === 'full-manual-preview' ? 'Post Copiado!' : 'Copiar Postagem Manual'}</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setShowFeedPreview((v) => !v)}
+                              className="text-xs text-cyan-400 hover:text-cyan-300 inline-flex items-center gap-1 cursor-pointer"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              <span>{showFeedPreview ? 'Ocultar Prévia Visual' : 'Ver Prévia no Feed'}</span>
+                            </button>
+                          </div>
                         </div>
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                           {[
@@ -5783,12 +6013,17 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
 
               <label className="block space-y-1">
                 <span className="text-slate-300 font-medium">Moeda Local</span>
-                <input
-                  type="text"
+                <select
                   value={newOfferCurrency}
                   onChange={(e) => setNewOfferCurrency(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white"
-                />
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white cursor-pointer"
+                >
+                  {CURRENCY_OPTIONS.map((opt) => (
+                    <option key={opt.code} value={opt.code}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
               </label>
 
               <label className="block space-y-1 sm:col-span-2">

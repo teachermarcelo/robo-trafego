@@ -30,6 +30,11 @@ import {
   Send,
   Filter,
   Download,
+  BellRing,
+  Cookie,
+  Pencil,
+  Save,
+  Shuffle,
 } from 'lucide-react';
 import JSZip from 'jszip';
 import { FacebookGroup, FacebookPostLog } from '../types';
@@ -132,6 +137,17 @@ export interface GlobalPinterestItem {
   destinationUrl: string;
   boardSuggestion: string;
   status: 'ready' | 'published';
+}
+
+export interface WaitingApprovalEntry {
+  logId?: string;
+  groupId?: string;
+  groupUrl: string;
+  groupSlug: string;
+  groupName: string;
+  fullText: string;
+  requestedAt: string;
+  lastCheckedAt?: string;
 }
 
 const STORAGE_KEYS = {
@@ -787,10 +803,22 @@ export const GlobalMediaScalersTab: React.FC = () => {
   const [renameAudienceInput, setRenameAudienceInput] = useState<string>('');
   const [chamativaStyle, setChamativaStyle] = useState<ChamativaStyle>('alerta');
   const [showFeedPreview, setShowFeedPreview] = useState<boolean>(true);
+  const [isEditingInPreview, setIsEditingInPreview] = useState<boolean>(false);
+  const [copySavedToast, setCopySavedToast] = useState<boolean>(false);
+  const [copyAngleIndex, setCopyAngleIndex] = useState<number>(0);
+  const [waitingApprovals, setWaitingApprovals] = useState<WaitingApprovalEntry[]>(() => {
+    try {
+      const saved = localStorage.getItem('autoviral_global_waiting_approvals_v1');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [checkingApprovals, setCheckingApprovals] = useState<boolean>(false);
   const [lastDispatchState, setLastDispatchState] = useState<{
     groupName: string;
     groupUrl: string;
-    phase: 'opening' | 'done';
+    phase: 'opening' | 'approved_alert' | 'done';
     statusLabel: string;
     updatedAt: string;
   } | null>(null);
@@ -899,6 +927,12 @@ export const GlobalMediaScalersTab: React.FC = () => {
     } catch {}
   }, [pinItems]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem('autoviral_global_waiting_approvals_v1', JSON.stringify(waitingApprovals));
+    } catch {}
+  }, [waitingApprovals]);
+
   // Sync default headline/body when activeOffer/kit changes
   useEffect(() => {
     if (!activeKit || !activeOffer) return;
@@ -993,6 +1027,7 @@ export const GlobalMediaScalersTab: React.FC = () => {
         approvalStatus === 'awaiting_admin' ||
         approvalStatus === 'not_member' ||
         approvalStatus === 'join_requested' ||
+        approvalStatus === 'approved_posting' ||
         approvalStatus === 'rate_limited' ||
         approvalStatus === 'unavailable' ||
         approvalStatus === 'composer_stuck'
@@ -1041,7 +1076,8 @@ export const GlobalMediaScalersTab: React.FC = () => {
       const statusMap: Record<string, string> = {
         published: 'Postagem Feita',
         awaiting_admin: 'Aguardando Aprovação Admin',
-        join_requested: 'Entrada Solicitada',
+        join_requested: 'Entrada Solicitada (Cookie Ativo)',
+        approved_posting: 'ADMIN ACEITOU! Gatilho disparado → Postando agora!',
         not_member: 'Precisa Participar',
         composer_stuck: 'Janela Travada no FB (Pause AdBlock)',
         rate_limited: 'Limite Temporário FB',
@@ -1050,12 +1086,17 @@ export const GlobalMediaScalersTab: React.FC = () => {
       setLastDispatchState({
         groupName: sanitizeGlobalGroupName(groupName || 'Global Facebook Group'),
         groupUrl: groupUrl || 'https://www.facebook.com/groups',
-        phase: 'done',
+        phase: normalizedStatus === 'approved_posting' ? 'approved_alert' : 'done',
         statusLabel: (normalizedStatus && statusMap[normalizedStatus]) || 'Verificado na Extensão',
         updatedAt: formattedNow,
       });
 
-      if (normalizedStatus === 'rate_limited') {
+      if (normalizedStatus === 'approved_posting') {
+        setBanner({
+          message: `🎉 Admin aceitou entrada em "${sanitizeGlobalGroupName(groupName || 'Grupo')}"! Gatilho automático abriu o grupo para postar agora.`,
+          tone: 'success',
+        });
+      } else if (normalizedStatus === 'rate_limited') {
         globalEnBotRunner.stop();
         setIsBotRunning(false);
         setBanner({
@@ -1076,6 +1117,28 @@ export const GlobalMediaScalersTab: React.FC = () => {
       if (Array.isArray(ev?.detail?.videos)) ingestYtVideos(ev.detail.videos);
     };
     const onPostResultEv = (ev: any) => applyPostResult(ev?.detail);
+    const onWaitingSyncedEv = (ev: any) => {
+      if (Array.isArray(ev?.detail)) {
+        setWaitingApprovals(ev.detail);
+      }
+    };
+    const onWaitingCheckDoneEv = (ev: any) => {
+      setCheckingApprovals(false);
+      const detail = ev?.detail;
+      if (detail && detail.ok) {
+        if (detail.approvedCount > 0) {
+          setBanner({
+            message: `🎉 ${detail.approvedCount} grupo(s) com entrada aprovada detectados! Gatilho automático acionado para postar.`,
+            tone: 'success',
+          });
+        } else {
+          setBanner({
+            message: `Verificação em 2º plano concluída (${detail.checked || 0} grupos checados). Ainda aguardando aceite dos admins.`,
+            tone: 'info',
+          });
+        }
+      }
+    };
 
     let bc: BroadcastChannel | null = null;
     try {
@@ -1089,6 +1152,8 @@ export const GlobalMediaScalersTab: React.FC = () => {
           ingestYtVideos(ev.data.videos || []);
         } else if (ev.data.action === 'AUTOVIRAL_FB_POST_RESULT') {
           applyPostResult(ev.data);
+        } else if (ev.data.action === 'AUTOVIRAL_WAITING_APPROVALS_SYNC') {
+          if (Array.isArray(ev.data.waitingApprovals)) setWaitingApprovals(ev.data.waitingApprovals);
         }
       };
     } catch {}
@@ -1096,6 +1161,8 @@ export const GlobalMediaScalersTab: React.FC = () => {
     window.addEventListener('autoviral_extension_groups_received', onGroupsEv);
     window.addEventListener('autoviral_extension_youtube_videos_received', onYtEv);
     window.addEventListener('autoviral_fb_post_result', onPostResultEv);
+    window.addEventListener('autoviral_waiting_approvals_synced', onWaitingSyncedEv);
+    window.addEventListener('autoviral_waiting_check_done', onWaitingCheckDoneEv);
 
     return () => {
       if (bc) {
@@ -1106,6 +1173,8 @@ export const GlobalMediaScalersTab: React.FC = () => {
       window.removeEventListener('autoviral_extension_groups_received', onGroupsEv);
       window.removeEventListener('autoviral_extension_youtube_videos_received', onYtEv);
       window.removeEventListener('autoviral_fb_post_result', onPostResultEv);
+      window.removeEventListener('autoviral_waiting_approvals_synced', onWaitingSyncedEv);
+      window.removeEventListener('autoviral_waiting_check_done', onWaitingCheckDoneEv);
     };
   }, [activeOffer, activeKit]);
 
@@ -1595,7 +1664,7 @@ export const GlobalMediaScalersTab: React.FC = () => {
 
     setBanner({
       message: autoJoinAndPostEnabled
-        ? `Grupo Global "${cleanGroupName}" aberto! Extensão v1.4.5 vai entrar (se precisar), postar e fechar a aba automaticamente.`
+        ? `Grupo Global "${cleanGroupName}" aberto! Extensão v1.5.0 vai entrar (ou ativar cookie de espera), postar e fechar a aba automaticamente.`
         : `Grupo Global "${cleanGroupName}" aberto e texto copiado para postagem manual assistida.`,
       tone: 'success',
     });
@@ -1613,6 +1682,83 @@ export const GlobalMediaScalersTab: React.FC = () => {
     const built = buildEyeCatchingFbPost(activeOffer, style, presellLink);
     setCustomPostHeadline(built.headline);
     setCustomPostBody(built.body);
+  };
+
+  const handleSavePreviewCopy = () => {
+    if (!activeOffer || !activeKit) return;
+    const presellLink = appendTrackingParam(
+      activeOffer.presellUrl || 'https://global-sell-beta.vercel.app/',
+      'utm_source',
+      'facebook_groups'
+    );
+    const normalizedBody = customPostBody.includes(presellLink)
+      ? customPostBody.replace(presellLink, '[PRESELL_LINK]')
+      : customPostBody;
+    setKitsByOffer((prev) => {
+      const existing = prev[activeOffer.id] || activeKit;
+      const existingPosts = existing.organicSocialKit.fbGroupPosts || [];
+      const updatedPosts =
+        existingPosts.length > 0
+          ? existingPosts.map((p, idx) =>
+              idx === 0
+                ? { ...p, headline: customPostHeadline.trim(), body: normalizedBody }
+                : p
+            )
+          : [{ angle: 'Personalizada Salva', headline: customPostHeadline.trim(), body: normalizedBody }];
+      return {
+        ...prev,
+        [activeOffer.id]: {
+          ...existing,
+          organicSocialKit: {
+            ...existing.organicSocialKit,
+            fbGroupPosts: updatedPosts,
+          },
+        },
+      };
+    });
+    setCopySavedToast(true);
+    setTimeout(() => setCopySavedToast(false), 2000);
+    setBanner({
+      message: `Copy salva para a oferta "${activeOffer.productName}"! Já será usada nos próximos disparos.`,
+      tone: 'success',
+    });
+  };
+
+  const handleCycleCopyAngle = () => {
+    if (!activeOffer) return;
+    const styles: ChamativaStyle[] = ['alerta', 'comparativo', 'historia', 'oferta'];
+    const nextIdx = (copyAngleIndex + 1) % styles.length;
+    setCopyAngleIndex(nextIdx);
+    handleApplyChamativaPreset(styles[nextIdx]);
+  };
+
+  const handleCopyFullManualPost = () => {
+    const presellLink = activeOffer
+      ? appendTrackingParam(activeOffer.presellUrl || 'https://global-sell-beta.vercel.app/', 'utm_source', 'facebook_groups')
+      : 'https://global-sell-beta.vercel.app/';
+    const headline = customPostHeadline.trim();
+    const bodyWithLink = customPostBody.replace(/\[PRESELL_LINK\]/g, presellLink).trim();
+    const fullText = headline ? `${headline}\n\n${bodyWithLink}` : bodyWithLink;
+    copyText(fullText, 'full-manual-preview');
+    setBanner({
+      message: 'Postagem inteira (Título + Corpo + Link rastreado) copiada! Basta dar Ctrl+V para postar manualmente.',
+      tone: 'success',
+    });
+  };
+
+  const handleCheckWaitingApprovalsNow = () => {
+    setCheckingApprovals(true);
+    try {
+      window.postMessage({ type: 'AUTOVIRAL_CHECK_WAITING_APPROVALS', maxCount: 4 }, '*');
+    } catch {}
+    setTimeout(() => setCheckingApprovals(false), 12000);
+  };
+
+  const handleRemoveWaitingApproval = (groupSlug: string) => {
+    setWaitingApprovals((prev) => prev.filter((w) => w.groupSlug !== groupSlug));
+    try {
+      window.postMessage({ type: 'AUTOVIRAL_REMOVE_WAITING_APPROVAL', groupSlug }, '*');
+    } catch {}
   };
 
   const handleRemovePortugueseFromGlobalQueue = () => {
@@ -1660,17 +1806,17 @@ export const GlobalMediaScalersTab: React.FC = () => {
       );
       zip.file(
         'COMO-ATUALIZAR.txt',
-        '1. Extraia este ZIP substituindo os arquivos da pasta anterior (ou em uma pasta nova).\n2. Abra chrome://extensions no Google Chrome.\n3. Clique no ícone de Atualizar (↻) da extensão AutoViral AI v1.4.5.\n4. Recarregue (F5) a aba do AutoViral AI.'
+        '1. Extraia este ZIP substituindo os arquivos da pasta anterior (ou em uma pasta nova).\n2. Abra chrome://extensions no Google Chrome.\n3. Clique no ícone de Atualizar (↻) da extensão AutoViral AI v1.5.0.\n4. Recarregue (F5) a aba do AutoViral AI.'
       );
       const blob = await zip.generateAsync({ type: 'blob' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = 'extensao-autoviral-v1.4.5.zip';
+      link.download = 'extensao-autoviral-v1.5.0.zip';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       setBanner({
-        message: 'Extensão v1.4.5 atualizada baixada! Extraia, recarregue (↻) em chrome://extensions e dê F5 nesta página.',
+        message: 'Extensão v1.5.0 atualizada baixada! Extraia, recarregue (↻) em chrome://extensions e dê F5 nesta página.',
         tone: 'success',
       });
     } catch {
@@ -2935,30 +3081,72 @@ export const GlobalMediaScalersTab: React.FC = () => {
               'facebook_groups'
             );
 
+            const waitingCookieCount = waitingApprovals.length;
+            const isApprovedTriggerActive = lastDispatchState?.phase === 'approved_alert';
+
             return (
               <div className="space-y-6">
-                {/* DISPLAY DE ACOMPANHAMENTO AO VIVO */}
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
+                {/* DISPLAY DE ACOMPANHAMENTO AO VIVO COM CORES & GATILHO */}
+                <div
+                  className={`rounded-xl p-5 space-y-4 border transition-colors ${
+                    isApprovedTriggerActive
+                      ? 'bg-gradient-to-br from-emerald-950/70 via-slate-900 to-cyan-950/40 border-emerald-500/60'
+                      : isBotRunning
+                      ? 'bg-gradient-to-br from-slate-900 via-slate-900 to-emerald-950/30 border-emerald-500/40'
+                      : 'bg-slate-900 border-slate-800'
+                  }`}
+                >
+                  {isApprovedTriggerActive && lastDispatchState && (
+                    <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2.5 rounded-lg bg-emerald-500/15 border border-emerald-400/50 text-xs">
+                      <div className="flex items-center gap-2 text-emerald-200 font-semibold">
+                        <BellRing className="w-4 h-4 text-lime-300 shrink-0" />
+                        <span>
+                          ADMIN ACEITOU ENTRADA em <strong>{lastDispatchState.groupName}</strong> → Gatilho automático abriu o grupo e está postando agora!
+                        </span>
+                      </div>
+                      <span className="font-mono text-[11px] text-lime-300">{lastDispatchState.updatedAt}</span>
+                    </div>
+                  )}
+
                   <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                    <div className="space-y-1 min-w-0">
-                      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
-                        <span className={`font-semibold ${isBotRunning ? 'text-emerald-400' : 'text-slate-300'}`}>
-                          {isBotRunning ? 'Robô Global em Execução' : 'Robô Global Pausado'}
+                    <div className="space-y-1.5 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2 text-xs">
+                        <span
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md font-bold ${
+                            isApprovedTriggerActive
+                              ? 'bg-lime-500/20 text-lime-300 border border-lime-400/40'
+                              : isBotRunning
+                              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                              : 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
+                          }`}
+                        >
+                          <span
+                            className={`w-2 h-2 rounded-full ${
+                              isApprovedTriggerActive
+                                ? 'bg-lime-400 animate-ping'
+                                : isBotRunning
+                                ? 'bg-emerald-400 animate-pulse'
+                                : 'bg-amber-400'
+                            }`}
+                          />
+                          {isApprovedTriggerActive
+                            ? 'GATILHO DE ACEITE ATIVO'
+                            : isBotRunning
+                            ? 'ROBÔ GLOBAL ATIVO'
+                            : 'ROBÔ PAUSADO'}
                         </span>
-                        <span aria-hidden="true">·</span>
-                        <span className="truncate max-w-[260px]">
-                          Público: <strong className="text-slate-200">{activeAudience ? activeAudience.name : 'Todos Globais'}</strong>
+                        <span className="px-2 py-0.5 rounded-md bg-slate-950 border border-slate-800 text-slate-300 truncate max-w-[240px]">
+                          Público: <strong className="text-white">{activeAudience ? activeAudience.name : 'Todos Globais'}</strong>
                         </span>
-                        <span aria-hidden="true">·</span>
-                        <span className="truncate max-w-[260px]">
-                          Oferta: <strong className="text-cyan-300">{activeOffer.productName}</strong>
+                        <span className="px-2 py-0.5 rounded-md bg-cyan-950/50 border border-cyan-800/50 text-cyan-300 truncate max-w-[240px]">
+                          Oferta: <strong>{activeOffer.productName}</strong>
                         </span>
                       </div>
 
                       <div className="text-sm font-semibold text-white truncate">
                         {nextGroup ? (
                           <span>
-                            Próximo (#{currentQueueNum} de {queueLen}): {nextGroupCleanName}
+                            Próximo (#{currentQueueNum} de {queueLen}): <span className="text-cyan-300">{nextGroupCleanName}</span>
                           </span>
                         ) : (
                           <span>Nenhum grupo na fila deste público</span>
@@ -2968,11 +3156,17 @@ export const GlobalMediaScalersTab: React.FC = () => {
 
                     {/* Countdown Clock + Primary Controls */}
                     <div className="flex flex-wrap items-center gap-3 shrink-0">
-                      <div className="flex items-center gap-2.5 bg-slate-950 border border-slate-800 rounded-lg px-3.5 py-2">
-                        <Clock className={`w-4 h-4 ${isBotRunning ? 'text-emerald-400' : 'text-slate-500'}`} />
+                      <div
+                        className={`flex items-center gap-2.5 rounded-lg px-3.5 py-2 border ${
+                          isBotRunning
+                            ? 'bg-emerald-950/40 border-emerald-600/40'
+                            : 'bg-slate-950 border-slate-800'
+                        }`}
+                      >
+                        <Clock className={`w-4 h-4 ${isBotRunning ? 'text-emerald-400' : 'text-amber-400'}`} />
                         <div>
                           <div className="text-[10px] text-slate-400 leading-none">Próximo disparo</div>
-                          <div className="font-mono text-lg font-bold text-white tabular-nums leading-tight">
+                          <div className={`font-mono text-lg font-bold tabular-nums leading-tight ${isBotRunning ? 'text-emerald-300' : 'text-white'}`}>
                             {isBotRunning ? formatCountdownClock(secondsRemaining) : 'Pronto'}
                           </div>
                         </div>
@@ -2985,7 +3179,7 @@ export const GlobalMediaScalersTab: React.FC = () => {
                           className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 rounded-lg inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
                           title="Pular para o próximo grupo da fila"
                         >
-                          <SkipForward className="w-3.5 h-3.5" />
+                          <SkipForward className="w-3.5 h-3.5 text-cyan-400" />
                           <span>Pular</span>
                         </button>
                       )}
@@ -2994,9 +3188,9 @@ export const GlobalMediaScalersTab: React.FC = () => {
                         type="button"
                         onClick={executeSingleGlobalPost}
                         disabled={queueLen === 0}
-                        className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-xs font-medium text-white rounded-lg inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                        className="px-3.5 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-xs font-semibold text-white rounded-lg inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
                       >
-                        <Send className="w-3.5 h-3.5 text-cyan-400" />
+                        <Send className="w-3.5 h-3.5" />
                         <span>Disparar 1 Agora</span>
                       </button>
 
@@ -3016,42 +3210,116 @@ export const GlobalMediaScalersTab: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Queue Progress Bar */}
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between text-[11px] text-slate-400 tabular-nums">
+                  {/* Queue Progress Bar + 4-Stage Pipeline */}
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-300 tabular-nums">
                       <span>Progresso da Fila ({currentQueueNum}/{queueLen} · {queueProgressPct}%)</span>
-                      <span>Cadência segura: 300s–400s · Auto-Post + Fechar Aba: {autoJoinAndPostEnabled ? 'Ativo' : 'Manual'}</span>
+                      <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                        <span className={`px-2 py-0.5 rounded border ${lastDispatchState?.phase === 'opening' ? 'bg-cyan-500/20 border-cyan-400/50 text-cyan-200 font-bold' : 'bg-slate-950 border-slate-800 text-slate-400'}`}>
+                          1. Abrir Grupo
+                        </span>
+                        <span className="text-slate-600">→</span>
+                        <span className={`px-2 py-0.5 rounded border ${waitingCookieCount > 0 ? 'bg-sky-500/15 border-sky-400/40 text-sky-200 font-semibold' : 'bg-slate-950 border-slate-800 text-slate-400'}`}>
+                          2. Entrar / Cookie Espera
+                        </span>
+                        <span className="text-slate-600">→</span>
+                        <span className={`px-2 py-0.5 rounded border ${isApprovedTriggerActive ? 'bg-lime-500/20 border-lime-400/50 text-lime-200 font-bold' : 'bg-emerald-950/40 border-emerald-700/40 text-emerald-300'}`}>
+                          3. Postar (+Alt Anônimo)
+                        </span>
+                        <span className="text-slate-600">→</span>
+                        <span className="px-2 py-0.5 rounded border bg-slate-950 border-slate-800 text-slate-300">
+                          4. Fechar Aba 4s
+                        </span>
+                      </div>
                     </div>
-                    <div className="h-1.5 w-full bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+                    <div className="h-2 w-full bg-slate-950 rounded-full overflow-hidden border border-slate-800">
                       <div
-                        className="h-full bg-cyan-500 transition-all duration-300"
+                        className="h-full bg-gradient-to-r from-cyan-500 via-emerald-400 to-lime-400 transition-all duration-300"
                         style={{ width: `${queueProgressPct}%` }}
                       />
                     </div>
                   </div>
 
-                  {/* 5-Column KPI Strip */}
-                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-3 border-t border-slate-800">
-                    <div>
+                  {/* 6 Color-Coded KPI Cards */}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 pt-1">
+                    <div className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5">
                       <div className="text-[11px] text-slate-400">Na Fila Atual</div>
                       <div className="font-mono text-xl font-bold text-white tabular-nums">{queueLen}</div>
                     </div>
-                    <div>
-                      <div className="text-[11px] text-slate-400">Postagens Feitas</div>
+                    <div className="bg-emerald-950/30 border border-emerald-500/35 rounded-lg px-3 py-2.5">
+                      <div className="text-[11px] text-emerald-300">Postagens Feitas</div>
                       <div className="font-mono text-xl font-bold text-emerald-400 tabular-nums">{publishedCount}</div>
                     </div>
-                    <div>
-                      <div className="text-[11px] text-slate-400">Aguardando Admin</div>
+                    <div className="bg-amber-950/30 border border-amber-500/35 rounded-lg px-3 py-2.5">
+                      <div className="text-[11px] text-amber-200">Aguard. Admin Post</div>
                       <div className="font-mono text-xl font-bold text-amber-300 tabular-nums">{adminCount}</div>
                     </div>
-                    <div>
-                      <div className="text-[11px] text-slate-400">Entrada / Participar</div>
-                      <div className="font-mono text-xl font-bold text-cyan-300 tabular-nums">{joinPendingCount}</div>
+                    <div className="bg-cyan-950/35 border border-cyan-500/40 rounded-lg px-3 py-2.5">
+                      <div className="text-[11px] text-cyan-200 flex items-center gap-1">
+                        <Cookie className="w-3 h-3 text-cyan-400" />
+                        <span>Espera Aceite</span>
+                      </div>
+                      <div className="font-mono text-xl font-bold text-cyan-300 tabular-nums">{waitingCookieCount}</div>
                     </div>
-                    <div>
-                      <div className="text-[11px] text-slate-400">Erros / Limite</div>
+                    <div className="bg-sky-950/30 border border-sky-500/35 rounded-lg px-3 py-2.5">
+                      <div className="text-[11px] text-sky-200">Entrada / Participar</div>
+                      <div className="font-mono text-xl font-bold text-sky-300 tabular-nums">{joinPendingCount}</div>
+                    </div>
+                    <div className="bg-rose-950/30 border border-rose-500/35 rounded-lg px-3 py-2.5">
+                      <div className="text-[11px] text-rose-200">Erros / Limite</div>
                       <div className="font-mono text-xl font-bold text-rose-400 tabular-nums">{errorCount}</div>
                     </div>
+                  </div>
+
+                  {/* Background Approval Watchdog Strip (Works Even With Group Tabs Closed) */}
+                  <div className="bg-slate-950 border border-cyan-800/40 rounded-lg p-3 space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 text-xs">
+                        <Cookie className="w-4 h-4 text-cyan-400 shrink-0" />
+                        <span className="font-semibold text-cyan-200">
+                          Monitor de Aceites em 2º Plano ({waitingCookieCount} {waitingCookieCount === 1 ? 'grupo' : 'grupos'} c/ cookie & gatilho)
+                        </span>
+                        <span className="text-[11px] text-slate-400 hidden sm:inline">
+                          · Verifica a cada 3 min mesmo com aba fechada e posta ao aprovar
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleCheckWaitingApprovalsNow}
+                        disabled={checkingApprovals || waitingCookieCount === 0}
+                        className="px-2.5 py-1 bg-cyan-600/20 hover:bg-cyan-600/35 disabled:opacity-40 border border-cyan-500/40 text-cyan-200 text-[11px] font-semibold rounded-md inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                      >
+                        <RefreshCw className={`w-3 h-3 ${checkingApprovals ? 'animate-spin' : ''}`} />
+                        <span>{checkingApprovals ? 'Verificando Aceites...' : 'Verificar Aceites Agora'}</span>
+                      </button>
+                    </div>
+
+                    {waitingCookieCount > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {waitingApprovals.slice(0, 8).map((w) => (
+                          <div
+                            key={w.groupSlug}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-900 border border-slate-700 text-[11px] text-slate-200"
+                          >
+                            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                            <span className="truncate max-w-[180px] font-medium">
+                              {sanitizeGlobalGroupName(w.groupName || w.groupSlug)}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveWaitingApproval(w.groupSlug)}
+                              className="text-slate-500 hover:text-rose-400 cursor-pointer"
+                              title="Remover da lista de espera"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ))}
+                        {waitingCookieCount > 8 && (
+                          <span className="text-[11px] text-cyan-300 self-center">+{waitingCookieCount - 8} grupos</span>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Current / Last Action Telemetry Bar */}
@@ -3060,13 +3328,17 @@ export const GlobalMediaScalersTab: React.FC = () => {
                       <div className="flex flex-wrap items-center gap-2 min-w-0">
                         {lastDispatchState.phase === 'opening' ? (
                           <RefreshCw className="w-3.5 h-3.5 text-cyan-400 shrink-0 animate-spin" />
+                        ) : lastDispatchState.phase === 'approved_alert' ? (
+                          <BellRing className="w-3.5 h-3.5 text-lime-300 shrink-0" />
                         ) : (
                           <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                         )}
                         <span className="text-slate-400 shrink-0">Último disparo:</span>
-                        <span className="font-semibold text-white truncate max-w-[280px]">{lastDispatchState.groupName}</span>
+                        <span className="font-semibold text-white truncate max-w-[260px]">{lastDispatchState.groupName}</span>
                         <span aria-hidden="true" className="text-slate-600">·</span>
-                        <span className="text-cyan-300">{lastDispatchState.statusLabel}</span>
+                        <span className={lastDispatchState.phase === 'approved_alert' ? 'text-lime-300 font-semibold' : 'text-cyan-300'}>
+                          {lastDispatchState.statusLabel}
+                        </span>
                         <span className="text-slate-500 font-mono tabular-nums">({lastDispatchState.updatedAt})</span>
                       </div>
                     ) : latestLog ? (
@@ -3111,11 +3383,11 @@ export const GlobalMediaScalersTab: React.FC = () => {
                           type="button"
                           onClick={handleDownloadGlobalExtensionZip}
                           disabled={isDownloadingExt}
-                          className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-cyan-300 text-[11px] font-medium rounded-md inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
-                          title="Baixar Extensão v1.4.5 atualizada (clique real do navegador + inserção nativa no Facebook)"
+                          className="px-3 py-1.5 bg-cyan-600/20 hover:bg-cyan-600/35 border border-cyan-500/40 text-cyan-200 text-[11px] font-semibold rounded-md inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                          title="Baixar Extensão v1.5.0 (Cookie Espera + Gatilho de Aceite + Fluxo Alt Post Anônimo)"
                         >
                           <Download className="w-3 h-3" />
-                          <span>{isDownloadingExt ? 'Gerando ZIP...' : 'Atualizar Extensão v1.4.5 (ZIP)'}</span>
+                          <span>{isDownloadingExt ? 'Gerando ZIP...' : 'Atualizar Extensão v1.5.0 (ZIP)'}</span>
                         </button>
                       </div>
                       <div className="flex flex-wrap gap-2">
@@ -3280,35 +3552,100 @@ export const GlobalMediaScalersTab: React.FC = () => {
                         />
                       </label>
 
-                      {/* Live Facebook Feed Preview */}
+                      {/* Live Facebook Feed Preview + Editor + Save + Copy Manual */}
                       {showFeedPreview && (
-                        <div className="border border-slate-800 rounded-xl bg-slate-950 p-4 space-y-3">
-                          <div className="flex items-center justify-between gap-2 text-[11px] text-slate-400">
-                            <span>Prévia Real no Feed do Grupo</span>
-                            <span className="truncate max-w-[260px]">
-                              {nextGroupCleanName || `${activeOffer.countryName} Community Group`}
-                            </span>
+                        <div className="border border-cyan-500/35 rounded-xl bg-slate-950 p-4 space-y-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 text-xs">
+                              <span className="font-bold text-cyan-300">Prévia Real no Feed do Grupo</span>
+                              <span className="text-[11px] text-slate-400 truncate max-w-[180px]">
+                                · {nextGroupCleanName || `${activeOffer.countryName} Group`}
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => setIsEditingInPreview((v) => !v)}
+                                className={`px-2.5 py-1 text-[11px] font-semibold rounded-md inline-flex items-center gap-1 cursor-pointer ${
+                                  isEditingInPreview
+                                    ? 'bg-amber-600/25 border border-amber-500/50 text-amber-200'
+                                    : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
+                                }`}
+                              >
+                                <Pencil className="w-3 h-3" />
+                                <span>{isEditingInPreview ? 'Ver Prévia Limpa' : 'Editar Copy Aqui'}</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={handleCycleCopyAngle}
+                                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-cyan-300 text-[11px] font-semibold rounded-md inline-flex items-center gap-1 cursor-pointer"
+                                title="Alternar ângulo e estilo da postagem"
+                              >
+                                <Shuffle className="w-3 h-3" />
+                                <span>Mudar Copy</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={handleSavePreviewCopy}
+                                className="px-2.5 py-1 bg-sky-600/25 hover:bg-sky-600/40 border border-sky-500/40 text-sky-200 text-[11px] font-semibold rounded-md inline-flex items-center gap-1 cursor-pointer"
+                              >
+                                {copySavedToast ? <Check className="w-3 h-3 text-emerald-400" /> : <Save className="w-3 h-3" />}
+                                <span>{copySavedToast ? 'Salvo!' : 'Salvar Copy'}</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={handleCopyFullManualPost}
+                                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold rounded-md inline-flex items-center gap-1 cursor-pointer"
+                              >
+                                {copiedId === 'full-manual-preview' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                                <span>{copiedId === 'full-manual-preview' ? 'Copiada!' : 'Copiar Postagem Inteira'}</span>
+                              </button>
+                            </div>
                           </div>
 
                           <div className="bg-slate-900 border border-slate-800 rounded-lg p-3.5 space-y-3">
-                            <div className="flex items-center gap-2.5">
-                              <div className="w-8 h-8 rounded-full bg-cyan-600/25 border border-cyan-500/40 flex items-center justify-center text-xs font-bold text-cyan-300 shrink-0">
-                                {activeOffer.countryCode}
-                              </div>
-                              <div className="min-w-0">
-                                <div className="text-xs font-semibold text-white truncate">
-                                  Publicação no Grupo · {nextGroupCleanName || activeOffer.countryName}
+                            <div className="flex items-center justify-between gap-2.5">
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <div className="w-8 h-8 rounded-full bg-cyan-600/25 border border-cyan-500/40 flex items-center justify-center text-xs font-bold text-cyan-300 shrink-0">
+                                  {activeOffer.countryCode}
                                 </div>
-                                <div className="text-[11px] text-slate-400">Agora mesmo · Público</div>
+                                <div className="min-w-0">
+                                  <div className="text-xs font-semibold text-white truncate">
+                                    Publicação no Grupo · {nextGroupCleanName || activeOffer.countryName}
+                                  </div>
+                                  <div className="text-[11px] text-slate-400">Agora mesmo · Público</div>
+                                </div>
                               </div>
+                              <span className="text-[10px] font-mono text-slate-400 tabular-nums shrink-0">
+                                {(customPostHeadline.length + customPostBody.length)} chars
+                              </span>
                             </div>
 
-                            <div className="space-y-2 text-xs text-slate-100 leading-relaxed whitespace-pre-line break-words">
-                              {customPostHeadline && (
-                                <div className="font-bold text-white text-[13px]">{customPostHeadline}</div>
-                              )}
-                              <div>{customPostBody}</div>
-                            </div>
+                            {isEditingInPreview ? (
+                              <div className="space-y-2">
+                                <input
+                                  type="text"
+                                  value={customPostHeadline}
+                                  onChange={(e) => setCustomPostHeadline(e.target.value)}
+                                  placeholder="Título / Gancho da postagem..."
+                                  className="w-full bg-slate-950 border border-cyan-500/40 rounded-lg px-3 py-2 text-xs font-bold text-white"
+                                />
+                                <textarea
+                                  rows={7}
+                                  value={customPostBody}
+                                  onChange={(e) => setCustomPostBody(e.target.value)}
+                                  placeholder="Corpo da postagem com link..."
+                                  className="w-full bg-slate-950 border border-cyan-500/40 rounded-lg p-3 text-xs text-slate-100 leading-relaxed"
+                                />
+                              </div>
+                            ) : (
+                              <div className="space-y-2 text-xs text-slate-100 leading-relaxed whitespace-pre-line break-words">
+                                {customPostHeadline && (
+                                  <div className="font-bold text-white text-[13px]">{customPostHeadline}</div>
+                                )}
+                                <div>{customPostBody}</div>
+                              </div>
+                            )}
 
                             <div className="border border-slate-800 bg-slate-950 rounded-lg p-2.5 flex items-center justify-between gap-3">
                               <div className="min-w-0">
@@ -3326,15 +3663,15 @@ export const GlobalMediaScalersTab: React.FC = () => {
                         </div>
                       )}
 
-                      {/* Auto Join + Auto Post + Auto Close Tab Toggle (Same System as Brazil v1.4.0) */}
+                      {/* Auto Join + Auto Post + Auto Close Tab Toggle (Same System as Brazil v1.5.0) */}
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5">
                         <div className="text-xs">
                           <div className="font-semibold text-white">
-                            Sistema Automático: Abrir → Entrar no Grupo → Postar → Fechar Aba (v1.4.5)
+                            Sistema Automático: Abrir → Entrar / Cookie Espera → Postar → Fechar Aba (v1.5.0)
                           </div>
                           <div className="text-[11px] text-slate-400">
                             {autoJoinAndPostEnabled
-                              ? 'Ativado: entra automaticamente no grupo (se precisar), preenche, publica (Post/Postar) e fecha a aba em 4s.'
+                              ? 'Ativado: entra automaticamente (ou ativa cookie + fecha aba se aguardar admin), posta (com fluxo Alt se pedir Post Anônimo) e fecha em 4s.'
                               : 'Desativado: apenas abre o grupo e copia o texto para você postar manualmente.'}
                           </div>
                         </div>
@@ -3542,6 +3879,8 @@ export const GlobalMediaScalersTab: React.FC = () => {
                               className={`font-medium shrink-0 ${
                                 log.approvalStatus === 'published'
                                   ? 'text-emerald-400'
+                                  : log.approvalStatus === 'approved_posting'
+                                  ? 'text-lime-300 font-bold'
                                   : log.approvalStatus === 'awaiting_admin' || log.approvalStatus === 'join_requested'
                                   ? 'text-amber-300'
                                   : log.status === 'error'
@@ -3551,10 +3890,12 @@ export const GlobalMediaScalersTab: React.FC = () => {
                             >
                               {log.approvalStatus === 'published'
                                 ? 'Postagem Feita'
+                                : log.approvalStatus === 'approved_posting'
+                                ? 'Aceito! Postando'
                                 : log.approvalStatus === 'awaiting_admin'
                                 ? 'Aguardando Admin'
                                 : log.approvalStatus === 'join_requested'
-                                ? 'Entrada Solicitada'
+                                ? 'Espera Aceite (Cookie)'
                                 : log.approvalStatus === 'rate_limited'
                                 ? 'Limite Temp. FB'
                                 : log.approvalStatus === 'unavailable'

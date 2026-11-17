@@ -1,4 +1,4 @@
-// AutoViral AI Chrome Extension - Content Script V1.4.5
+// AutoViral AI Chrome Extension - Content Script V1.5.0
 // Runs on Facebook, YouTube, Instagram, Pinterest and AutoViral AI Web Platform
 
 (function () {
@@ -687,28 +687,67 @@
 
     function findComposerTrigger() {
       const composerTriggers = Array.from(
-        document.querySelectorAll('[data-pagelet="GroupInlineComposer"] div[role="button"], div[role="button"], span')
+        document.querySelectorAll('[data-pagelet="GroupInlineComposer"] div[role="button"], [data-pagelet="GroupInlineComposer"] span, div[role="button"], span')
       );
-      const matched = composerTriggers.find((el) => {
+      let best = null;
+      let bestScore = -Infinity;
+      for (const el of composerTriggers) {
         const rect = el.getBoundingClientRect();
-        if (rect.width < 60 || rect.height < 16) return false;
-        if (el.closest('div[role="dialog"]')) return false;
-        if (el.closest('div[role="article"]')) return false;
-        if (el.closest('[aria-busy="true"]')) return false;
+        if (rect.width < 60 || rect.height < 16 || rect.height > 78) continue;
+        if (rect.top < 0 || rect.top > window.innerHeight * 1.4) continue;
+        if (el.closest('div[role="dialog"]')) continue;
+        if (el.closest('div[role="article"]')) continue;
+        if (el.closest('[aria-busy="true"]')) continue;
         const t = (el.innerText || el.getAttribute('aria-label') || '').trim().toLowerCase();
-        return (
+        if (!t || t.length > 90) continue;
+        if (
+          t.includes('anônim') ||
+          t.includes('anonim') ||
+          t.includes('anonym') ||
+          t.includes('enquete') ||
+          t.includes('poll') ||
+          t.includes('sentimento') ||
+          t.includes('feeling') ||
+          t.includes('foto') ||
+          t.includes('photo') ||
+          t.includes('vídeo') ||
+          t.includes('video') ||
+          t.includes('ao vivo') ||
+          t.includes('live')
+        ) {
+          continue;
+        }
+        const isExact =
           t === 'escreva algo...' ||
+          t === 'write something...' ||
+          t === 'no que você está pensando?' ||
+          t === "what's on your mind?";
+        const isMatch =
+          isExact ||
           t.includes('escreva algo') ||
           t.includes('no que você está pensando') ||
-          t === 'write something...' ||
           t.includes('write something') ||
           t.includes("what's on your mind") ||
           t.includes('criar publicação pública') ||
-          t.includes('create a public post')
-        );
-      });
-      if (!matched) return null;
-      return matched.closest('div[role="button"]') || matched;
+          t.includes('create a public post');
+        if (!isMatch) continue;
+        const inInline = el.closest('[data-pagelet="GroupInlineComposer"]') ? 20000 : 0;
+        const isSpanBoost = el.tagName === 'SPAN' ? 8000 : 0;
+        const exactBoost = isExact ? 100000 : 40000;
+        const area = Math.max(1, rect.width * rect.height);
+        const score = exactBoost + inInline + isSpanBoost - area * 0.05;
+        if (score > bestScore) {
+          bestScore = score;
+          best = el;
+        }
+      }
+      if (!best) return null;
+      const btn = best.closest('div[role="button"]');
+      if (btn) {
+        const br = btn.getBoundingClientRect();
+        if (br.height <= 78 && br.width >= 60) return btn;
+      }
+      return best;
     }
 
     function copyTextReliably(text) {
@@ -878,6 +917,79 @@
         }
         return true;
       }) || null;
+    }
+
+    function setWaitingApprovalCookie(slug) {
+      if (!slug) return;
+      try {
+        document.cookie = `autoviral_wait_${slug}=1; max-age=2592000; path=/; domain=.facebook.com; SameSite=Lax`;
+      } catch (e) {}
+    }
+
+    function clearWaitingApprovalCookie(slug) {
+      if (!slug) return;
+      try {
+        document.cookie = `autoviral_wait_${slug}=; max-age=0; path=/; domain=.facebook.com; SameSite=Lax`;
+      } catch (e) {}
+    }
+
+    function saveWaitingApprovalEntry(pending, currentSlug) {
+      if (!currentSlug) return;
+      setWaitingApprovalCookie(currentSlug);
+      try {
+        if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
+          chrome.runtime.sendMessage({
+            action: 'AUTOVIRAL_SAVE_WAITING_APPROVAL',
+            item: {
+              logId: pending && pending.logId ? pending.logId : `glog-wait-${Date.now()}`,
+              groupId: pending && pending.groupId ? pending.groupId : '',
+              groupUrl: (pending && pending.groupUrl) || window.location.href,
+              groupSlug: currentSlug,
+              groupName: (pending && pending.groupName) || document.title || currentSlug,
+              fullText: (pending && pending.fullText) || '',
+              requestedAt: new Date().toISOString(),
+              lastCheckedAt: new Date().toISOString()
+            }
+          }, () => { void chrome.runtime.lastError; });
+        }
+      } catch (e) {}
+    }
+
+    function findAnonymousPostDialog() {
+      const dialogs = Array.from(document.querySelectorAll('div[role="dialog"]')).filter((d) => {
+        const r = d.getBoundingClientRect();
+        return r.width > 200 && r.height > 120;
+      });
+      return dialogs.find((d) => {
+        const txt = (d.innerText || '').toLowerCase();
+        return (
+          txt.includes('post anônimo') ||
+          txt.includes('post anonimo') ||
+          txt.includes('anonymous post') ||
+          txt.includes('criar post anônimo') ||
+          txt.includes('criar post anonimo') ||
+          txt.includes('create anonymous post')
+        );
+      }) || null;
+    }
+
+    function clickButtonInDialogByTexts(dlg, labels) {
+      if (!dlg || !Array.isArray(labels)) return false;
+      const normLabels = labels.map((l) => l.toLowerCase());
+      const btns = Array.from(dlg.querySelectorAll('div[role="button"], button, span[role="button"]'));
+      for (const b of btns) {
+        const r = b.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) continue;
+        const txt = ((b.innerText || b.getAttribute('aria-label') || '') + '').trim().toLowerCase();
+        if (normLabels.includes(txt)) {
+          try {
+            b.focus();
+            b.click();
+            return true;
+          } catch (e) {}
+        }
+      }
+      return false;
     }
 
     function closeStuckCreatePostDialog(dlg) {
@@ -1181,6 +1293,7 @@
             note: 'Facebook exibiu: Este conteúdo não está disponível no momento'
           });
           clearStoredPendingGroupPost(currentSlug);
+          clearWaitingApprovalCookie(currentSlug);
           if (msgEl) {
             msgEl.style.color = '#fb7185';
           }
@@ -1188,7 +1301,7 @@
           return;
         }
         const trigger = findComposerTrigger();
-        if (trigger || triggerTries >= 16) {
+        if (trigger || triggerTries >= 15) {
           clearInterval(waitTrigger);
           if (!trigger) {
             if (isFacebookGroupUnavailable()) {
@@ -1208,9 +1321,9 @@
               return;
             }
             if (msgEl) {
-              msgEl.textContent = '📋 Texto copiado! Clique em "Escreva algo..." no grupo e cole (Ctrl+V).';
               msgEl.style.color = '#fbbf24';
             }
+            scheduleAutoCloseTab(msgEl, cancelAutoBtn, '⚠️ Caixa "Escreva algo..." não apareceu a tempo (texto copiado).', 4);
             return;
           }
 
@@ -1219,7 +1332,6 @@
             msgEl.style.color = '#38bdf8';
           }
 
-          // Give Facebook Relay an extra 1.1s after trigger appears, then open cleanly via MAIN world simple click first
           setTimeout(() => {
             const reloadKey = `av_skel_reload_${currentSlug}`;
             const targetTag = String(pending.logId || '1');
@@ -1236,10 +1348,48 @@
 
             let boxTries = 0;
             let retriedSkeleton = false;
-            let reopenPauseUntil = Date.now() + 1100;
+            let anonDialogCount = 0;
+            let reopenPauseUntil = Date.now() + 900;
             const waitTextbox = setInterval(() => {
               if (Date.now() < reopenPauseUntil) return;
               boxTries++;
+
+              // Intercept "Post anônimo" modal immediately!
+              const anonDlg = findAnonymousPostDialog();
+              if (anonDlg) {
+                if (anonDialogCount === 0) {
+                  anonDialogCount = 1;
+                  if (msgEl) {
+                    msgEl.textContent = '🛡️ Modal "Post anônimo" detectado — cancelando e clicando em "Escreva algo..."';
+                    msgEl.style.color = '#fbbf24';
+                  }
+                  clickButtonInDialogByTexts(anonDlg, ['cancelar', 'cancel']);
+                  reopenPauseUntil = Date.now() + 900;
+                  setTimeout(() => {
+                    const freshTrigger = findComposerTrigger();
+                    if (freshTrigger) openComposerWithPreload(freshTrigger, 'simple');
+                  }, 480);
+                  return;
+                } else if (anonDialogCount === 1) {
+                  // Alternative flow if Facebook insists on Anonymous Post: proceed cleanly so tab NEVER gets stuck!
+                  anonDialogCount = 2;
+                  if (msgEl) {
+                    msgEl.textContent = '🕶️ Fluxo alternativo: entrando por "Criar post anônimo" para postar e fechar aba!';
+                    msgEl.style.color = '#38bdf8';
+                  }
+                  const clickedAnonCreate = clickButtonInDialogByTexts(anonDlg, [
+                    'criar post anônimo',
+                    'criar post anonimo',
+                    'create anonymous post'
+                  ]);
+                  if (!clickedAnonCreate) {
+                    closeStuckCreatePostDialog(anonDlg);
+                  }
+                  reopenPauseUntil = Date.now() + 1000;
+                  return;
+                }
+              }
+
               const dlg = findCreatePostDialog();
               const textbox = findCreatePostTextbox(dlg);
               if (textbox) {
@@ -1248,6 +1398,7 @@
                   sessionStorage.removeItem(`av_skip_auto_modal_${currentSlug}`);
                 } catch (e) {}
                 clearInterval(waitTextbox);
+                clearWaitingApprovalCookie(currentSlug);
                 if (msgEl) {
                   msgEl.textContent = '✍️ Etapa 2/4: Caixa carregada! Inserindo texto da postagem...';
                   msgEl.style.color = '#38bdf8';
@@ -1341,22 +1492,22 @@
                         }
                         startSubmissionMonitor(pending, currentSlug, msgEl, false, cancelAutoBtn);
                       }
-                    }, 480);
-                  }, 2200);
-                }, 550);
-              } else if (boxTries === 26 && !retriedSkeleton) {
+                    }, 450);
+                  }, 1800);
+                }, 480);
+              } else if (boxTries === 22 && !retriedSkeleton) {
                 retriedSkeleton = true;
                 if (msgEl) {
                   msgEl.textContent = '🔄 Facebook demorou em "Criar post". Fechando e tentando clique com pré-carregamento...';
                   msgEl.style.color = '#fbbf24';
                 }
                 closeStuckCreatePostDialog(dlg);
-                reopenPauseUntil = Date.now() + 2600;
+                reopenPauseUntil = Date.now() + 2000;
                 setTimeout(() => {
                   const retryTrigger = findComposerTrigger();
                   if (retryTrigger) openComposerWithPreload(retryTrigger, 'full');
-                }, 1600);
-              } else if (boxTries === 44) {
+                }, 1200);
+              } else if (boxTries === 38) {
                 if (prevReloadTag !== targetTag) {
                   clearInterval(waitTextbox);
                   try {
@@ -1366,39 +1517,31 @@
                     msgEl.textContent = '🔄 Recarregando grupo 1x para destravar janela "Criar post" do Facebook...';
                     msgEl.style.color = '#fbbf24';
                   }
-                  setTimeout(() => window.location.reload(), 900);
+                  setTimeout(() => window.location.reload(), 800);
                 }
-              } else if (boxTries >= 64) {
+              } else if (boxTries >= 54) {
                 clearInterval(waitTextbox);
                 if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
                 copyTextReliably(pending.fullText);
                 closeStuckCreatePostDialog(dlg);
+                clearStoredPendingGroupPost(currentSlug);
                 sendRealPostResultToPlatform({
                   logId: pending.logId,
                   groupId: pending.groupId,
                   groupUrl: window.location.href,
                   groupName: pending.groupName,
                   approvalStatus: 'composer_stuck',
-                  note: 'Facebook travou o modal automático. Texto copiado — clique manual em Escreva algo e Ctrl+V.'
+                  note: 'Facebook travou o modal automático. Aba fechada com segurança e texto copiado.'
                 });
-                setTimeout(() => {
-                  const stillBlocked = findCreatePostDialog();
-                  if (stillBlocked && !findCreatePostTextbox(stillBlocked)) {
-                    try {
-                      sessionStorage.setItem(`av_skip_auto_modal_${currentSlug}`, targetTag);
-                    } catch (e) {}
-                    window.location.reload();
-                  } else if (msgEl) {
-                    msgEl.textContent = '⚠️ Facebook manteve "Criar post" cinza! Pause o AdBlock em facebook.com, feche abas antigas e teste clicar manualmente em "Escreva algo..." para confirmar se a conta está com limite temporário.';
-                    msgEl.style.color = '#fbbf24';
-                    startSubmissionMonitor(pending, currentSlug, msgEl, false, cancelAutoBtn);
-                  }
-                }, 700);
+                if (msgEl) {
+                  msgEl.style.color = '#fbbf24';
+                }
+                scheduleAutoCloseTab(msgEl, cancelAutoBtn, '⚠️ Janela travada no Facebook — fechando aba p/ não travar a fila.', 4);
               }
-            }, 480);
-          }, 1100);
+            }, 420);
+          }, 900);
         }
-      }, 480);
+      }, 420);
     }
 
     function initGroupPostAssistant() {
@@ -1504,6 +1647,7 @@
 
           if (isMembershipPendingApproval()) {
             if (pending) {
+              saveWaitingApprovalEntry(pending, currentSlug);
               sendRealPostResultToPlatform({
                 logId: pending.logId,
                 groupId: pending.groupId,
@@ -1511,11 +1655,12 @@
                 groupName: pending.groupName,
                 approvalStatus: 'join_requested'
               });
+              clearStoredPendingGroupPost(currentSlug);
             }
             if (msgEl) {
-              msgEl.textContent = '⏳ Solicitação de entrada já enviada! Aguardando admin aprovar — sua postagem ficou salva para publicar depois.';
-              msgEl.style.color = '#fbbf24';
+              msgEl.style.color = '#38bdf8';
             }
+            scheduleAutoCloseTab(msgEl, cancelAutoBtn, '⏳ Entrada pendente! Cookie & gatilho salvos — postará ao admin aceitar.', 3);
             return;
           }
 
@@ -1548,6 +1693,7 @@
 
               if (hasMembershipQuestionsModalOpen()) {
                 if (pending) {
+                  saveWaitingApprovalEntry(pending, currentSlug);
                   sendRealPostResultToPlatform({
                     logId: pending.logId,
                     groupId: pending.groupId,
@@ -1555,9 +1701,10 @@
                     groupName: pending.groupName,
                     approvalStatus: 'join_requested'
                   });
+                  clearStoredPendingGroupPost(currentSlug);
                 }
                 if (msgEl) {
-                  msgEl.textContent = '📝 O grupo pediu perguntas de entrada! Responda na janela acima; sua postagem ficou salva para depois.';
+                  msgEl.textContent = '📝 Perguntas de entrada abertas! Cookie & gatilho ativados — responda acima e postamos assim que admin aceitar.';
                   msgEl.style.color = '#fbbf24';
                 }
                 return;
@@ -1565,6 +1712,7 @@
 
               if (isMembershipPendingApproval() || findJoinGroupButton()) {
                 if (pending) {
+                  saveWaitingApprovalEntry(pending, currentSlug);
                   sendRealPostResultToPlatform({
                     logId: pending.logId,
                     groupId: pending.groupId,
@@ -1572,23 +1720,24 @@
                     groupName: pending.groupName,
                     approvalStatus: 'join_requested'
                   });
+                  clearStoredPendingGroupPost(currentSlug);
                 }
                 if (msgEl) {
-                  msgEl.textContent = '⏳ Entrada solicitada! Aguardando aprovação do admin (post salvo para quando aprovar).';
-                  msgEl.style.color = '#fbbf24';
+                  msgEl.style.color = '#38bdf8';
                 }
+                scheduleAutoCloseTab(msgEl, cancelAutoBtn, '⏳ Entrada solicitada! Cookie & gatilho ativados (fechando aba e postará quando aceitar).', 3);
                 return;
               }
 
-              // Joined public group instantly! Wait 4.5s humanized delay before posting!
+              // Joined public group instantly! Wait 3.5s humanized delay before posting!
               if (msgEl) {
-                msgEl.textContent = '✅ Entrada confirmada! Aguardando 4.5s (proteção anti-spam) antes de postar...';
+                msgEl.textContent = '✅ Entrada confirmada! Aguardando 3.5s (proteção anti-spam) antes de postar...';
                 msgEl.style.color = '#34d399';
               }
               if (pending && pending.fullText) {
-                setTimeout(() => executeAutoPostFlow(pending, currentSlug, msgEl, cancelAutoBtn, autoSubmitPost), 4500);
+                setTimeout(() => executeAutoPostFlow(pending, currentSlug, msgEl, cancelAutoBtn, autoSubmitPost), 3500);
               }
-            }, 3200);
+            }, 3000);
             return;
           }
 
@@ -1704,6 +1853,58 @@
       });
     }
 
+    function checkWaitingApprovalsAndNotifications() {
+      if (!chrome.storage || !chrome.storage.local || !chrome.runtime || !chrome.runtime.sendMessage) return;
+      chrome.storage.local.get(['autoviral_waiting_approval_map', 'autoviral_pending_fb_posts_map'], (res) => {
+        const waitingMap = (res && res.autoviral_waiting_approval_map && typeof res.autoviral_waiting_approval_map === 'object')
+          ? res.autoviral_waiting_approval_map
+          : {};
+        const pendingMap = (res && res.autoviral_pending_fb_posts_map && typeof res.autoviral_pending_fb_posts_map === 'object')
+          ? res.autoviral_pending_fb_posts_map
+          : {};
+        const waitingSlugs = Object.keys(waitingMap);
+        if (waitingSlugs.length === 0) return;
+
+        const currentSlug = getCurrentGroupSlug();
+        if (currentSlug && waitingMap[currentSlug] && !pendingMap[currentSlug] && isAlreadyGroupMember()) {
+          clearWaitingApprovalCookie(currentSlug);
+          chrome.runtime.sendMessage({
+            action: 'AUTOVIRAL_TRIGGER_APPROVED_GROUP_POST',
+            groupSlug: currentSlug,
+            alreadyInTab: true
+          }, () => { void chrome.runtime.lastError; });
+          return;
+        }
+
+        // Also scan visible Facebook approval notifications in DOM
+        const groupLinks = Array.from(document.querySelectorAll('a[href*="/groups/"]'));
+        for (const a of groupLinks) {
+          const href = a.getAttribute('href') || '';
+          const m = href.match(/\/groups\/([^\/?#]+)/i);
+          if (!m) continue;
+          const linkSlug = m[1].toLowerCase();
+          if (!waitingMap[linkSlug] || pendingMap[linkSlug]) continue;
+          const containerText = ((a.closest('div[role="listitem"], div[role="row"], div[role="button"], li, div') || a).innerText || '').toLowerCase();
+          if (
+            containerText.includes('aprovou sua solicitação') ||
+            containerText.includes('aproveite sua participação') ||
+            containerText.includes('agora é membro') ||
+            containerText.includes('approved your request') ||
+            containerText.includes('enjoy your membership') ||
+            containerText.includes('now a member')
+          ) {
+            clearWaitingApprovalCookie(linkSlug);
+            chrome.runtime.sendMessage({
+              action: 'AUTOVIRAL_TRIGGER_APPROVED_GROUP_POST',
+              groupSlug: linkSlug,
+              alreadyInTab: false
+            }, () => { void chrome.runtime.lastError; });
+            break;
+          }
+        }
+      });
+    }
+
     const scheduleGroupPostAssistant = () => {
       let didInit = false;
       const runOnce = () => {
@@ -1712,15 +1913,17 @@
         initGroupPostAssistant();
       };
       if (document.readyState === 'complete') {
-        setTimeout(runOnce, 3000);
+        setTimeout(runOnce, 2200);
       } else {
-        window.addEventListener('load', () => setTimeout(runOnce, 3000), { once: true });
-        setTimeout(runOnce, 6500);
+        window.addEventListener('load', () => setTimeout(runOnce, 2200), { once: true });
+        setTimeout(runOnce, 5200);
       }
+      setTimeout(checkWaitingApprovalsAndNotifications, 4200);
+      setInterval(checkWaitingApprovalsAndNotifications, 25000);
     };
     scheduleGroupPostAssistant();
 
-    // Message listener for popup
+    // Message listener for popup & background watchdog
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (request.action === 'AUTOVIRAL_MAP_GROUPS' || request.action === 'AUTOVIRAL_GET_GROUPS') {
         const justFound = scanVisibleGroups();
@@ -1734,6 +1937,11 @@
         localMappedGroups = [];
         updateFloatingBadge();
         sendResponse({ success: true });
+      } else if (request.action === 'AUTOVIRAL_RUN_PENDING_NOW') {
+        const oldAssist = document.getElementById('autoviral-post-assistant');
+        if (oldAssist) oldAssist.remove();
+        setTimeout(initGroupPostAssistant, 200);
+        sendResponse({ ok: true });
       }
       return true;
     });
@@ -2579,6 +2787,10 @@
         window.dispatchEvent(new CustomEvent('autoviral_fb_post_result', {
           detail: data
         }));
+      } else if (data.action === 'AUTOVIRAL_WAITING_APPROVALS_SYNC') {
+        window.dispatchEvent(new CustomEvent('autoviral_waiting_approvals_synced', {
+          detail: data.waitingApprovals || []
+        }));
       }
     };
 
@@ -2602,6 +2814,9 @@
               }
             }));
           }
+          window.dispatchEvent(new CustomEvent('autoviral_waiting_approvals_synced', {
+            detail: Array.isArray(res.waitingApprovals) ? res.waitingApprovals : []
+          }));
           window.dispatchEvent(new CustomEvent('autoviral_insta_sync_complete', {
             detail: {
               count: Array.isArray(res.accounts) ? res.accounts.length : 0,
@@ -2632,6 +2847,25 @@
         }
       } else if (ev.data.type === 'AUTOVIRAL_REQUEST_INSTA_SYNC') {
         pullExtensionCacheIntoAutoViral();
+      } else if (ev.data.type === 'AUTOVIRAL_CHECK_WAITING_APPROVALS') {
+        if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
+          chrome.runtime.sendMessage({
+            action: 'AUTOVIRAL_CHECK_WAITING_APPROVALS',
+            maxCount: ev.data.maxCount || 4
+          }, (res) => {
+            void chrome.runtime.lastError;
+            window.dispatchEvent(new CustomEvent('autoviral_waiting_check_done', {
+              detail: res || { ok: false }
+            }));
+          });
+        }
+      } else if (ev.data.type === 'AUTOVIRAL_REMOVE_WAITING_APPROVAL' && ev.data.groupSlug) {
+        if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
+          chrome.runtime.sendMessage({
+            action: 'AUTOVIRAL_REMOVE_WAITING_APPROVAL',
+            groupSlug: ev.data.groupSlug
+          }, () => { void chrome.runtime.lastError; });
+        }
       }
     });
 
@@ -2650,7 +2884,8 @@
         message.action === 'AUTOVIRAL_IMPORT_YOUTUBE_VIDEOS_FROM_EXTENSION' ||
         message.action === 'AUTOVIRAL_IMPORT_INSTAGRAM_ACCOUNTS' ||
         message.action === 'AUTOVIRAL_INSTA_ACCOUNT_SYNC' ||
-        message.action === 'AUTOVIRAL_FB_POST_RESULT'
+        message.action === 'AUTOVIRAL_FB_POST_RESULT' ||
+        message.action === 'AUTOVIRAL_WAITING_APPROVALS_SYNC'
       ) {
         forwardExtensionEvent(message);
         sendResponse({ received: true });

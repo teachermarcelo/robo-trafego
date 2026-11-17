@@ -1,14 +1,34 @@
 // AutoViral AI Chrome Extension - Background Service Worker (Manifest V3)
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('[AutoViral AI] Extensão v1.4.5 instalada com sucesso!');
-  chrome.storage.local.get(['autoviral_interval', 'autoviral_mapped_groups'], (res) => {
+  console.log('[AutoViral AI] Extensão v1.5.0 instalada com sucesso!');
+  chrome.storage.local.get(['autoviral_interval', 'autoviral_mapped_groups', 'autoviral_waiting_approval_map'], (res) => {
     chrome.storage.local.set({
       autoviral_interval: res.autoviral_interval || 350,
-      autoviral_mapped_groups: Array.isArray(res.autoviral_mapped_groups) ? res.autoviral_mapped_groups : []
+      autoviral_mapped_groups: Array.isArray(res.autoviral_mapped_groups) ? res.autoviral_mapped_groups : [],
+      autoviral_waiting_approval_map: (res && res.autoviral_waiting_approval_map && typeof res.autoviral_waiting_approval_map === 'object')
+        ? res.autoviral_waiting_approval_map
+        : {}
     });
   });
+  ensureApprovalWatchdogAlarm();
 });
+
+if (chrome.runtime.onStartup) {
+  chrome.runtime.onStartup.addListener(() => {
+    ensureApprovalWatchdogAlarm();
+  });
+}
+
+function ensureApprovalWatchdogAlarm() {
+  try {
+    if (chrome.alarms && chrome.alarms.create) {
+      chrome.alarms.create('autoviral_approval_watchdog', { periodInMinutes: 3 });
+    }
+  } catch (e) {}
+}
+
+ensureApprovalWatchdogAlarm();
 
 const sleepMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -179,7 +199,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  // Pull cached Instagram/FB/YouTube data from chrome.storage.local (and live Instagram tab if open)
+  // Pull cached Instagram/FB/YouTube/Waiting data from chrome.storage.local (and live Instagram tab if open)
   if (request.action === 'AUTOVIRAL_PULL_EXTENSION_CACHE') {
     chrome.tabs.query({ url: '*://*.instagram.com/*' }, (instaTabs) => {
       const finalize = (liveAccounts, liveHandle) => {
@@ -188,7 +208,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             'autoviral_insta_accounts',
             'autoviral_insta_connected_handle',
             'autoviral_mapped_groups',
-            'autoviral_yt_videos'
+            'autoviral_yt_videos',
+            'autoviral_waiting_approval_map'
           ],
           (res) => {
             const accounts = (Array.isArray(liveAccounts) && liveAccounts.length > 0)
@@ -203,12 +224,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             if (connectedHandle) {
               chrome.storage.local.set({ autoviral_insta_connected_handle: connectedHandle });
             }
+            const waitingMap = (res.autoviral_waiting_approval_map && typeof res.autoviral_waiting_approval_map === 'object')
+              ? res.autoviral_waiting_approval_map
+              : {};
             sendResponse({
               success: true,
               accounts,
               connectedHandle,
               groups: res.autoviral_mapped_groups || [],
-              ytVideos: res.autoviral_yt_videos || []
+              ytVideos: res.autoviral_yt_videos || [],
+              waitingApprovals: Object.values(waitingMap)
             });
           }
         );
@@ -227,6 +252,74 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         finalize(null, null);
       }
     });
+    return true;
+  }
+
+  if (request.action === 'AUTOVIRAL_SAVE_WAITING_APPROVAL') {
+    const item = request.item;
+    if (!item || !item.groupSlug) {
+      sendResponse({ ok: false });
+      return false;
+    }
+    const slug = String(item.groupSlug).toLowerCase();
+    chrome.storage.local.get(['autoviral_waiting_approval_map'], (res) => {
+      const map = (res && res.autoviral_waiting_approval_map && typeof res.autoviral_waiting_approval_map === 'object')
+        ? { ...res.autoviral_waiting_approval_map }
+        : {};
+      map[slug] = {
+        ...item,
+        groupSlug: slug,
+        requestedAt: item.requestedAt || new Date().toISOString(),
+        lastCheckedAt: item.lastCheckedAt || new Date().toISOString()
+      };
+      chrome.storage.local.set({ autoviral_waiting_approval_map: map }, () => {
+        ensureApprovalWatchdogAlarm();
+        relayToAutoViralTabs({
+          action: 'AUTOVIRAL_WAITING_APPROVALS_SYNC',
+          waitingApprovals: Object.values(map),
+          timestamp: new Date().toISOString()
+        });
+        sendResponse({ ok: true, count: Object.keys(map).length });
+      });
+    });
+    return true;
+  }
+
+  if (request.action === 'AUTOVIRAL_REMOVE_WAITING_APPROVAL') {
+    const slug = String(request.groupSlug || '').toLowerCase();
+    chrome.storage.local.get(['autoviral_waiting_approval_map'], (res) => {
+      const map = (res && res.autoviral_waiting_approval_map && typeof res.autoviral_waiting_approval_map === 'object')
+        ? { ...res.autoviral_waiting_approval_map }
+        : {};
+      if (slug && map[slug]) delete map[slug];
+      chrome.storage.local.set({ autoviral_waiting_approval_map: map }, () => {
+        relayToAutoViralTabs({
+          action: 'AUTOVIRAL_WAITING_APPROVALS_SYNC',
+          waitingApprovals: Object.values(map),
+          timestamp: new Date().toISOString()
+        });
+        sendResponse({ ok: true, count: Object.keys(map).length });
+      });
+    });
+    return true;
+  }
+
+  if (request.action === 'AUTOVIRAL_TRIGGER_APPROVED_GROUP_POST') {
+    const slug = String(request.groupSlug || '').toLowerCase();
+    if (!slug) {
+      sendResponse({ ok: false });
+      return false;
+    }
+    triggerApprovedGroupPostBySlug(slug, Boolean(request.alreadyInTab), sender && sender.tab ? sender.tab.id : null)
+      .then((result) => sendResponse(result))
+      .catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
+  if (request.action === 'AUTOVIRAL_CHECK_WAITING_APPROVALS') {
+    checkWaitingApprovalsNow(request.maxCount || 4)
+      .then((result) => sendResponse(result))
+      .catch(() => sendResponse({ ok: false, checked: 0, approvedCount: 0 }));
     return true;
   }
 
@@ -333,35 +426,40 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         func: (clickMode) => {
           try {
             const candidates = Array.from(
-              document.querySelectorAll('[data-pagelet="GroupInlineComposer"] div[role="button"], div[role="button"], span')
+              document.querySelectorAll('[data-pagelet="GroupInlineComposer"] div[role="button"], [data-pagelet="GroupInlineComposer"] span, div[role="button"], span')
             );
-            const matched = candidates.find((el) => {
+            const scored = [];
+            for (const el of candidates) {
               const rect = el.getBoundingClientRect();
-              if (rect.width < 60 || rect.height < 16) return false;
-              if (el.closest('div[role="dialog"]')) return false;
-              if (el.closest('[aria-busy="true"]')) return false;
+              if (rect.width < 55 || rect.height < 14 || rect.height > 78) continue;
+              if (el.closest('div[role="dialog"]') || el.closest('div[role="article"]') || el.closest('[aria-busy="true"]')) continue;
               const t = (el.innerText || el.getAttribute('aria-label') || '').trim().toLowerCase();
-              return (
+              if (!t || t.includes('anônim') || t.includes('anonym') || t.includes('enquete') || t.includes('poll') || t.includes('sentimento') || t.includes('feeling')) continue;
+              const isMatch =
                 t === 'escreva algo...' ||
+                t === 'write something...' ||
                 t.includes('escreva algo') ||
                 t.includes('no que você está pensando') ||
-                t === 'write something...' ||
                 t.includes('write something') ||
                 t.includes("what's on your mind") ||
                 t.includes('criar publicação pública') ||
-                t.includes('create a public post')
-              );
-            });
-            const trigger = matched ? (matched.closest('div[role="button"]') || matched) : null;
-            if (!trigger) return { found: false };
-            trigger.scrollIntoView({ behavior: 'instant', block: 'center' });
-            const r = trigger.getBoundingClientRect();
-            const cx = Math.round(r.left + r.width / 2);
+                t.includes('create a public post');
+              if (!isMatch) continue;
+              const exact = t === 'escreva algo...' || t === 'write something...' ? 0 : 1;
+              scored.push({ el, score: exact * 100000 + rect.width * rect.height });
+            }
+            scored.sort((a, b) => a.score - b.score);
+            const hit = scored[0] ? scored[0].el : null;
+            const trigger = hit ? (hit.closest('div[role="button"]') || hit) : null;
+            if (!trigger || !hit) return { found: false };
+            hit.scrollIntoView({ behavior: 'instant', block: 'center' });
+            const r = hit.getBoundingClientRect();
+            const cx = Math.round(r.left + Math.min(r.width * 0.45, 140));
             const cy = Math.round(r.top + r.height / 2);
 
             if (clickMode === 'simple') {
               trigger.focus();
-              trigger.click();
+              hit.click();
               return { found: true, mode: 'simple' };
             }
 
@@ -638,33 +736,36 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               world: 'MAIN',
               func: () => {
                 const candidates = Array.from(
-                  document.querySelectorAll('[data-pagelet="GroupInlineComposer"] div[role="button"], div[role="button"], span')
+                  document.querySelectorAll('[data-pagelet="GroupInlineComposer"] div[role="button"], [data-pagelet="GroupInlineComposer"] span, div[role="button"], span')
                 );
-                const matched = candidates.find((el) => {
+                const scored = [];
+                for (const el of candidates) {
                   const rect = el.getBoundingClientRect();
-                  if (rect.width < 60 || rect.height < 16) return false;
-                  if (el.closest('div[role="dialog"]')) return false;
-                  if (el.closest('div[role="article"]')) return false;
-                  if (el.closest('[aria-busy="true"]')) return false;
+                  if (rect.width < 55 || rect.height < 14 || rect.height > 78) continue;
+                  if (el.closest('div[role="dialog"]') || el.closest('div[role="article"]') || el.closest('[aria-busy="true"]')) continue;
                   const t = (el.innerText || el.getAttribute('aria-label') || '').trim().toLowerCase();
-                  return (
+                  if (!t || t.includes('anônim') || t.includes('anonym') || t.includes('enquete') || t.includes('poll') || t.includes('sentimento') || t.includes('feeling')) continue;
+                  const isMatch =
                     t === 'escreva algo...' ||
+                    t === 'write something...' ||
                     t.includes('escreva algo') ||
                     t.includes('no que você está pensando') ||
-                    t === 'write something...' ||
                     t.includes('write something') ||
                     t.includes("what's on your mind") ||
                     t.includes('criar publicação pública') ||
-                    t.includes('create a public post')
-                  );
-                });
-                const trigger = matched ? (matched.closest('div[role="button"]') || matched) : null;
-                if (!trigger) return { found: false };
-                trigger.scrollIntoView({ behavior: 'instant', block: 'center' });
-                const r = trigger.getBoundingClientRect();
+                    t.includes('create a public post');
+                  if (!isMatch) continue;
+                  const exact = t === 'escreva algo...' || t === 'write something...' ? 0 : 1;
+                  scored.push({ el, score: exact * 100000 + rect.width * rect.height });
+                }
+                scored.sort((a, b) => a.score - b.score);
+                const hit = scored[0] ? scored[0].el : null;
+                if (!hit) return { found: false };
+                hit.scrollIntoView({ behavior: 'instant', block: 'center' });
+                const r = hit.getBoundingClientRect();
                 return {
                   found: true,
-                  cx: Math.round(r.left + r.width / 2),
+                  cx: Math.round(r.left + Math.min(r.width * 0.45, 140)),
                   cy: Math.round(r.top + r.height / 2)
                 };
               }
@@ -690,31 +791,34 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               world: 'MAIN',
               func: () => {
                 const candidates = Array.from(
-                  document.querySelectorAll('[data-pagelet="GroupInlineComposer"] div[role="button"], div[role="button"], span')
+                  document.querySelectorAll('[data-pagelet="GroupInlineComposer"] div[role="button"], [data-pagelet="GroupInlineComposer"] span, div[role="button"], span')
                 );
-                const matched = candidates.find((el) => {
+                const scored = [];
+                for (const el of candidates) {
                   const rect = el.getBoundingClientRect();
-                  if (rect.width < 60 || rect.height < 16) return false;
-                  if (el.closest('div[role="dialog"]')) return false;
-                  if (el.closest('div[role="article"]')) return false;
-                  if (el.closest('[aria-busy="true"]')) return false;
+                  if (rect.width < 55 || rect.height < 14 || rect.height > 78) continue;
+                  if (el.closest('div[role="dialog"]') || el.closest('div[role="article"]') || el.closest('[aria-busy="true"]')) continue;
                   const t = (el.innerText || el.getAttribute('aria-label') || '').trim().toLowerCase();
-                  return (
+                  if (!t || t.includes('anônim') || t.includes('anonym') || t.includes('enquete') || t.includes('poll') || t.includes('sentimento') || t.includes('feeling')) continue;
+                  const isMatch =
                     t === 'escreva algo...' ||
+                    t === 'write something...' ||
                     t.includes('escreva algo') ||
                     t.includes('no que você está pensando') ||
-                    t === 'write something...' ||
                     t.includes('write something') ||
                     t.includes("what's on your mind") ||
                     t.includes('criar publicação pública') ||
-                    t.includes('create a public post')
-                  );
-                });
-                const trigger = matched ? (matched.closest('div[role="button"]') || matched) : null;
-                if (!trigger) return null;
-                const r = trigger.getBoundingClientRect();
+                    t.includes('create a public post');
+                  if (!isMatch) continue;
+                  const exact = t === 'escreva algo...' || t === 'write something...' ? 0 : 1;
+                  scored.push({ el, score: exact * 100000 + rect.width * rect.height });
+                }
+                scored.sort((a, b) => a.score - b.score);
+                const hit = scored[0] ? scored[0].el : null;
+                if (!hit) return null;
+                const r = hit.getBoundingClientRect();
                 return {
-                  cx: Math.round(r.left + Math.min(r.width * 0.5, 180)),
+                  cx: Math.round(r.left + Math.min(r.width * 0.45, 140)),
                   cy: Math.round(r.top + r.height / 2)
                 };
               }
@@ -747,30 +851,34 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               world: 'MAIN',
               func: () => {
                 const candidates = Array.from(
-                  document.querySelectorAll('[data-pagelet="GroupInlineComposer"] div[role="button"], div[role="button"], span')
+                  document.querySelectorAll('[data-pagelet="GroupInlineComposer"] div[role="button"], [data-pagelet="GroupInlineComposer"] span, div[role="button"], span')
                 );
-                const matched = candidates.find((el) => {
+                const scored = [];
+                for (const el of candidates) {
                   const rect = el.getBoundingClientRect();
-                  if (rect.width < 60 || rect.height < 16) return false;
-                  if (el.closest('div[role="dialog"]')) return false;
-                  if (el.closest('div[role="article"]')) return false;
-                  if (el.closest('[aria-busy="true"]')) return false;
+                  if (rect.width < 55 || rect.height < 14 || rect.height > 78) continue;
+                  if (el.closest('div[role="dialog"]') || el.closest('div[role="article"]') || el.closest('[aria-busy="true"]')) continue;
                   const t = (el.innerText || el.getAttribute('aria-label') || '').trim().toLowerCase();
-                  return (
+                  if (!t || t.includes('anônim') || t.includes('anonym') || t.includes('enquete') || t.includes('poll') || t.includes('sentimento') || t.includes('feeling')) continue;
+                  const isMatch =
                     t === 'escreva algo...' ||
+                    t === 'write something...' ||
                     t.includes('escreva algo') ||
                     t.includes('no que você está pensando') ||
-                    t === 'write something...' ||
                     t.includes('write something') ||
                     t.includes("what's on your mind") ||
                     t.includes('criar publicação pública') ||
-                    t.includes('create a public post')
-                  );
-                });
-                const trigger = matched ? (matched.closest('div[role="button"]') || matched) : null;
+                    t.includes('create a public post');
+                  if (!isMatch) continue;
+                  const exact = t === 'escreva algo...' || t === 'write something...' ? 0 : 1;
+                  scored.push({ el, score: exact * 100000 + rect.width * rect.height });
+                }
+                scored.sort((a, b) => a.score - b.score);
+                const hit = scored[0] ? scored[0].el : null;
+                const trigger = hit ? (hit.closest('div[role="button"]') || hit) : null;
                 if (trigger) {
                   trigger.focus();
-                  trigger.click();
+                  hit.click();
                 }
               }
             },
@@ -969,3 +1077,166 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return false;
   }
 });
+
+// =========================================================================
+// BACKGROUND APPROVAL WATCHDOG (MONITORS EVEN WHEN GROUP TAB IS CLOSED)
+// =========================================================================
+async function triggerApprovedGroupPostBySlug(slug, alreadyInTab, existingTabId) {
+  const cleanSlug = String(slug || '').toLowerCase();
+  if (!cleanSlug) return { ok: false };
+
+  const storeRes = await new Promise((resolve) => {
+    chrome.storage.local.get(['autoviral_waiting_approval_map', 'autoviral_pending_fb_posts_map'], (r) => resolve(r || {}));
+  });
+
+  const waitingMap = (storeRes.autoviral_waiting_approval_map && typeof storeRes.autoviral_waiting_approval_map === 'object')
+    ? { ...storeRes.autoviral_waiting_approval_map }
+    : {};
+  const item = waitingMap[cleanSlug];
+  if (!item) return { ok: false, reason: 'not_in_waiting_map' };
+
+  delete waitingMap[cleanSlug];
+  const pendingMap = (storeRes.autoviral_pending_fb_posts_map && typeof storeRes.autoviral_pending_fb_posts_map === 'object')
+    ? { ...storeRes.autoviral_pending_fb_posts_map }
+    : {};
+
+  const pendingPost = {
+    logId: item.logId || `glog-apv-${Date.now()}`,
+    groupId: item.groupId || '',
+    groupUrl: item.groupUrl,
+    groupSlug: cleanSlug,
+    groupName: item.groupName || '',
+    fullText: item.fullText || '',
+    autoJoinAndPost: true,
+    createdAt: new Date().toISOString()
+  };
+  pendingMap[cleanSlug] = pendingPost;
+
+  await new Promise((resolve) => {
+    chrome.storage.local.set(
+      {
+        autoviral_waiting_approval_map: waitingMap,
+        autoviral_pending_fb_post: pendingPost,
+        autoviral_pending_fb_posts_map: pendingMap
+      },
+      resolve
+    );
+  });
+
+  relayToAutoViralTabs({
+    action: 'AUTOVIRAL_WAITING_APPROVALS_SYNC',
+    waitingApprovals: Object.values(waitingMap),
+    timestamp: new Date().toISOString()
+  });
+
+  relayToAutoViralTabs({
+    action: 'AUTOVIRAL_FB_POST_RESULT',
+    logId: pendingPost.logId,
+    groupId: pendingPost.groupId,
+    groupUrl: pendingPost.groupUrl,
+    groupName: pendingPost.groupName,
+    approvalStatus: 'approved_posting',
+    note: 'Admin aceitou sua entrada! Gatilho disparado automaticamente para postar agora.',
+    timestamp: new Date().toISOString()
+  });
+
+  if (!alreadyInTab && pendingPost.groupUrl) {
+    chrome.tabs.create({ url: pendingPost.groupUrl, active: true }, () => {
+      void chrome.runtime.lastError;
+    });
+  } else if (alreadyInTab && typeof existingTabId === 'number') {
+    sendMessageToTabAllFrames(existingTabId, { action: 'AUTOVIRAL_RUN_PENDING_NOW', groupSlug: cleanSlug });
+  }
+
+  return { ok: true, triggeredSlug: cleanSlug, groupName: pendingPost.groupName };
+}
+
+async function checkWaitingApprovalsNow(maxCount) {
+  const storeRes = await new Promise((resolve) => {
+    chrome.storage.local.get(['autoviral_waiting_approval_map'], (r) => resolve(r || {}));
+  });
+  const waitingMap = (storeRes.autoviral_waiting_approval_map && typeof storeRes.autoviral_waiting_approval_map === 'object')
+    ? { ...storeRes.autoviral_waiting_approval_map }
+    : {};
+  const entries = Object.values(waitingMap).sort((a, b) => {
+    const ta = new Date(a.lastCheckedAt || a.requestedAt || 0).getTime();
+    const tb = new Date(b.lastCheckedAt || b.requestedAt || 0).getTime();
+    return ta - tb;
+  });
+
+  if (entries.length === 0) {
+    return { ok: true, checked: 0, approvedCount: 0, waitingCount: 0 };
+  }
+
+  const slice = entries.slice(0, Math.max(1, Math.min(Number(maxCount) || 2, 5)));
+  let checked = 0;
+  let approvedCount = 0;
+
+  for (const entry of slice) {
+    if (!entry || !entry.groupUrl || !entry.groupSlug) continue;
+    checked++;
+    try {
+      const resp = await fetch(entry.groupUrl, { credentials: 'include', redirect: 'follow' });
+      const html = await resp.text();
+      const stillPending =
+        /"viewer_forum_join_state":"REQUESTED"/i.test(html) ||
+        /"viewer_join_state":"REQUESTED"/i.test(html) ||
+        /"Cancel request"/i.test(html) ||
+        /"Cancelar solicitação"/i.test(html);
+      const isApproved =
+        !stillPending &&
+        (
+          /"viewer_forum_join_state":"MEMBER"/i.test(html) ||
+          /"viewer_join_state":"MEMBER"/i.test(html) ||
+          /"is_viewer_member":true/i.test(html) ||
+          /"GroupInlineComposer"/i.test(html)
+        );
+
+      if (waitingMap[entry.groupSlug]) {
+        waitingMap[entry.groupSlug].lastCheckedAt = new Date().toISOString();
+      }
+
+      if (isApproved) {
+        approvedCount++;
+        await triggerApprovedGroupPostBySlug(entry.groupSlug, false, null);
+        delete waitingMap[entry.groupSlug];
+      }
+    } catch (e) {
+      if (waitingMap[entry.groupSlug]) {
+        waitingMap[entry.groupSlug].lastCheckedAt = new Date().toISOString();
+      }
+    }
+    await sleepMs(1800);
+  }
+
+  await new Promise((resolve) => {
+    chrome.storage.local.get(['autoviral_waiting_approval_map'], (latest) => {
+      const merged = (latest && latest.autoviral_waiting_approval_map && typeof latest.autoviral_waiting_approval_map === 'object')
+        ? { ...latest.autoviral_waiting_approval_map }
+        : {};
+      for (const item of slice) {
+        if (item && item.groupSlug && merged[item.groupSlug] && waitingMap[item.groupSlug]) {
+          merged[item.groupSlug].lastCheckedAt = waitingMap[item.groupSlug].lastCheckedAt;
+        }
+      }
+      chrome.storage.local.set({ autoviral_waiting_approval_map: merged }, () => {
+        relayToAutoViralTabs({
+          action: 'AUTOVIRAL_WAITING_APPROVALS_SYNC',
+          waitingApprovals: Object.values(merged),
+          timestamp: new Date().toISOString()
+        });
+        resolve();
+      });
+    });
+  });
+
+  return { ok: true, checked, approvedCount, waitingCount: Object.keys(waitingMap).length };
+}
+
+if (chrome.alarms && chrome.alarms.onAlarm) {
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm && alarm.name === 'autoviral_approval_watchdog') {
+      checkWaitingApprovalsNow(2).catch(() => {});
+    }
+  });
+}

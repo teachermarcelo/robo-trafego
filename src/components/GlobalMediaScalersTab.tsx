@@ -38,6 +38,9 @@ import {
   Shuffle,
   Image as ImageIcon,
   Upload,
+  RotateCcw,
+  History,
+  Database,
 } from 'lucide-react';
 import JSZip from 'jszip';
 import { Campaign, FacebookGroup, FacebookPostLog } from '../types';
@@ -53,6 +56,12 @@ import {
   formatCurrencyPrice,
   replacePriceCurrencyPrefix,
 } from '../utils/currency';
+import {
+  saveGlobalWorkspaceSyncToFirebase,
+  pullGlobalWorkspaceSyncFromFirebase,
+  pullFullCloudSnapshotFromFirebase,
+  GlobalWorkspaceSyncData,
+} from '../lib/firebase';
 
 export interface GlobalOffer {
   id: string;
@@ -260,6 +269,8 @@ const STORAGE_KEYS = {
   PENDING_BRIDGE: 'autoviral_universal_inbox_pending_v1',
   GROUPS: 'autoviral_global_fb_groups_v1',
   AUDIENCES: 'autoviral_global_audiences_v1',
+  TRASH_AUDIENCES: 'autoviral_global_audiences_trash_v1',
+  BACKUP_AUDIENCES: 'autoviral_global_audiences_backup_v1',
   SELECTED_AUDIENCE: 'autoviral_global_selected_audience_v1',
   KITS_BY_OFFER: 'autoviral_global_kits_by_offer_v1',
   LOGS: 'autoviral_global_bot_logs_v1',
@@ -599,7 +610,7 @@ function getGroupsForAudience(aud: GlobalAudience | null, allGroups: GlobalGroup
 function isLikelyPortugueseGroup(name: string, url?: string): boolean {
   const clean = sanitizeGlobalGroupName(name);
   const text = `${clean} ${url || ''}`.toLowerCase();
-  if (/[ãõçáéíóúâêôàü]/i.test(clean)) return true;
+  if (/[ãõçêâà]/i.test(clean)) return true;
   return /\b(brasil|brazil|curitiba|são paulo|sao paulo|rio de janeiro|minas|bahia|recife|fortaleza|salvador|porto alegre|manaus|goiânia|florianópolis|renda extra|currículo|curriculo|faço|pedagog|autismo|psicoped|pix|promoções|promocoes|desapego|vendas|emprego|vagas|receitas|culinária|culinaria|brechó|brecho|loja|comprar|vender|grupo de|dicas de)\b/i.test(
     text
   );
@@ -1197,6 +1208,22 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
   const [mergeAudienceIds, setMergeAudienceIds] = useState<string[]>([]);
   const [mergeNewName, setMergeNewName] = useState<string>('');
   const [mergeReplaceOriginals, setMergeReplaceOriginals] = useState<boolean>(false);
+  const [confirmDeleteAudienceId, setConfirmDeleteAudienceId] = useState<string | null>(null);
+  const [trashAudiences, setTrashAudiences] = useState<Array<GlobalAudience & { deletedAt?: string; deletedReason?: string }>>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.TRASH_AUDIENCES);
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
+  const [recoverySearchInput, setRecoverySearchInput] = useState<string>('oraciones');
+  const [isDeepScanning, setIsDeepScanning] = useState<boolean>(false);
+  const [extensionCachedGroups, setExtensionCachedGroups] = useState<GlobalGroupItem[]>([]);
+  const [cloudScannedGroups, setCloudScannedGroups] = useState<GlobalGroupItem[]>([]);
+  const [cloudScannedAudiences, setCloudScannedAudiences] = useState<GlobalAudience[]>([]);
+  const [isRecoveryPanelOpen, setIsRecoveryPanelOpen] = useState<boolean>(false);
   const [silentBackgroundMode, setSilentBackgroundMode] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem('autoviral_global_silent_mode');
@@ -1333,8 +1360,85 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEYS.AUDIENCES, JSON.stringify(globalAudiences));
+      // Keep a rolling safety backup of audiences that never wipes previous entries automatically
+      if (globalAudiences.length > 0) {
+        const prevBackupRaw = localStorage.getItem(STORAGE_KEYS.BACKUP_AUDIENCES);
+        const prevBackup: GlobalAudience[] = prevBackupRaw ? JSON.parse(prevBackupRaw) : [];
+        const byId = new Map<string, GlobalAudience>();
+        (Array.isArray(prevBackup) ? prevBackup : []).forEach((a) => {
+          if (a?.id) byId.set(a.id, a);
+        });
+        globalAudiences.forEach((a) => {
+          if (a?.id) byId.set(a.id, a);
+        });
+        localStorage.setItem(STORAGE_KEYS.BACKUP_AUDIENCES, JSON.stringify(Array.from(byId.values()).slice(0, 120)));
+      }
     } catch {}
   }, [globalAudiences]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.TRASH_AUDIENCES, JSON.stringify(trashAudiences.slice(0, 60)));
+    } catch {}
+  }, [trashAudiences]);
+
+  // Debounced cloud sync for Global Audiences, Trash, Groups & Offers so nothing is ever lost between sessions/URLs
+  const hasMountedGlobalSyncRef = useRef(false);
+  useEffect(() => {
+    if (!hasMountedGlobalSyncRef.current) {
+      hasMountedGlobalSyncRef.current = true;
+      return;
+    }
+    const t = window.setTimeout(() => {
+      saveGlobalWorkspaceSyncToFirebase({
+        globalAudiences,
+        globalTrashAudiences: trashAudiences,
+        globalGroups,
+        globalOffers: offers,
+      }).catch(() => {});
+    }, 1800);
+    return () => window.clearTimeout(t);
+  }, [globalAudiences, trashAudiences, globalGroups, offers]);
+
+  // Listen for Firebase Global Workspace sync events (non-destructive merge into state)
+  useEffect(() => {
+    const mergeCloudGlobal = (cloud: GlobalWorkspaceSyncData | null | undefined) => {
+      if (!cloud || typeof cloud !== 'object') return;
+      if (Array.isArray(cloud.globalGroups) && cloud.globalGroups.length > 0) {
+        setGlobalGroups((prev) => {
+          const existingKeys = new Set(prev.map((g) => normalizeGroupUrlKey(g.url) || g.id));
+          const fresh = cloud.globalGroups!.filter((g: any) => {
+            const k = normalizeGroupUrlKey(g?.url || '') || g?.id;
+            if (!k || existingKeys.has(k)) return false;
+            existingKeys.add(k);
+            return true;
+          });
+          return fresh.length > 0 ? [...prev, ...fresh] : prev;
+        });
+      }
+      if (Array.isArray(cloud.globalAudiences) && cloud.globalAudiences.length > 0) {
+        setGlobalAudiences((prev) => {
+          const existingIds = new Set(prev.map((a) => a.id));
+          const trashIds = new Set(trashAudiences.map((t) => t.id));
+          const fresh = cloud.globalAudiences!.filter((a: any) => a?.id && !existingIds.has(a.id) && !trashIds.has(a.id));
+          return fresh.length > 0 ? [...prev, ...fresh] : prev;
+        });
+      }
+      if (Array.isArray(cloud.globalTrashAudiences) && cloud.globalTrashAudiences.length > 0) {
+        setTrashAudiences((prev) => {
+          const existingIds = new Set(prev.map((t) => t.id));
+          const fresh = cloud.globalTrashAudiences!.filter((t: any) => t?.id && !existingIds.has(t.id));
+          return fresh.length > 0 ? [...prev, ...fresh] : prev;
+        });
+      }
+    };
+
+    const onGlobalSynced = (ev: Event) => {
+      mergeCloudGlobal((ev as CustomEvent)?.detail as GlobalWorkspaceSyncData);
+    };
+    window.addEventListener('autoviral_global_workspace_synced', onGlobalSynced);
+    return () => window.removeEventListener('autoviral_global_workspace_synced', onGlobalSynced);
+  }, [trashAudiences]);
 
   useEffect(() => {
     try {
@@ -1604,7 +1708,22 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
           tone: 'warning',
         });
       } else if (normalizedStatus === 'unavailable' && groupUrl) {
-        setGlobalGroups((prev) => prev.filter((g) => g.url !== groupUrl));
+        const checkedNow = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+        const cleanSlug = String(groupUrl || '').match(/\/groups\/([^\/?#]+)/i)?.[1]?.toLowerCase() || '';
+        setGlobalGroups((prev) =>
+          prev.map((g) => {
+            const gSlug = String(g.url || '').match(/\/groups\/([^\/?#]+)/i)?.[1]?.toLowerCase() || '';
+            const matched = (groupId && g.id === groupId) || (cleanSlug && gSlug === cleanSlug) || g.url === groupUrl;
+            return matched
+              ? {
+                  ...g,
+                  membershipStatus: 'unavailable',
+                  membershipCheckedAt: checkedNow,
+                  membershipNote: note || 'Grupo indisponível/privado (preservado para histórico)',
+                }
+              : g;
+          })
+        );
       }
 
       // Sync group membership status automatically based on post result
@@ -1787,6 +1906,29 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
       };
     } catch {}
 
+    const onCachedExtGroupsEv = (ev: any) => {
+      const raw = ev?.detail?.groups;
+      if (!Array.isArray(raw) || raw.length === 0) return;
+      const normalized: GlobalGroupItem[] = raw
+        .filter((g: any) => g && g.url)
+        .map((g: any, idx: number) => ({
+          id: g.id || `ext-rec-${Date.now()}-${idx}`,
+          name: sanitizeGlobalGroupName(String(g.name || 'Facebook Group')),
+          url: String(g.url).trim(),
+          membersCount: Number(g.membersCount) || 0,
+          privacy: 'Público',
+          niche: g.niche || g.searchTerm || 'Extensão Chrome',
+          mappedAt: g.mappedAt || 'Extensão',
+          dispatchCount: 0,
+          status: 'ready',
+          countryName: g.countryName || 'Global',
+          languageName: g.languageName || 'English',
+          isVerifiedReal: true,
+          validationStatus: 'verified',
+        }));
+      setExtensionCachedGroups(normalized);
+    };
+
     window.addEventListener('autoviral_extension_groups_received', onGroupsEv);
     window.addEventListener('autoviral_extension_youtube_videos_received', onYtEv);
     window.addEventListener('autoviral_fb_post_result', onPostResultEv);
@@ -1795,6 +1937,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
     window.addEventListener('autoviral_membership_batch_done', onMembershipBatchDoneEv);
     window.addEventListener('autoviral_waiting_approvals_synced', onWaitingSyncedEv);
     window.addEventListener('autoviral_waiting_check_done', onWaitingCheckDoneEv);
+    window.addEventListener('autoviral_extension_cached_groups_received', onCachedExtGroupsEv);
 
     return () => {
       if (bc) {
@@ -1810,6 +1953,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
       window.removeEventListener('autoviral_membership_batch_done', onMembershipBatchDoneEv);
       window.removeEventListener('autoviral_waiting_approvals_synced', onWaitingSyncedEv);
       window.removeEventListener('autoviral_waiting_check_done', onWaitingCheckDoneEv);
+      window.removeEventListener('autoviral_extension_cached_groups_received', onCachedExtGroupsEv);
     };
   }, [activeOffer, activeKit]);
 
@@ -2520,6 +2664,16 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
     ).length;
 
     setGlobalAudiences((prev) => {
+      if (mergeReplaceOriginals) {
+        const replaced = prev.filter((a) => mergeAudienceIds.includes(a.id));
+        if (replaced.length > 0) {
+          const nowIso = new Date().toISOString();
+          setTrashAudiences((tr) => [
+            ...replaced.map((r) => ({ ...r, deletedAt: nowIso, deletedReason: `Substituído na fusão "${finalName}"` })),
+            ...tr.filter((t) => !replaced.some((r) => r.id === t.id)),
+          ]);
+        }
+      }
       const remaining = mergeReplaceOriginals ? prev.filter((a) => !mergeAudienceIds.includes(a.id)) : prev;
       return [newAud, ...remaining];
     });
@@ -2529,6 +2683,399 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
     setCurrentPostIndex(0);
     setBanner({
       message: `🔀 Público "${finalName}" criado com ${unifiedGroups.length} grupos únicos (✅ ${openCnt} abertos · 🔒 ${closedCnt} fechados/pendentes)!`,
+      tone: 'success',
+    });
+  };
+
+  // Safe Delete (moves to Trash instead of destroying permanently) & Full Multi-Source Recovery
+  const handleDeleteAudienceToTrash = (aud: GlobalAudience) => {
+    const matched = getGroupsForAudience(aud, globalGroups);
+    const enrichedAud: GlobalAudience & { deletedAt?: string; deletedReason?: string } = {
+      ...aud,
+      groupSnapshots:
+        matched.length > 0
+          ? matched.map((g) => ({
+              id: g.id,
+              name: sanitizeGlobalGroupName(g.name),
+              url: g.url,
+              membersCount: g.membersCount || 0,
+              countryName: g.countryName || aud.countryName,
+              languageName: g.languageName || aud.languageName,
+              niche: aud.name,
+            }))
+          : aud.groupSnapshots,
+      deletedAt: new Date().toISOString(),
+      deletedReason: 'Movido para Lixeira',
+    };
+    setTrashAudiences((prev) => [enrichedAud, ...prev.filter((t) => t.id !== aud.id)]);
+    setGlobalAudiences((prev) => prev.filter((a) => a.id !== aud.id));
+    setConfirmDeleteAudienceId(null);
+    setBanner({
+      message: `🗑️ Público "${aud.name}" movido para a Lixeira (nenhum grupo foi apagado — restaure em 1 clique quando quiser).`,
+      tone: 'info',
+    });
+  };
+
+  const handleRestoreAudienceFromTrashOrBackup = (aud: GlobalAudience, extraGroups?: GlobalGroupItem[]) => {
+    const restoredId = aud.id || `gaud-rec-${Date.now()}`;
+    const groupsToRestore: GlobalGroupItem[] =
+      extraGroups && extraGroups.length > 0
+        ? extraGroups
+        : Array.isArray(aud.groupSnapshots)
+        ? aud.groupSnapshots.map((s) => ({
+            id: s.id,
+            name: sanitizeGlobalGroupName(s.name),
+            url: s.url,
+            membersCount: s.membersCount || 0,
+            privacy: 'Público',
+            niche: aud.name,
+            mappedAt: 'Recuperado',
+            dispatchCount: 0,
+            status: 'ready',
+            countryName: s.countryName || aud.countryName || 'Global',
+            languageName: s.languageName || aud.languageName || 'Español',
+            isVerifiedReal: true,
+            validationStatus: 'verified',
+          }))
+        : [];
+
+    if (groupsToRestore.length > 0) {
+      setGlobalGroups((prev) => {
+        const seen = new Set(prev.map((g) => normalizeGroupUrlKey(g.url) || g.id));
+        const missing = groupsToRestore.filter((g) => {
+          const k = normalizeGroupUrlKey(g.url) || g.id;
+          if (!k || seen.has(k)) return false;
+          seen.add(k);
+          return true;
+        });
+        return missing.length > 0 ? [...missing, ...prev] : prev;
+      });
+    }
+
+    const cleanAud: GlobalAudience = {
+      id: restoredId,
+      name: aud.name,
+      countryName: aud.countryName || 'Global',
+      languageName: aud.languageName || 'Español',
+      groupIds:
+        aud.groupIds && aud.groupIds.length > 0
+          ? aud.groupIds
+          : groupsToRestore.map((g) => g.id),
+      groupUrls:
+        aud.groupUrls && aud.groupUrls.length > 0
+          ? aud.groupUrls
+          : groupsToRestore.map((g) => g.url),
+      groupSnapshots: aud.groupSnapshots || groupsToRestore.map((g) => ({
+        id: g.id,
+        name: g.name,
+        url: g.url,
+        membersCount: g.membersCount || 0,
+        countryName: g.countryName,
+        languageName: g.languageName,
+        niche: aud.name,
+      })),
+      createdAt: aud.createdAt || new Date().toISOString(),
+    };
+
+    setGlobalAudiences((prev) => {
+      if (prev.some((a) => a.id === cleanAud.id)) return prev;
+      return [cleanAud, ...prev];
+    });
+    setTrashAudiences((prev) => prev.filter((t) => t.id !== cleanAud.id));
+    setSelectedAudienceId(cleanAud.id);
+    setCurrentPostIndex(0);
+    setBanner({
+      message: `🛟 Público "${cleanAud.name}" restaurado com sucesso (${groupsToRestore.length || cleanAud.groupIds.length} grupos recuperados)!`,
+      tone: 'success',
+    });
+  };
+
+  // Auto-discover orphaned niches in globalGroups, missing audiences in backup, and Brazil-redirected audiences
+  const recoverableDiscovery = useMemo(() => {
+    const activeNames = new Set(globalAudiences.map((a) => (a.name || '').trim().toLowerCase()));
+    const activeIds = new Set(globalAudiences.map((a) => a.id));
+
+    // 1. Orphaned niche groups in globalGroups whose niche doesn't belong to any active audience
+    const orphanByNiche = new Map<string, GlobalGroupItem[]>();
+    globalGroups.forEach((g) => {
+      const n = (g.niche || '').trim();
+      if (!n || activeNames.has(n.toLowerCase())) return;
+      const belongsToAnyActive = globalAudiences.some((a) => {
+        if (a.groupIds?.includes(g.id)) return true;
+        const gKey = normalizeGroupUrlKey(g.url);
+        return Boolean(gKey && a.groupUrls?.some((u) => normalizeGroupUrlKey(u) === gKey));
+      });
+      if (!belongsToAnyActive) {
+        const key = n.toLowerCase();
+        const arr = orphanByNiche.get(key) || [];
+        arr.push(g);
+        orphanByNiche.set(key, arr);
+      }
+    });
+
+    // 2. Missing from rolling localStorage backup
+    let backupMissing: GlobalAudience[] = [];
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.BACKUP_AUDIENCES);
+      const parsed: GlobalAudience[] = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(parsed)) {
+        backupMissing = parsed.filter(
+          (a) => a?.id && a?.name && !activeIds.has(a.id) && !activeNames.has(a.name.trim().toLowerCase())
+        );
+      }
+    } catch {}
+
+    // 3. Also check Brazil audiences in case the user routed a Global audience to Brazil by mistake
+    let brazilMatches: Array<{ audName: string; groups: GlobalGroupItem[]; country: string }> = [];
+    try {
+      const brAudRaw = localStorage.getItem('autoviral_fb_audiences_v4') || localStorage.getItem('autoviral_fb_audiences_v3');
+      const brGrpRaw = localStorage.getItem('autoviral_fb_mapped_groups_v5_real') || localStorage.getItem('autoviral_fb_mapped_groups_v3');
+      const brAuds: any[] = brAudRaw ? JSON.parse(brAudRaw) : [];
+      const brGrps: any[] = brGrpRaw ? JSON.parse(brGrpRaw) : [];
+      if (Array.isArray(brAuds)) {
+        brAuds.forEach((ba) => {
+          const nm = (ba?.name || '').trim();
+          if (!nm || activeNames.has(nm.toLowerCase())) return;
+          if (/oracion|spain|españa|usa|uk|au|health|cook|dieta|pray|biblia/i.test(nm)) {
+            const setIds = new Set(ba.groupIds || []);
+            const setUrls = new Set((ba.groupUrls || []).map((u: string) => normalizeGroupUrlKey(u)));
+            const matchedBr = brGrps.filter((bg) => setIds.has(bg.id) || setUrls.has(normalizeGroupUrlKey(bg.url || '')));
+            if (matchedBr.length > 0) {
+              brazilMatches.push({
+                audName: nm,
+                country: 'España / Global (Estava no Brasil)',
+                groups: matchedBr.map((bg) => ({
+                  id: bg.id,
+                  name: sanitizeGlobalGroupName(bg.name),
+                  url: bg.url,
+                  membersCount: Number(bg.membersCount) || 0,
+                  privacy: bg.privacy || 'Público',
+                  niche: nm,
+                  mappedAt: bg.mappedAt || 'Brasil',
+                  dispatchCount: 0,
+                  status: 'ready',
+                  countryName: 'España',
+                  languageName: 'Español',
+                  isVerifiedReal: true,
+                  validationStatus: 'verified',
+                  membershipStatus: bg.membershipStatus,
+                })),
+              });
+            }
+          }
+        });
+      }
+    } catch {}
+
+    return {
+      orphanNiches: Array.from(orphanByNiche.entries()).map(([, items]) => ({
+        name: items[0].niche || 'Público Órfão',
+        groups: items,
+      })),
+      backupMissing,
+      brazilMatches,
+    };
+  }, [globalAudiences, globalGroups]);
+
+  const deepMatchedRecoveryGroups = useMemo(() => {
+    const q = recoverySearchInput.trim().toLowerCase();
+    const seen = new Set<string>();
+    const found: Array<GlobalGroupItem & { foundSource: string }> = [];
+
+    const pushIfMatch = (item: GlobalGroupItem, source: string) => {
+      const k = normalizeGroupUrlKey(item.url) || item.id;
+      if (!k || seen.has(k)) return;
+      const hay = `${item.name} ${item.niche || ''} ${item.url} ${item.countryName || ''}`.toLowerCase();
+      if (!q || hay.includes(q) || (q.includes('oracion') && /oraci|pray|dios|jesus|biblia|fe|bendic|catolic|cristian|milagro/i.test(hay))) {
+        seen.add(k);
+        found.push({ ...item, foundSource: source });
+      }
+    };
+
+    globalGroups.forEach((g) => pushIfMatch(g, `Grupos Globais (${g.niche || 'Global'})`));
+    cloudScannedGroups.forEach((g) => pushIfMatch(g, `Nuvem Firebase (${g.niche || 'Cloud'})`));
+    inboxGroups.forEach((g) =>
+      pushIfMatch(
+        {
+          id: g.id,
+          name: g.name,
+          url: g.url,
+          membersCount: g.membersCount || 0,
+          privacy: 'Público',
+          niche: g.searchTerm || g.detectedCountry || 'Caixa Triagem',
+          mappedAt: g.mappedAt,
+          dispatchCount: 0,
+          status: 'ready',
+          countryName: g.detectedCountry,
+          languageName: 'Español',
+        },
+        'Caixa de Triagem'
+      )
+    );
+    extensionCachedGroups.forEach((g) => pushIfMatch(g, 'Cache da Extensão Chrome'));
+    botLogs.forEach((l) => {
+      if (!l.groupUrl) return;
+      pushIfMatch(
+        {
+          id: l.groupId || `log-${normalizeGroupUrlKey(l.groupUrl)}`,
+          name: sanitizeGlobalGroupName(l.groupName),
+          url: l.groupUrl,
+          membersCount: 0,
+          privacy: 'Público',
+          niche: 'Histórico Robô Global',
+          mappedAt: l.postedAt,
+          dispatchCount: 1,
+          status: 'ready',
+          countryName: 'España',
+          languageName: 'Español',
+          membershipStatus:
+            l.approvalStatus === 'published' || l.approvalStatus === 'awaiting_admin'
+              ? 'authorized'
+              : l.approvalStatus === 'join_requested'
+              ? 'awaiting_admin'
+              : l.approvalStatus === 'rate_limited'
+              ? 'rate_limited'
+              : undefined,
+        },
+        'Histórico Robô Global'
+      );
+    });
+
+    try {
+      const brGrpRaw = localStorage.getItem('autoviral_fb_mapped_groups_v5_real') || localStorage.getItem('autoviral_fb_mapped_groups_v3');
+      const brGrps: any[] = brGrpRaw ? JSON.parse(brGrpRaw) : [];
+      if (Array.isArray(brGrps)) {
+        brGrps.forEach((bg) => {
+          if (!bg?.url) return;
+          pushIfMatch(
+            {
+              id: bg.id,
+              name: sanitizeGlobalGroupName(bg.name || 'Grupo'),
+              url: bg.url,
+              membersCount: Number(bg.membersCount) || 0,
+              privacy: bg.privacy || 'Público',
+              niche: bg.niche || 'Brasil',
+              mappedAt: bg.mappedAt || 'Brasil',
+              dispatchCount: 0,
+              status: 'ready',
+              countryName: 'España',
+              languageName: 'Español',
+              membershipStatus: bg.membershipStatus,
+            },
+            `Aba Brasil (${bg.niche || 'Geral'})`
+          );
+        });
+      }
+      const brLogsRaw = localStorage.getItem('autoviral_fb_bot_logs_v3');
+      const brLogs: any[] = brLogsRaw ? JSON.parse(brLogsRaw) : [];
+      if (Array.isArray(brLogs)) {
+        brLogs.forEach((bl) => {
+          if (!bl?.groupUrl) return;
+          pushIfMatch(
+            {
+              id: bl.groupId || `brlog-${normalizeGroupUrlKey(bl.groupUrl)}`,
+              name: sanitizeGlobalGroupName(bl.groupName || 'Grupo'),
+              url: bl.groupUrl,
+              membersCount: 0,
+              privacy: 'Público',
+              niche: 'Histórico Robô Brasil',
+              mappedAt: bl.postedAt,
+              dispatchCount: 1,
+              status: 'ready',
+              countryName: 'España',
+              languageName: 'Español',
+            },
+            'Histórico Robô Brasil'
+          );
+        });
+      }
+    } catch {}
+
+    return found;
+  }, [recoverySearchInput, globalGroups, cloudScannedGroups, inboxGroups, extensionCachedGroups, botLogs]);
+
+  const handleDeepScanAllSources = async () => {
+    setIsDeepScanning(true);
+    setIsRecoveryPanelOpen(true);
+    try {
+      window.postMessage({ type: 'AUTOVIRAL_REQUEST_EXTENSION_GROUPS' }, '*');
+    } catch {}
+    try {
+      const [globalCloud, brCloud] = await Promise.all([
+        pullGlobalWorkspaceSyncFromFirebase(),
+        pullFullCloudSnapshotFromFirebase().catch(() => null),
+      ]);
+      if (globalCloud) {
+        if (Array.isArray(globalCloud.globalGroups)) {
+          setCloudScannedGroups(globalCloud.globalGroups);
+        }
+        if (Array.isArray(globalCloud.globalAudiences)) {
+          setCloudScannedAudiences(globalCloud.globalAudiences);
+        }
+        if (Array.isArray(globalCloud.globalTrashAudiences)) {
+          setTrashAudiences((prev) => {
+            const seen = new Set(prev.map((t) => t.id));
+            const fresh = globalCloud.globalTrashAudiences!.filter((t: any) => t?.id && !seen.has(t.id));
+            return fresh.length > 0 ? [...prev, ...fresh] : prev;
+          });
+        }
+      }
+      if (brCloud?.workspace?.mappedGroups && Array.isArray(brCloud.workspace.mappedGroups)) {
+        setCloudScannedGroups((prev) => [...prev, ...brCloud.workspace!.mappedGroups!]);
+      }
+    } catch {}
+    window.setTimeout(() => setIsDeepScanning(false), 900);
+  };
+
+  const handleRebuildAudienceFromList = (targetName: string, groupsList: GlobalGroupItem[]) => {
+    if (groupsList.length === 0) return;
+    const cleanName = targetName.trim() || 'oraciones 1';
+    const cleanItems: GlobalGroupItem[] = groupsList.map((g) => ({
+      ...g,
+      niche: cleanName,
+      countryName: g.countryName || 'España',
+      languageName: g.languageName || 'Español',
+    }));
+
+    setGlobalGroups((prev) => {
+      const seen = new Set(prev.map((p) => normalizeGroupUrlKey(p.url) || p.id));
+      const fresh = cleanItems.filter((item) => {
+        const k = normalizeGroupUrlKey(item.url) || item.id;
+        if (!k || seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+      return fresh.length > 0 ? [...fresh, ...prev] : prev;
+    });
+
+    const existing = globalAudiences.find((a) => a.name.trim().toLowerCase() === cleanName.toLowerCase());
+    const audId = existing?.id || `gaud-rec-${Date.now()}`;
+    const rebuilt: GlobalAudience = {
+      id: audId,
+      name: cleanName,
+      countryName: cleanItems[0]?.countryName || 'España',
+      languageName: cleanItems[0]?.languageName || 'Español',
+      groupIds: Array.from(new Set([...(existing?.groupIds || []), ...cleanItems.map((g) => g.id)])),
+      groupUrls: Array.from(new Set([...(existing?.groupUrls || []), ...cleanItems.map((g) => g.url)])),
+      groupSnapshots: cleanItems.map((g) => ({
+        id: g.id,
+        name: sanitizeGlobalGroupName(g.name),
+        url: g.url,
+        membersCount: g.membersCount || 0,
+        countryName: g.countryName,
+        languageName: g.languageName,
+        niche: cleanName,
+      })),
+      createdAt: existing?.createdAt || new Date().toISOString(),
+    };
+
+    setGlobalAudiences((prev) =>
+      existing ? prev.map((a) => (a.id === audId ? rebuilt : a)) : [rebuilt, ...prev]
+    );
+    setSelectedAudienceId(audId);
+    setCurrentPostIndex(0);
+    setBanner({
+      message: `🛟 Público "${cleanName}" reconstruído com ${cleanItems.length} grupos recuperados!`,
       tone: 'success',
     });
   };
@@ -3336,6 +3883,69 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Auto-Discovery Banner if any Trash / Orphan Niche / Backup Audience exists */}
+      {(recoverableDiscovery.orphanNiches.length > 0 ||
+        recoverableDiscovery.backupMissing.length > 0 ||
+        recoverableDiscovery.brazilMatches.length > 0 ||
+        trashAudiences.length > 0) && (
+        <div className="rounded-xl border border-emerald-500/50 bg-emerald-950/30 px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="space-y-0.5">
+            <div className="font-bold text-emerald-200 flex items-center gap-1.5">
+              <RotateCcw className="w-4 h-4 text-emerald-400" />
+              <span>
+                Recuperação Automática Disponível! Encontramos dados salvos neste navegador que você pode restaurar em 1 clique:
+              </span>
+            </div>
+            <div className="text-[11px] text-emerald-100/80 flex flex-wrap gap-x-3 gap-y-1">
+              {trashAudiences.map((t) => (
+                <span key={`tr-top-${t.id}`}>🗑️ Lixeira: <strong>{t.name}</strong> ({t.groupIds?.length || t.groupSnapshots?.length || 0} grupos)</span>
+              ))}
+              {recoverableDiscovery.orphanNiches.map((o) => (
+                <span key={`or-top-${o.name}`}>🛟 Órfão encontrado: <strong>{o.name}</strong> ({o.groups.length} grupos)</span>
+              ))}
+              {recoverableDiscovery.backupMissing.map((b) => (
+                <span key={`bk-top-${b.id}`}>💾 Backup: <strong>{b.name}</strong> ({b.groupIds?.length || b.groupSnapshots?.length || 0} grupos)</span>
+              ))}
+              {recoverableDiscovery.brazilMatches.map((bm) => (
+                <span key={`br-top-${bm.audName}`}>🇧🇷 Na aba Brasil: <strong>{bm.audName}</strong> ({bm.groups.length} grupos)</span>
+              ))}
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            {recoverableDiscovery.orphanNiches.slice(0, 2).map((o) => (
+              <button
+                key={`btn-rec-${o.name}`}
+                type="button"
+                onClick={() => handleRebuildAudienceFromList(o.name, o.groups)}
+                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg cursor-pointer"
+              >
+                Restaurar "{o.name}" ({o.groups.length})
+              </button>
+            ))}
+            {trashAudiences.slice(0, 2).map((t) => (
+              <button
+                key={`btn-tr-${t.id}`}
+                type="button"
+                onClick={() => handleRestoreAudienceFromTrashOrBackup(t)}
+                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg cursor-pointer"
+              >
+                Restaurar "{t.name}"
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => {
+                setSubTab('triage');
+                setIsRecoveryPanelOpen(true);
+              }}
+              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-cyan-200 border border-cyan-500/40 font-semibold rounded-lg cursor-pointer"
+            >
+              Abrir Central de Recuperação →
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Contextual Status Banner */}
       {banner && (
@@ -4495,19 +5105,207 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                       </p>
                     )}
                   </div>
-                  {mergeAudienceIds.length > 0 && (
+                  <div className="flex items-center gap-2">
                     <button
                       type="button"
                       onClick={() => {
-                        setMergeAudienceIds([]);
-                        setMergeNewName('');
+                        const next = !isRecoveryPanelOpen;
+                        setIsRecoveryPanelOpen(next);
+                        if (next) handleDeepScanAllSources();
                       }}
-                      className="text-[11px] text-slate-400 hover:text-white underline cursor-pointer"
+                      className="px-2.5 py-1 bg-indigo-950/70 hover:bg-indigo-900 border border-indigo-500/50 text-indigo-200 text-[11px] font-bold rounded-lg inline-flex items-center gap-1.5 cursor-pointer"
                     >
-                      Limpar seleção ({mergeAudienceIds.length})
+                      <History className="w-3.5 h-3.5 text-indigo-300" />
+                      <span>
+                        Recuperar Público / Lixeira
+                        {trashAudiences.length > 0 ? ` (${trashAudiences.length})` : ''}
+                      </span>
                     </button>
-                  )}
+                    {mergeAudienceIds.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMergeAudienceIds([]);
+                          setMergeNewName('');
+                        }}
+                        className="text-[11px] text-slate-400 hover:text-white underline cursor-pointer"
+                      >
+                        Limpar seleção ({mergeAudienceIds.length})
+                      </button>
+                    )}
+                  </div>
                 </div>
+
+                {/* Deep Recovery Panel (Trash, Orphan Niches, Backup, Cloud Firebase, Bot Logs, Brazil & Extension Cache) */}
+                {isRecoveryPanelOpen && (
+                  <div className="bg-indigo-950/30 border border-indigo-500/50 rounded-xl p-3.5 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <h5 className="text-xs font-bold text-indigo-200 flex items-center gap-1.5">
+                          <Database className="w-3.5 h-3.5 text-indigo-300" />
+                          <span>Central de Recuperação (Nuvem · Lixeira · Logs · Extensão Chrome · Brasil)</span>
+                        </h5>
+                        <p className="text-[10px] text-slate-400 mt-0.5">
+                          Procura automaticamente grupos órfãos, histórico de postagens, backup local, nuvem Firebase e cache da Extensão.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleDeepScanAllSources}
+                        disabled={isDeepScanning}
+                        className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold rounded-lg inline-flex items-center gap-1 cursor-pointer disabled:opacity-60"
+                      >
+                        <RefreshCw className={`w-3 h-3 ${isDeepScanning ? 'animate-spin' : ''}`} />
+                        <span>{isDeepScanning ? 'Escaneando...' : 'Reescanear Tudo'}</span>
+                      </button>
+                    </div>
+
+                    {/* 1. Trash Audiences */}
+                    {trashAudiences.length > 0 && (
+                      <div className="space-y-1.5">
+                        <div className="text-[10px] uppercase font-bold text-rose-300">🗑️ Lixeira de Públicos ({trashAudiences.length})</div>
+                        <div className="space-y-1">
+                          {trashAudiences.map((t) => (
+                            <div key={t.id} className="flex items-center justify-between gap-2 bg-slate-950/90 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs">
+                              <div className="min-w-0">
+                                <div className="font-semibold text-white truncate">{t.name}</div>
+                                <div className="text-[10px] text-slate-400">
+                                  {t.countryName} · {t.groupIds?.length || t.groupSnapshots?.length || 0} grupos · {t.deletedReason || 'Na Lixeira'}
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleRestoreAudienceFromTrashOrBackup(t)}
+                                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold rounded cursor-pointer shrink-0"
+                              >
+                                Restaurar
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 2. Backup + Cloud Audiences + Orphan Niches + Brazil Matches */}
+                    {(recoverableDiscovery.orphanNiches.length > 0 ||
+                      recoverableDiscovery.backupMissing.length > 0 ||
+                      recoverableDiscovery.brazilMatches.length > 0 ||
+                      cloudScannedAudiences.filter((ca) => !globalAudiences.some((ga) => ga.id === ca.id)).length > 0) && (
+                      <div className="space-y-1.5">
+                        <div className="text-[10px] uppercase font-bold text-emerald-300">🛟 Públicos Encontrados Automaticamente</div>
+                        <div className="space-y-1">
+                          {recoverableDiscovery.orphanNiches.map((o) => (
+                            <div key={`or-${o.name}`} className="flex items-center justify-between gap-2 bg-slate-950/90 border border-emerald-700/40 rounded-lg px-2.5 py-1.5 text-xs">
+                              <div className="min-w-0">
+                                <div className="font-semibold text-emerald-200 truncate">{o.name} (Grupos Órfãos neste Navegador)</div>
+                                <div className="text-[10px] text-slate-400">{o.groups.length} grupos preservados em cache local</div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleRebuildAudienceFromList(o.name, o.groups)}
+                                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold rounded cursor-pointer shrink-0"
+                              >
+                                Reconstruir ({o.groups.length})
+                              </button>
+                            </div>
+                          ))}
+                          {recoverableDiscovery.backupMissing.map((b) => (
+                            <div key={`bk-${b.id}`} className="flex items-center justify-between gap-2 bg-slate-950/90 border border-cyan-700/40 rounded-lg px-2.5 py-1.5 text-xs">
+                              <div className="min-w-0">
+                                <div className="font-semibold text-cyan-200 truncate">{b.name} (Backup Automático Local)</div>
+                                <div className="text-[10px] text-slate-400">{b.groupIds?.length || b.groupSnapshots?.length || 0} grupos</div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleRestoreAudienceFromTrashOrBackup(b)}
+                                className="px-2.5 py-1 bg-cyan-600 hover:bg-cyan-500 text-white text-[11px] font-bold rounded cursor-pointer shrink-0"
+                              >
+                                Restaurar Backup
+                              </button>
+                            </div>
+                          ))}
+                          {cloudScannedAudiences
+                            .filter((ca) => !globalAudiences.some((ga) => ga.id === ca.id))
+                            .map((ca) => (
+                              <div key={`cl-${ca.id}`} className="flex items-center justify-between gap-2 bg-slate-950/90 border border-indigo-500/40 rounded-lg px-2.5 py-1.5 text-xs">
+                                <div className="min-w-0">
+                                  <div className="font-semibold text-indigo-200 truncate">{ca.name} (Nuvem Firebase)</div>
+                                  <div className="text-[10px] text-slate-400">{ca.groupIds?.length || ca.groupSnapshots?.length || 0} grupos</div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRestoreAudienceFromTrashOrBackup(ca)}
+                                  className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold rounded cursor-pointer shrink-0"
+                                >
+                                  Baixar da Nuvem
+                                </button>
+                              </div>
+                            ))}
+                          {recoverableDiscovery.brazilMatches.map((bm) => (
+                            <div key={`brm-${bm.audName}`} className="flex items-center justify-between gap-2 bg-slate-950/90 border border-amber-500/40 rounded-lg px-2.5 py-1.5 text-xs">
+                              <div className="min-w-0">
+                                <div className="font-semibold text-amber-200 truncate">{bm.audName} ({bm.country})</div>
+                                <div className="text-[10px] text-slate-400">{bm.groups.length} grupos encontrados na aba Brasil</div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleRebuildAudienceFromList(bm.audName, bm.groups)}
+                                className="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-bold rounded cursor-pointer shrink-0"
+                              >
+                                Copiar para Global ({bm.groups.length})
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 3. Custom Keyword Search Across All Logs, Groups, Extension & Cloud */}
+                    <div className="space-y-2 pt-1 border-t border-indigo-500/30">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="relative flex-1 min-w-[180px]">
+                          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2" />
+                          <input
+                            type="text"
+                            value={recoverySearchInput}
+                            onChange={(e) => setRecoverySearchInput(e.target.value)}
+                            placeholder="Buscar grupo ou nicho perdido (ex: oraciones)..."
+                            className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-8 pr-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-400"
+                          />
+                        </div>
+                        {deepMatchedRecoveryGroups.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleRebuildAudienceFromList(
+                                recoverySearchInput.trim() ? `${recoverySearchInput.trim()} (Recuperado)` : 'oraciones 1',
+                                deepMatchedRecoveryGroups
+                              )
+                            }
+                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg cursor-pointer whitespace-nowrap"
+                          >
+                            Criar Público com {deepMatchedRecoveryGroups.length} Encontrados
+                          </button>
+                        )}
+                      </div>
+                      <div className="text-[11px] text-slate-300">
+                        {deepMatchedRecoveryGroups.length > 0
+                          ? `✅ Encontrados ${deepMatchedRecoveryGroups.length} grupos compatíveis com "${recoverySearchInput || 'todos'}" entre grupos salvos, histórico de postagens, nuvem e extensão.`
+                          : `Nenhum grupo com "${recoverySearchInput}" encontrado na varredura local/nuvem deste navegador. Se você mapeou em outro navegador/perfil do Chrome ou tem um Backup .json, importe o backup ou recarregue com a conta/perfil original.`}
+                      </div>
+                      {deepMatchedRecoveryGroups.length > 0 && (
+                        <div className="max-h-36 overflow-y-auto divide-y divide-slate-800 border border-slate-800 rounded-lg bg-slate-950/90">
+                          {deepMatchedRecoveryGroups.slice(0, 40).map((g) => (
+                            <div key={g.url} className="px-2.5 py-1.5 flex items-center justify-between gap-2 text-[11px]">
+                              <span className="text-slate-200 truncate">{g.name}</span>
+                              <span className="text-[10px] text-indigo-300 shrink-0">{g.foundSource}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {/* Merge & Recreate Panel when 2+ audiences are checked */}
                 {mergeAudienceIds.length >= 2 && (() => {
@@ -4552,7 +5350,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                             onChange={(e) => setMergeReplaceOriginals(e.target.checked)}
                             className="rounded border-slate-600 bg-slate-900 text-cyan-500"
                           />
-                          <span>Apagar originais após recriar</span>
+                          <span>Mover originais para Lixeira após recriar</span>
                         </label>
                         <button
                           type="button"
@@ -4569,7 +5367,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
 
                 {globalAudiences.length === 0 ? (
                   <p className="text-xs text-slate-400">
-                    Nenhum Público Global criado ainda. Selecione grupos na Caixa Geral ao lado, dê um nome e clique em "Enviar p/ Robô Global".
+                    Nenhum Público Global criado ainda. Selecione grupos na Caixa Geral ao lado, dê um nome e clique em "Enviar p/ Robô Global" — ou clique em <strong>Recuperar Público / Lixeira</strong> acima.
                   </p>
                 ) : (
                   <div className="divide-y divide-slate-800 border border-slate-800 rounded-lg bg-slate-950">
@@ -4688,14 +5486,33 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                               >
                                 {isActive ? 'Ativo' : 'Publicar'}
                               </button>
-                              <button
-                                type="button"
-                                onClick={() => setGlobalAudiences((prev) => prev.filter((a) => a.id !== aud.id))}
-                                className="text-slate-500 hover:text-rose-400 p-1 cursor-pointer"
-                                title="Excluir público"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
+                              {confirmDeleteAudienceId === aud.id ? (
+                                <div className="inline-flex items-center gap-1 bg-rose-950/80 border border-rose-500/60 rounded-md px-1.5 py-0.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteAudienceToTrash(aud)}
+                                    className="text-[10px] font-bold text-rose-200 hover:text-white cursor-pointer"
+                                  >
+                                    Mover Lixeira
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteAudienceId(null)}
+                                    className="text-[10px] text-slate-400 hover:text-white cursor-pointer"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteAudienceId(aud.id)}
+                                  className="text-slate-500 hover:text-rose-400 p-1 cursor-pointer"
+                                  title="Mover público para Lixeira (com confirmação)"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                             </div>
                           </div>
 

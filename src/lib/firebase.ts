@@ -785,6 +785,135 @@ export async function pullFullCloudSnapshotFromFirebase(): Promise<{
 }
 
 /**
+ * Dedicated Cloud Sync for Global Media Scalers Mode (audiences, trash, groups, offers)
+ * Stored in autoviral_settings/global_workspace_sync_v1 so Global audiences never get lost across tabs/devices.
+ */
+export interface GlobalWorkspaceSyncData {
+  globalAudiences?: any[];
+  globalTrashAudiences?: any[];
+  globalGroups?: any[];
+  globalOffers?: any[];
+  updatedAt?: string;
+}
+
+const globalWorkspaceFieldHashes: Record<string, string> = {};
+
+function recordCloudGlobalHashes(data: Record<string, any> | null | undefined) {
+  if (!data || typeof data !== 'object') return;
+  for (const [k, v] of Object.entries(data)) {
+    if (k === 'updatedAt' || v === undefined) continue;
+    try {
+      globalWorkspaceFieldHashes[k] = JSON.stringify(v);
+    } catch {}
+  }
+}
+
+export async function saveGlobalWorkspaceSyncToFirebase(
+  partial: Partial<GlobalWorkspaceSyncData>,
+  options?: { force?: boolean }
+): Promise<{ ok: boolean; skipped?: boolean; quotaExceeded?: boolean; error?: string }> {
+  if (isFirestoreWritesPaused() && !options?.force) {
+    return { ok: false, quotaExceeded: true, error: 'quota-paused' };
+  }
+  try {
+    const safePayload: Record<string, any> = {};
+    let hasChanges = Boolean(options?.force);
+
+    Object.entries(partial).forEach(([key, value]) => {
+      if (value === undefined) return;
+      let normalizedValue = stripUndefinedDeep(value);
+      if (key === 'globalGroups' && Array.isArray(normalizedValue)) {
+        normalizedValue = normalizedValue.slice(0, 600);
+      } else if (key === 'globalAudiences' && Array.isArray(normalizedValue)) {
+        normalizedValue = normalizedValue.slice(0, 120).map((a: any) => {
+          if (!a || typeof a !== 'object') return a;
+          const snaps = Array.isArray(a.groupSnapshots) ? a.groupSnapshots.slice(0, 400) : a.groupSnapshots;
+          return { ...a, groupSnapshots: snaps };
+        });
+      } else if (Array.isArray(normalizedValue)) {
+        normalizedValue = normalizedValue.slice(0, 200);
+      }
+
+      const serialized = JSON.stringify(normalizedValue);
+      if (globalWorkspaceFieldHashes[key] !== serialized) {
+        hasChanges = true;
+        safePayload[key] = normalizedValue;
+      }
+    });
+
+    if (!hasChanges || Object.keys(safePayload).length === 0) {
+      return { ok: true, skipped: true };
+    }
+
+    safePayload.updatedAt = new Date().toISOString();
+
+    if (JSON.stringify(safePayload).length > 850000 && Array.isArray(safePayload.globalGroups)) {
+      safePayload.globalGroups = safePayload.globalGroups.slice(0, 300);
+    }
+    if (JSON.stringify(safePayload).length > 900000 && Array.isArray(safePayload.globalAudiences)) {
+      safePayload.globalAudiences = safePayload.globalAudiences.map((a: any) => ({
+        ...a,
+        groupSnapshots: Array.isArray(a?.groupSnapshots) ? a.groupSnapshots.slice(0, 80) : undefined,
+      }));
+    }
+    if (JSON.stringify(safePayload).length > 920000) {
+      delete safePayload.globalGroups;
+    }
+
+    await setDoc(doc(db, SETTINGS_COLLECTION, 'global_workspace_sync_v1'), safePayload, { merge: true });
+    recordCloudGlobalHashes(safePayload);
+    return { ok: true };
+  } catch (error: any) {
+    if (isQuotaExceededError(error)) {
+      firestoreWritesPausedUntil = Date.now() + 15 * 60 * 1000;
+      const now = Date.now();
+      if (now - lastQuotaNoticeAt > 30000) {
+        lastQuotaNoticeAt = now;
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('autoviral_firebase_quota_exceeded'));
+        }
+      }
+      return { ok: false, quotaExceeded: true, error: error?.message || String(error) };
+    }
+    console.warn('Global workspace sync write notice:', error);
+    return { ok: false, error: error?.message || String(error) };
+  }
+}
+
+export function subscribeGlobalWorkspaceSync(
+  onUpdate: (data: GlobalWorkspaceSyncData) => void,
+  onError?: (err: any) => void
+): () => void {
+  const docRef = doc(db, SETTINGS_COLLECTION, 'global_workspace_sync_v1');
+  return onSnapshot(
+    docRef,
+    (snap) => {
+      if (snap.exists()) {
+        const data = snap.data() as GlobalWorkspaceSyncData;
+        recordCloudGlobalHashes(data as Record<string, any>);
+        onUpdate(data);
+      }
+    },
+    (err) => {
+      console.warn('Global workspace sync subscription error:', err);
+      if (onError) onError(err);
+    }
+  );
+}
+
+export async function pullGlobalWorkspaceSyncFromFirebase(): Promise<GlobalWorkspaceSyncData | null> {
+  try {
+    const snap = await getDocFromServer(doc(db, SETTINGS_COLLECTION, 'global_workspace_sync_v1')).catch(() =>
+      getDoc(doc(db, SETTINGS_COLLECTION, 'global_workspace_sync_v1'))
+    );
+    return snap.exists() ? (snap.data() as GlobalWorkspaceSyncData) : null;
+  } catch (err) {
+    console.warn('Pull global workspace error:', err);
+    return null;
+  }
+}
+
+/**
  * Discover archived campaigns stored in autoviral_settings/landing_page_* or INITIAL_CAMPAIGNS
  * that are currently missing from active campaigns (excluding dummy camp-1..camp-3).
  */

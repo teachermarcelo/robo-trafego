@@ -3160,6 +3160,14 @@
               }
             }));
           }
+          if (Array.isArray(res.groups) && res.groups.length > 0) {
+            window.dispatchEvent(new CustomEvent('autoviral_extension_cached_groups_received', {
+              detail: {
+                groups: res.groups,
+                timestamp: new Date().toISOString()
+              }
+            }));
+          }
           window.dispatchEvent(new CustomEvent('autoviral_waiting_approvals_synced', {
             detail: Array.isArray(res.waitingApprovals) ? res.waitingApprovals : []
           }));
@@ -3207,7 +3215,7 @@
             }));
           });
         }
-      } else if (ev.data.type === 'AUTOVIRAL_REQUEST_INSTA_SYNC') {
+      } else if (ev.data.type === 'AUTOVIRAL_REQUEST_INSTA_SYNC' || ev.data.type === 'AUTOVIRAL_REQUEST_EXTENSION_GROUPS') {
         pullExtensionCacheIntoAutoViral();
       } else if (ev.data.type === 'AUTOVIRAL_CHECK_WAITING_APPROVALS') {
         if (chrome && chrome.runtime && chrome.runtime.sendMessage) {

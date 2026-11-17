@@ -52,10 +52,14 @@ import {
   saveWorkspaceSyncToFirebase,
   subscribeWorkspaceSync,
   pullFullCloudSnapshotFromFirebase,
+  saveGlobalWorkspaceSyncToFirebase,
+  subscribeGlobalWorkspaceSync,
+  pullGlobalWorkspaceSyncFromFirebase,
   fetchRecoverableArchivedCampaigns,
   restoreArchivedCampaignToFirebase,
   resetFirebaseQuotaPause,
   WorkspaceSyncData,
+  GlobalWorkspaceSyncData,
 } from './lib/firebase';
 
 export default function App() {
@@ -342,7 +346,50 @@ export default function App() {
     };
 
     const unsubWs = subscribeWorkspaceSync(mergeWorkspaceIntoLocalStorage);
-    return () => unsubWs();
+
+    const mergeGlobalWorkspaceIntoLocalStorage = (cloud: GlobalWorkspaceSyncData) => {
+      if (!cloud || typeof cloud !== 'object') return;
+      const safeRead = (k: string) => {
+        try {
+          const r = localStorage.getItem(k);
+          return r ? JSON.parse(r) : null;
+        } catch {
+          return null;
+        }
+      };
+      const safeWrite = (k: string, val: any) => {
+        try {
+          localStorage.setItem(k, JSON.stringify(val));
+        } catch {}
+      };
+      const mergeArrayByKey = (key: string, incoming: any[] | undefined, idKey: string) => {
+        if (!Array.isArray(incoming) || incoming.length === 0) return;
+        const existing: any[] = safeRead(key) || [];
+        const seen = new Set(existing.map((item) => String(item?.[idKey] || '').toLowerCase()).filter(Boolean));
+        const fresh = incoming.filter((item) => {
+          const k = String(item?.[idKey] || '').toLowerCase();
+          if (!k || seen.has(k)) return false;
+          seen.add(k);
+          return true;
+        });
+        if (fresh.length > 0) {
+          safeWrite(key, [...fresh, ...existing]);
+        }
+      };
+
+      mergeArrayByKey('autoviral_global_audiences_v1', cloud.globalAudiences, 'id');
+      mergeArrayByKey('autoviral_global_audiences_trash_v1', cloud.globalTrashAudiences, 'id');
+      mergeArrayByKey('autoviral_global_fb_groups_v1', cloud.globalGroups, 'url');
+      mergeArrayByKey('autoviral_global_offers_v1', cloud.globalOffers, 'id');
+
+      window.dispatchEvent(new CustomEvent('autoviral_global_workspace_synced', { detail: cloud }));
+    };
+
+    const unsubGlobalWs = subscribeGlobalWorkspaceSync(mergeGlobalWorkspaceIntoLocalStorage);
+    return () => {
+      unsubWs();
+      unsubGlobalWs();
+    };
   }, []);
 
   // 2c. Discover archived/previous campaigns in Firebase settings so user can restore in 1 click if needed
@@ -1095,6 +1142,12 @@ export default function App() {
         storyQueue: safeParse('autoviral_insta_story_queue') || safeParse('autoviral_insta_story_queue_v2'),
         mappedInstaTargets: safeParse('autoviral_insta_mapped_targets_v2'),
         whatsappX1Flows: safeParse('autoviral_whatsapp_x1_flows_v1'),
+        globalAudiences: safeParse('autoviral_global_audiences_v1'),
+        globalTrashAudiences: safeParse('autoviral_global_audiences_trash_v1'),
+        globalGroups: safeParse('autoviral_global_fb_groups_v1'),
+        globalOffers: safeParse('autoviral_global_offers_v1'),
+        globalInboxGroups: safeParse('autoviral_global_inbox_groups_v1'),
+        globalBotLogs: safeParse('autoviral_global_bot_logs_v1'),
       },
     };
     const blob = new Blob([JSON.stringify(backupData, null, 2)], {
@@ -1158,6 +1211,12 @@ export default function App() {
         }
         if (w.mappedInstaTargets) putJson('autoviral_insta_mapped_targets_v2', w.mappedInstaTargets);
         if (w.whatsappX1Flows) putJson('autoviral_whatsapp_x1_flows_v1', w.whatsappX1Flows);
+        if (w.globalAudiences) putJson('autoviral_global_audiences_v1', w.globalAudiences);
+        if (w.globalTrashAudiences) putJson('autoviral_global_audiences_trash_v1', w.globalTrashAudiences);
+        if (w.globalGroups) putJson('autoviral_global_fb_groups_v1', w.globalGroups);
+        if (w.globalOffers) putJson('autoviral_global_offers_v1', w.globalOffers);
+        if (w.globalInboxGroups) putJson('autoviral_global_inbox_groups_v1', w.globalInboxGroups);
+        if (w.globalBotLogs) putJson('autoviral_global_bot_logs_v1', w.globalBotLogs);
 
         saveWorkspaceSyncToFirebase({
           savedCopiesMap: w.savedCopiesMap || undefined,
@@ -1170,6 +1229,13 @@ export default function App() {
           mappedInstaTargets: w.mappedInstaTargets || undefined,
           mappedGroups: w.mappedGroups || undefined,
           whatsappX1Flows: w.whatsappX1Flows || undefined,
+        }).catch(console.warn);
+
+        saveGlobalWorkspaceSyncToFirebase({
+          globalAudiences: w.globalAudiences || undefined,
+          globalTrashAudiences: w.globalTrashAudiences || undefined,
+          globalGroups: w.globalGroups || undefined,
+          globalOffers: w.globalOffers || undefined,
         }).catch(console.warn);
       }
 
@@ -1198,24 +1264,35 @@ export default function App() {
       };
 
       // 1. Push local workspace state to Firebase (deduplicated)
-      const wsRes = await saveWorkspaceSyncToFirebase({
-        savedCopiesMap: safeParse('autoviral_saved_copies_v1'),
-        customCopyPresets: safeParse('autoviral_custom_copy_presets_v1'),
-        audiences: safeParse('autoviral_fb_audiences_v4') || safeParse('autoviral_fb_audiences_v3'),
-        youtubeVideos: safeParse('autoviral_yt_videos_v2'),
-        pinterestPins: safeParse('autoviral_pinterest_pins_v1'),
-        instaCampaigns: safeParse('autoviral_insta_campaigns_v1'),
-        storyQueue: safeParse('autoviral_insta_story_queue') || safeParse('autoviral_insta_story_queue_v2'),
-        mappedInstaTargets: safeParse('autoviral_insta_mapped_targets_v2'),
-        mappedGroups: safeParse('autoviral_fb_mapped_groups_v5_real') || safeParse('autoviral_fb_mapped_groups_v3'),
-        whatsappX1Flows: safeParse('autoviral_whatsapp_x1_flows_v1'),
-      });
-      if (wsRes.quotaExceeded) {
+      const [wsRes, globalWsRes] = await Promise.all([
+        saveWorkspaceSyncToFirebase({
+          savedCopiesMap: safeParse('autoviral_saved_copies_v1'),
+          customCopyPresets: safeParse('autoviral_custom_copy_presets_v1'),
+          audiences: safeParse('autoviral_fb_audiences_v4') || safeParse('autoviral_fb_audiences_v3'),
+          youtubeVideos: safeParse('autoviral_yt_videos_v2'),
+          pinterestPins: safeParse('autoviral_pinterest_pins_v1'),
+          instaCampaigns: safeParse('autoviral_insta_campaigns_v1'),
+          storyQueue: safeParse('autoviral_insta_story_queue') || safeParse('autoviral_insta_story_queue_v2'),
+          mappedInstaTargets: safeParse('autoviral_insta_mapped_targets_v2'),
+          mappedGroups: safeParse('autoviral_fb_mapped_groups_v5_real') || safeParse('autoviral_fb_mapped_groups_v3'),
+          whatsappX1Flows: safeParse('autoviral_whatsapp_x1_flows_v1'),
+        }),
+        saveGlobalWorkspaceSyncToFirebase({
+          globalAudiences: safeParse('autoviral_global_audiences_v1'),
+          globalTrashAudiences: safeParse('autoviral_global_audiences_trash_v1'),
+          globalGroups: safeParse('autoviral_global_fb_groups_v1'),
+          globalOffers: safeParse('autoviral_global_offers_v1'),
+        }),
+      ]);
+      if (wsRes.quotaExceeded || globalWsRes.quotaExceeded) {
         setFirebaseQuotaExceeded(true);
       }
 
       // 2. Pull fresh snapshot directly from Firestore server
-      const snap = await pullFullCloudSnapshotFromFirebase();
+      const [snap, globalSnap] = await Promise.all([
+        pullFullCloudSnapshotFromFirebase(),
+        pullGlobalWorkspaceSyncFromFirebase(),
+      ]);
       const cloudDelSet = new Set(snap.deletedIds);
       setDeletedCampaignIds(cloudDelSet);
       try {
@@ -1240,6 +1317,9 @@ export default function App() {
 
       if (snap.workspace) {
         window.dispatchEvent(new CustomEvent('autoviral_workspace_synced', { detail: snap.workspace }));
+      }
+      if (globalSnap) {
+        window.dispatchEvent(new CustomEvent('autoviral_global_workspace_synced', { detail: globalSnap }));
       }
     } catch (err) {
       console.warn('Manual cloud sync error:', err);

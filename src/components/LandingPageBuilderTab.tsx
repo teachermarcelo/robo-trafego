@@ -32,6 +32,11 @@ import { Campaign } from '../types';
 import { saveLandingPageSettingsToFirebase } from '../lib/firebase';
 import { getCampaignSlug, getCampaignLandingUrl } from '../utils/campaignSlug';
 import { NicheType } from '../types';
+import {
+  generateViralFlyerSync,
+  generateViralFlyerAsync,
+  ViralFlyerThemeId,
+} from '../utils/viralFlyerGenerator';
 
 interface LandingPageBuilderTabProps {
   campaigns: Campaign[];
@@ -44,110 +49,31 @@ interface LandingPageBuilderTabProps {
 function generateLandingCoverDataUrl(params: {
   title: string;
   headline?: string;
+  subheadline?: string;
+  nichePain?: string;
+  targetAudience?: string;
   price?: number;
   oldPrice?: number;
   badgeText?: string;
   nicheLabel?: string;
+  theme?: ViralFlyerThemeId;
 }): string {
-  try {
-    const canvas = document.createElement('canvas');
-    canvas.width = 1200;
-    canvas.height = 630;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return '';
-
-    const grad = ctx.createLinearGradient(0, 0, 1200, 630);
-    grad.addColorStop(0, '#04121b');
-    grad.addColorStop(0.55, '#072434');
-    grad.addColorStop(1, '#021a14');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, 1200, 630);
-
-    // Subtle radial highlights
-    const glow1 = ctx.createRadialGradient(210, 140, 20, 210, 140, 360);
-    glow1.addColorStop(0, 'rgba(16, 185, 129, 0.28)');
-    glow1.addColorStop(1, 'rgba(16, 185, 129, 0)');
-    ctx.fillStyle = glow1;
-    ctx.fillRect(0, 0, 1200, 630);
-
-    const glow2 = ctx.createRadialGradient(1020, 500, 30, 1020, 500, 380);
-    glow2.addColorStop(0, 'rgba(6, 182, 212, 0.25)');
-    glow2.addColorStop(1, 'rgba(6, 182, 212, 0)');
-    ctx.fillStyle = glow2;
-    ctx.fillRect(0, 0, 1200, 630);
-
-    // Frame border
-    ctx.strokeStyle = 'rgba(52, 211, 153, 0.38)';
-    ctx.lineWidth = 4;
-    ctx.strokeRect(26, 26, 1148, 578);
-
-    // Top badge
-    const badge = (params.badgeText || params.nicheLabel || 'OFERTA VERIFICADA · ACESSO IMEDIATO')
-      .toUpperCase()
-      .slice(0, 52);
-    ctx.fillStyle = '#10b981';
-    ctx.fillRect(68, 66, Math.min(820, badge.length * 14 + 48), 44);
-    ctx.fillStyle = '#022c22';
-    ctx.font = 'bold 20px system-ui, -apple-system, sans-serif';
-    ctx.fillText(badge, 90, 95);
-
-    // Headline / Title wrapped cleanly
-    const rawTitle = (params.headline || params.title || 'Produto Especial').trim();
-    ctx.fillStyle = '#ffffff';
-    ctx.font = '900 48px system-ui, -apple-system, sans-serif';
-    const words = rawTitle.split(/\s+/);
-    const lines: string[] = [];
-    let currentLine = '';
-    for (const w of words) {
-      const candidate = currentLine ? `${currentLine} ${w}` : w;
-      if (candidate.length > 34 && currentLine) {
-        lines.push(currentLine);
-        currentLine = w;
-      } else {
-        currentLine = candidate;
-      }
-    }
-    if (currentLine) lines.push(currentLine);
-    lines.slice(0, 3).forEach((ln, idx) => {
-      ctx.fillText(ln, 68, 178 + idx * 58);
-    });
-
-    // Price anchor pill box
-    const priceNum = Number(params.price) || 0;
-    const oldNum = Number(params.oldPrice) || 0;
-    if (priceNum > 0) {
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
-      ctx.fillRect(68, 392, 460, 148);
-      ctx.strokeStyle = 'rgba(16, 185, 129, 0.65)';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(68, 392, 460, 148);
-
-      if (oldNum > priceNum) {
-        ctx.fillStyle = '#94a3b8';
-        ctx.font = 'bold 22px system-ui, -apple-system, sans-serif';
-        ctx.fillText(`De R$ ${oldNum.toFixed(2).replace('.', ',')}`, 96, 434);
-      }
-
-      ctx.fillStyle = '#34d399';
-      ctx.font = '900 56px system-ui, -apple-system, sans-serif';
-      ctx.fillText(`R$ ${priceNum.toFixed(2).replace('.', ',')}`, 96, 496);
-
-      ctx.fillStyle = '#cbd5e1';
-      ctx.font = 'bold 18px system-ui, -apple-system, sans-serif';
-      ctx.fillText('Acesso imediato · Compra segura', 96, 526);
-    }
-
-    // Right CTA card visual
-    ctx.fillStyle = '#10b981';
-    ctx.fillRect(600, 444, 510, 76);
-    ctx.fillStyle = '#022c22';
-    ctx.font = '900 24px system-ui, -apple-system, sans-serif';
-    ctx.fillText('CLIQUE PARA VER A OFERTA  →', 648, 490);
-
-    return canvas.toDataURL('image/jpeg', 0.88);
-  } catch {
-    return '';
-  }
+  const priceNum = Number(params.price) || 0;
+  const oldNum = Number(params.oldPrice) || 0;
+  return generateViralFlyerSync({
+    productName: params.title,
+    headline: params.headline || params.title,
+    subheadline: params.subheadline,
+    nichePain: params.nichePain,
+    targetAudience: params.targetAudience,
+    priceText: priceNum > 0 ? `R$ ${priceNum.toFixed(2).replace('.', ',')}` : undefined,
+    oldPriceText: oldNum > priceNum ? `R$ ${oldNum.toFixed(2).replace('.', ',')}` : undefined,
+    discountBadge: params.badgeText,
+    countryLabel: params.nicheLabel,
+    language: 'pt',
+    theme: params.theme || 'purple_gold',
+    aspect: 'og',
+  });
 }
 
 export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
@@ -253,6 +179,8 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
   const [uploadFileName, setUploadFileName] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [ensureCoverOnSave, setEnsureCoverOnSave] = useState(true);
+  const [flyerTheme, setFlyerTheme] = useState<ViralFlyerThemeId>('purple_gold');
+  const [framingPhoto, setFramingPhoto] = useState(false);
 
   const processImageFile = (file: File) => {
     if (!file.type.startsWith('image/')) {
@@ -348,20 +276,24 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
     }
   };
 
-  const handleGenerateCoverImage = (autoPersist = false) => {
+  const handleGenerateCoverImage = (autoPersist = false, overrideTheme?: ViralFlyerThemeId) => {
     const parsedPrice = parseFloat(price.replace(',', '.')) || activeCamp?.price || 37.0;
     const parsedOldPrice = parseFloat(oldPrice.replace(',', '.')) || parsedPrice * 2;
     const generated = generateLandingCoverDataUrl({
       title: title.trim() || activeCamp?.title || 'Oferta Especial',
       headline: headline.trim() || title.trim(),
+      subheadline: subheadline.trim(),
+      nichePain: activeCamp?.painPointTargeted,
+      targetAudience: activeCamp?.targetAudience,
       price: parsedPrice,
       oldPrice: parsedOldPrice,
       badgeText: badgeText.trim(),
       nicheLabel: activeCamp?.nicheLabel,
+      theme: overrideTheme || flyerTheme,
     });
     if (!generated) return;
     setImageUrl(generated);
-    setUploadFileName('capa-gerada-og.jpg');
+    setUploadFileName('arte-viral-og.jpg');
     if (autoPersist && activeCamp) {
       const updated: Campaign = {
         ...activeCamp,
@@ -382,7 +314,40 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
         window.dispatchEvent(new CustomEvent('autoviral-landing-synced', { detail: { campaignId: updated.id } }));
         saveLandingPageSettingsToFirebase(updated, updated.id).catch(console.warn);
       } catch {}
-      setGlobalSyncNotice(`Capa OG gerada e salva em "${updated.title}"! Quando alguém postar este link no Facebook, o card aparecerá com esta imagem.`);
+      setGlobalSyncNotice(`Arte viral OG gerada e salva em "${updated.title}"! Quando alguém postar este link no Facebook, o card aparecerá com este visual.`);
+    }
+  };
+
+  const handleFrameCurrentPhotoInFlyer = async () => {
+    if (!imageUrl.trim()) {
+      handleGenerateCoverImage(false);
+      return;
+    }
+    setFramingPhoto(true);
+    try {
+      const parsedPrice = parseFloat(price.replace(',', '.')) || activeCamp?.price || 37.0;
+      const parsedOldPrice = parseFloat(oldPrice.replace(',', '.')) || parsedPrice * 2;
+      const framed = await generateViralFlyerAsync({
+        productName: title.trim() || activeCamp?.title || 'Oferta Especial',
+        headline: headline.trim() || title.trim(),
+        subheadline: subheadline.trim(),
+        nichePain: activeCamp?.painPointTargeted,
+        targetAudience: activeCamp?.targetAudience,
+        priceText: parsedPrice > 0 ? `R$ ${parsedPrice.toFixed(2).replace('.', ',')}` : undefined,
+        oldPriceText: parsedOldPrice > parsedPrice ? `R$ ${parsedOldPrice.toFixed(2).replace('.', ',')}` : undefined,
+        discountBadge: badgeText.trim(),
+        countryLabel: activeCamp?.nicheLabel,
+        language: 'pt',
+        theme: flyerTheme,
+        embeddedImageUrl: imageUrl.trim(),
+        aspect: 'og',
+      });
+      if (framed) {
+        setImageUrl(framed);
+        setUploadFileName('arte-viral-com-foto.jpg');
+      }
+    } finally {
+      setFramingPhoto(false);
     }
   };
 
@@ -399,14 +364,18 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
       finalImageUrl = generateLandingCoverDataUrl({
         title: title.trim() || activeCamp.title,
         headline: headline.trim() || title.trim(),
+        subheadline: subheadline.trim(),
+        nichePain: activeCamp.painPointTargeted,
+        targetAudience: activeCamp.targetAudience,
         price: parsedPrice,
         oldPrice: parsedOldPrice,
         badgeText: badgeText.trim(),
         nicheLabel: activeCamp.nicheLabel,
+        theme: flyerTheme,
       });
       if (finalImageUrl) {
         setImageUrl(finalImageUrl);
-        setUploadFileName('capa-gerada-og.jpg');
+        setUploadFileName('arte-viral-og.jpg');
       }
     }
 
@@ -688,7 +657,7 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
                     <img
                       src={imageUrl}
                       alt={`Prévia OG ${headline || title}`}
-                      className="w-full h-36 object-cover bg-slate-950"
+                      className="w-full h-44 object-contain bg-slate-950"
                     />
                   ) : (
                     <div className="w-full h-24 bg-slate-950 flex flex-col items-center justify-center text-[11px] text-amber-300 gap-1 px-3 text-center">
@@ -886,15 +855,36 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
                   <ImageIcon className="w-4 h-4" />
                   <span>Imagem de Capa do Produto (Card no Link &amp; Post)</span>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={flyerTheme}
+                    onChange={(e) => setFlyerTheme(e.target.value as ViralFlyerThemeId)}
+                    className="text-[11px] px-2 py-1 rounded-lg bg-slate-950 border border-slate-700 text-purple-200 font-semibold cursor-pointer"
+                    title="Paleta visual do flyer modelo"
+                  >
+                    <option value="purple_gold">Roxo &amp; Dourado (Modelo Viral)</option>
+                    <option value="emerald_gold">Esmeralda &amp; Ouro</option>
+                    <option value="royal_blue">Azul Royal &amp; Ouro</option>
+                  </select>
                   <button
                     type="button"
                     onClick={() => handleGenerateCoverImage(false)}
-                    className="text-[11px] px-2.5 py-1 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/35 border border-cyan-500/40 text-cyan-200 font-bold inline-flex items-center gap-1 cursor-pointer"
+                    className="text-[11px] px-2.5 py-1 rounded-lg bg-purple-600/25 hover:bg-purple-600/40 border border-purple-500/45 text-purple-200 font-bold inline-flex items-center gap-1 cursor-pointer"
                   >
                     <Sparkles className="w-3 h-3" />
-                    <span>Gerar Capa Automática</span>
+                    <span>Gerar Arte Viral (Modelo)</span>
                   </button>
+                  {imageUrl && (
+                    <button
+                      type="button"
+                      onClick={handleFrameCurrentPhotoInFlyer}
+                      disabled={framingPhoto}
+                      className="text-[11px] px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/35 border border-amber-500/45 text-amber-200 font-bold inline-flex items-center gap-1 cursor-pointer disabled:opacity-60"
+                    >
+                      <ImageIcon className="w-3 h-3" />
+                      <span>{framingPhoto ? 'Enquadrando...' : 'Enquadrar Foto no Flyer'}</span>
+                    </button>
+                  )}
                   <span className="text-[11px] px-2 py-0.5 rounded-full bg-pink-950/80 border border-pink-700/50 text-pink-300 font-medium">
                     Upload Direto do PC
                   </span>
@@ -1283,10 +1273,13 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
                 const autoCoverUrl = generateLandingCoverDataUrl({
                   title: newHeadline,
                   headline: newHeadline,
+                  subheadline: newLandingPain.trim(),
+                  nichePain: newLandingPain.trim(),
                   price: parsedNewPrice,
                   oldPrice: parsedNewOldPrice,
                   badgeText: newBadge,
                   nicheLabel: newLandingNicheLabel,
+                  theme: flyerTheme,
                 });
 
                 const newCamp: Campaign = {

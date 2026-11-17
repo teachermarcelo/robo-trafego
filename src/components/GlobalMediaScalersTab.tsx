@@ -43,6 +43,11 @@ import JSZip from 'jszip';
 import { Campaign, FacebookGroup, FacebookPostLog } from '../types';
 import { globalEnBotRunner } from '../utils/globalEnBotRunner';
 import { getCampaignLandingUrl } from '../utils/campaignSlug';
+import {
+  generateViralFlyerSync,
+  generateViralFlyerAsync,
+  ViralFlyerThemeId,
+} from '../utils/viralFlyerGenerator';
 
 export interface GlobalOffer {
   id: string;
@@ -327,106 +332,35 @@ function resizeImageFileToDataUrl(file: File, maxDim = 1080): Promise<string> {
   });
 }
 
-function wrapCanvasLines(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, maxLines: number): string[] {
-  const words = String(text || '').trim().split(/\s+/).filter(Boolean);
-  const lines: string[] = [];
-  let current = '';
-  for (const word of words) {
-    const candidate = current ? `${current} ${word}` : word;
-    if (ctx.measureText(candidate).width <= maxWidth) {
-      current = candidate;
-    } else {
-      if (current) lines.push(current);
-      current = word;
-      if (lines.length >= maxLines - 1) break;
-    }
+function detectOfferFlyerLang(offer: GlobalOffer): 'pt' | 'en' | 'es' {
+  const langLower = `${offer.languageName || ''} ${offer.countryName || ''}`.toLowerCase();
+  if (langLower.includes('portug') || langLower.includes('brasil') || langLower.includes('brazil')) {
+    return 'pt';
   }
-  if (current && lines.length < maxLines) lines.push(current);
-  return lines;
+  if (langLower.includes('span') || langLower.includes('espan') || langLower.includes('méx') || langLower.includes('mex')) {
+    return 'es';
+  }
+  if (/[ãõç]/i.test(`${offer.productName} ${offer.nichePain}`)) return 'pt';
+  return 'en';
 }
 
-function generateOfferPromoImageDataUrl(offer: GlobalOffer, headline?: string): string {
-  const canvas = document.createElement('canvas');
-  canvas.width = 1200;
-  canvas.height = 800;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return '';
-
-  // Dark editorial gradient backdrop
-  const bg = ctx.createLinearGradient(0, 0, 1200, 800);
-  bg.addColorStop(0, '#07111e');
-  bg.addColorStop(0.55, '#0b192c');
-  bg.addColorStop(1, '#062026');
-  ctx.fillStyle = bg;
-  ctx.fillRect(0, 0, 1200, 800);
-
-  // Top & bottom subtle accent bars
-  const bar = ctx.createLinearGradient(0, 0, 1200, 0);
-  bar.addColorStop(0, '#06b6d4');
-  bar.addColorStop(1, '#10b981');
-  ctx.fillStyle = bar;
-  ctx.fillRect(0, 0, 1200, 12);
-
-  // Border frame
-  ctx.strokeStyle = 'rgba(34, 211, 238, 0.25)';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(42, 42, 1116, 716);
-
-  // Country & Offer top tag
-  const badgeText = `${(offer.countryCode || 'GLB').toUpperCase()}  |  ${(offer.countryName || 'GLOBAL').toUpperCase()}  ·  ${offer.offerPriceText || 'SPECIAL OFFER'}`;
-  ctx.font = 'bold 24px Inter, system-ui, sans-serif';
-  const badgeW = Math.min(1040, ctx.measureText(badgeText).width + 52);
-  ctx.fillStyle = 'rgba(16, 185, 129, 0.16)';
-  ctx.fillRect(80, 86, badgeW, 54);
-  ctx.strokeStyle = 'rgba(16, 185, 129, 0.55)';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(80, 86, badgeW, 54);
-  ctx.fillStyle = '#6ee7b7';
-  ctx.fillText(badgeText, 106, 121);
-
-  // Main Headline
-  const rawTitle = (headline || '').trim() || offer.productName;
-  ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 54px Inter, system-ui, sans-serif';
-  const titleLines = wrapCanvasLines(ctx, rawTitle, 1020, 3);
-  let y = 220;
-  for (const line of titleLines) {
-    ctx.fillText(line, 80, y);
-    y += 70;
-  }
-
-  // Product Name highlight if different from headline
-  if (headline && headline.trim() && headline.trim() !== offer.productName.trim()) {
-    ctx.fillStyle = '#38bdf8';
-    ctx.font = 'bold 30px Inter, system-ui, sans-serif';
-    ctx.fillText(offer.productName.slice(0, 62), 80, y + 12);
-    y += 54;
-  }
-
-  // Comparison / Benefit Box
-  const boxY = Math.max(430, y + 18);
-  ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-  ctx.fillRect(80, boxY, 1040, 175);
-  ctx.strokeStyle = 'rgba(148, 163, 184, 0.28)';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(80, boxY, 1040, 175);
-
-  ctx.fillStyle = '#fda4af';
-  ctx.font = 'bold 26px Inter, system-ui, sans-serif';
-  ctx.fillText(`✕  Problem: ${(offer.nichePain || 'Common quality issues').slice(0, 68)}`, 112, boxY + 58);
-
-  ctx.fillStyle = '#34d399';
-  ctx.fillText(`✓  Solution: ${(offer.discountText || offer.offerPriceText || 'Verified Offer').slice(0, 68)}`, 112, boxY + 122);
-
-  // Bottom Link Strip
-  const cleanDomain = (offer.presellUrl || 'https://global-sell-beta.vercel.app/')
-    .replace(/^https?:\/\//i, '')
-    .slice(0, 72);
-  ctx.fillStyle = '#06b6d4';
-  ctx.font = 'bold 26px monospace';
-  ctx.fillText(`Link & Full Comparison: ${cleanDomain}`, 80, 706);
-
-  return canvas.toDataURL('image/jpeg', 0.88);
+function generateOfferPromoImageDataUrl(
+  offer: GlobalOffer,
+  headline?: string,
+  theme: ViralFlyerThemeId = 'purple_gold'
+): string {
+  return generateViralFlyerSync({
+    productName: offer.productName,
+    headline: (headline || '').trim() || offer.productName,
+    nichePain: offer.nichePain,
+    priceText: offer.offerPriceText || 'SPECIAL OFFER',
+    discountBadge: offer.discountText || `${(offer.countryName || 'GLOBAL').toUpperCase()} · SPECIAL DEAL`,
+    countryLabel: offer.countryName || 'GLOBAL',
+    linkDomain: offer.presellUrl,
+    language: detectOfferFlyerLang(offer),
+    theme,
+    aspect: 'square',
+  });
 }
 
 function campaignToGlobalOffer(camp: Campaign, existing?: GlobalOffer): GlobalOffer {
@@ -1181,6 +1115,8 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
   const [sessionDispatchedCount, setSessionDispatchedCount] = useState<number>(0);
   const sessionDispatchedRef = useRef<number>(0);
   const [attachImageInComposer, setAttachImageInComposer] = useState<boolean>(true);
+  const [flyerTheme, setFlyerTheme] = useState<ViralFlyerThemeId>('purple_gold');
+  const [framingFlyerPhoto, setFramingFlyerPhoto] = useState<boolean>(false);
 
   const [customPostHeadline, setCustomPostHeadline] = useState('');
   const [customPostBody, setCustomPostBody] = useState('');
@@ -1742,7 +1678,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
       presellUrl: newOfferPresellUrl.trim() || 'https://global-sell-beta.vercel.app/',
       createdAt: new Date().toISOString(),
     };
-    const autoImg = generateOfferPromoImageDataUrl(created);
+    const autoImg = generateOfferPromoImageDataUrl(created, undefined, flyerTheme);
     if (autoImg) created.postImageUrl = autoImg;
     setOffers((prev) => [created, ...prev]);
     setSelectedOfferId(created.id);
@@ -2392,7 +2328,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
     // Guarantee visual asset: auto-create promo image if offer has none and composer attach is active
     let postImageUrl = activeOffer?.postImageUrl || '';
     if (attachImageInComposer && !postImageUrl && activeOffer) {
-      const autoGeneratedImg = generateOfferPromoImageDataUrl(activeOffer, customPostHeadline);
+      const autoGeneratedImg = generateOfferPromoImageDataUrl(activeOffer, customPostHeadline, flyerTheme);
       if (autoGeneratedImg) {
         postImageUrl = autoGeneratedImg;
         handleUpdateOfferField('postImageUrl', autoGeneratedImg);
@@ -2577,15 +2513,48 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
     }
   };
 
-  const handleGenerateOfferPostImage = () => {
+  const handleGenerateOfferPostImage = (overrideTheme?: ViralFlyerThemeId) => {
     if (!activeOffer) return;
-    const dataUrl = generateOfferPromoImageDataUrl(activeOffer, customPostHeadline);
+    const dataUrl = generateOfferPromoImageDataUrl(activeOffer, customPostHeadline, overrideTheme || flyerTheme);
     if (!dataUrl) return;
     handleUpdateOfferField('postImageUrl', dataUrl);
     setBanner({
-      message: `Card visual da oferta "${activeOffer.productName}" gerado em 1 clique! Já aparece na Prévia e vai junto no Facebook.`,
+      message: `Arte Viral Modelo (1080×1080) de "${activeOffer.productName}" criada com selo, benefícios e preço! Já aparece na Prévia e vai junto no Facebook.`,
       tone: 'success',
     });
+  };
+
+  const handleFramePhotoInViralFlyer = async () => {
+    if (!activeOffer) return;
+    if (!activeOffer.postImageUrl) {
+      handleGenerateOfferPostImage();
+      return;
+    }
+    setFramingFlyerPhoto(true);
+    try {
+      const framedUrl = await generateViralFlyerAsync({
+        productName: activeOffer.productName,
+        headline: customPostHeadline.trim() || activeOffer.productName,
+        nichePain: activeOffer.nichePain,
+        priceText: activeOffer.offerPriceText || 'SPECIAL OFFER',
+        discountBadge: activeOffer.discountText || `${(activeOffer.countryName || 'GLOBAL').toUpperCase()} · SPECIAL DEAL`,
+        countryLabel: activeOffer.countryName || 'GLOBAL',
+        linkDomain: activeOffer.presellUrl,
+        language: detectOfferFlyerLang(activeOffer),
+        theme: flyerTheme,
+        embeddedImageUrl: activeOffer.postImageUrl,
+        aspect: 'square',
+      });
+      if (framedUrl) {
+        handleUpdateOfferField('postImageUrl', framedUrl);
+        setBanner({
+          message: `Foto real do produto enquadrada dentro da Arte Viral Modelo de "${activeOffer.productName}"! Confira o resultado na Prévia.`,
+          tone: 'success',
+        });
+      }
+    } finally {
+      setFramingFlyerPhoto(false);
+    }
   };
 
   const handleDownloadOfferPostImage = () => {
@@ -3145,14 +3114,35 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
                           }}
                         />
                       </label>
+                      <select
+                        value={flyerTheme}
+                        onChange={(e) => setFlyerTheme(e.target.value as ViralFlyerThemeId)}
+                        className="px-2 py-1.5 bg-slate-900 border border-slate-700 text-xs text-purple-200 font-semibold rounded-md cursor-pointer"
+                        title="Paleta de cores da arte modelo"
+                      >
+                        <option value="purple_gold">Roxo &amp; Dourado (Modelo Viral)</option>
+                        <option value="emerald_gold">Esmeralda &amp; Ouro</option>
+                        <option value="royal_blue">Azul Royal &amp; Ouro</option>
+                      </select>
                       <button
                         type="button"
-                        onClick={handleGenerateOfferPostImage}
-                        className="px-2.5 py-1.5 bg-cyan-600/20 hover:bg-cyan-600/35 border border-cyan-500/40 text-cyan-200 text-xs font-semibold rounded-md inline-flex items-center gap-1.5 cursor-pointer"
+                        onClick={() => handleGenerateOfferPostImage()}
+                        className="px-2.5 py-1.5 bg-purple-600/25 hover:bg-purple-600/40 border border-purple-500/45 text-purple-200 text-xs font-bold rounded-md inline-flex items-center gap-1.5 cursor-pointer"
                       >
                         <Sparkles className="w-3.5 h-3.5" />
-                        <span>Gerar Card Visual (1 Clique)</span>
+                        <span>Gerar Arte Viral (Modelo)</span>
                       </button>
+                      {activeOffer.postImageUrl && (
+                        <button
+                          type="button"
+                          onClick={handleFramePhotoInViralFlyer}
+                          disabled={framingFlyerPhoto}
+                          className="px-2.5 py-1.5 bg-amber-500/20 hover:bg-amber-500/35 border border-amber-500/45 text-amber-200 text-xs font-bold rounded-md inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
+                        >
+                          <ImageIcon className="w-3.5 h-3.5" />
+                          <span>{framingFlyerPhoto ? 'Enquadrando...' : 'Colocar Foto no Flyer'}</span>
+                        </button>
+                      )}
                       {activeOffer.postImageUrl && (
                         <button
                           type="button"
@@ -3185,7 +3175,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
                       <img
                         src={activeOffer.postImageUrl}
                         alt={`Imagem da oferta ${activeOffer.productName}`}
-                        className="w-28 h-20 object-cover rounded-lg border border-slate-700 bg-slate-900 shrink-0"
+                        className="w-28 h-28 object-contain rounded-lg border border-slate-700 bg-slate-900 shrink-0"
                       />
                       <div className="text-[11px] text-emerald-300 space-y-1">
                         <div className="font-semibold">Imagem pronta para anexar no Facebook</div>
@@ -4917,14 +4907,35 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
                                 }}
                               />
                             </label>
+                            <select
+                              value={flyerTheme}
+                              onChange={(e) => setFlyerTheme(e.target.value as ViralFlyerThemeId)}
+                              className="px-2 py-1 bg-slate-900 border border-slate-700 text-[11px] text-purple-200 font-semibold rounded-md cursor-pointer"
+                              title="Paleta visual do flyer modelo"
+                            >
+                              <option value="purple_gold">Roxo &amp; Dourado (Modelo Viral)</option>
+                              <option value="emerald_gold">Esmeralda &amp; Ouro</option>
+                              <option value="royal_blue">Azul Royal &amp; Ouro</option>
+                            </select>
                             <button
                               type="button"
-                              onClick={handleGenerateOfferPostImage}
-                              className="px-2.5 py-1 bg-cyan-600/20 hover:bg-cyan-600/35 border border-cyan-500/40 text-cyan-200 text-[11px] font-semibold rounded-md inline-flex items-center gap-1 cursor-pointer"
+                              onClick={() => handleGenerateOfferPostImage()}
+                              className="px-2.5 py-1 bg-purple-600/25 hover:bg-purple-600/40 border border-purple-500/45 text-purple-200 text-[11px] font-bold rounded-md inline-flex items-center gap-1 cursor-pointer"
                             >
                               <Sparkles className="w-3 h-3" />
-                              <span>Gerar Imagem Auto</span>
+                              <span>Gerar Arte Viral (Modelo)</span>
                             </button>
+                            {activeOffer.postImageUrl && (
+                              <button
+                                type="button"
+                                onClick={handleFramePhotoInViralFlyer}
+                                disabled={framingFlyerPhoto}
+                                className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/35 border border-amber-500/45 text-amber-200 text-[11px] font-bold rounded-md inline-flex items-center gap-1 cursor-pointer disabled:opacity-60"
+                              >
+                                <ImageIcon className="w-3 h-3" />
+                                <span>{framingFlyerPhoto ? 'Enquadrando...' : 'Colocar Foto no Flyer'}</span>
+                              </button>
+                            )}
                             {activeOffer.postImageUrl && (
                               <button
                                 type="button"
@@ -4940,13 +4951,13 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
 
                         {!activeOffer.postImageUrl && (
                           <div className="p-2 bg-amber-950/40 border border-amber-600/40 rounded-md flex flex-wrap items-center justify-between gap-2 text-[11px] text-amber-200">
-                            <span>Sem imagem ainda — ao disparar com "Anexar foto" ativado, geraremos uma capa automática para chamar atenção do lead.</span>
+                            <span>Sem imagem ainda — ao disparar com "Anexar foto" ativado, geraremos a Arte Viral Modelo para chamar atenção do lead.</span>
                             <button
                               type="button"
-                              onClick={handleGenerateOfferPostImage}
+                              onClick={() => handleGenerateOfferPostImage()}
                               className="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded cursor-pointer shrink-0"
                             >
-                              Gerar Agora
+                              Gerar Arte Agora
                             </button>
                           </div>
                         )}
@@ -5076,7 +5087,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
                                 <img
                                   src={activeOffer.postImageUrl}
                                   alt={`Prévia visual ${activeOffer.productName}`}
-                                  className="w-full max-h-72 object-cover"
+                                  className="w-full max-h-[420px] object-contain bg-slate-900"
                                 />
                                 <div className="px-3 py-1.5 bg-slate-950/90 border-t border-slate-800 flex items-center justify-between gap-2 text-[11px]">
                                   <span className="text-emerald-300 font-medium">
@@ -5101,11 +5112,11 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
                               className="border border-slate-800 hover:border-cyan-500/50 bg-slate-950 rounded-lg overflow-hidden block transition-colors group"
                             >
                               {activeOffer.postImageUrl && (
-                                <div className="relative h-32 w-full bg-slate-900 overflow-hidden border-b border-slate-800">
+                                <div className="relative h-40 w-full bg-slate-900 overflow-hidden border-b border-slate-800">
                                   <img
                                     src={activeOffer.postImageUrl}
                                     alt={`Card OG ${activeOffer.productName}`}
-                                    className="w-full h-full object-cover"
+                                    className="w-full h-full object-contain"
                                   />
                                   <span className="absolute top-2 right-2 px-2 py-0.5 rounded bg-emerald-500 text-slate-950 text-[10px] font-black">
                                     Imagem no Link Ativa

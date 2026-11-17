@@ -139,10 +139,14 @@ NOTIFY pgrst, 'reload schema';
 `;
 
   function normalizeSupabaseUrl(input: string): string {
-    let cleaned = input.trim();
-    const dashboardMatch = cleaned.match(/supabase\.com\/dashboard\/project\/([a-zA-Z0-9_-]+)/);
+    let cleaned = input.replace(/[\s"'`<>\u200B-\u200D\uFEFF]+/g, '');
+    const dashboardMatch = cleaned.match(/supabase\.com\/dashboard\/project\/([a-zA-Z0-9_-]+)/i);
     if (dashboardMatch && dashboardMatch[1]) {
       return `https://${dashboardMatch[1]}.supabase.co`;
+    }
+    const supaHostMatch = cleaned.match(/(?:db\.)?([a-zA-Z0-9_-]+)\.supabase\.(co|in)/i);
+    if (supaHostMatch && supaHostMatch[1]) {
+      return `https://${supaHostMatch[1]}.supabase.${supaHostMatch[2].toLowerCase()}`;
     }
     if (!cleaned.includes('.') && !cleaned.includes('/') && cleaned.length >= 8) {
       return `https://${cleaned}.supabase.co`;
@@ -152,7 +156,7 @@ NOTIFY pgrst, 'reload schema';
     }
     try {
       const urlObj = new URL(cleaned);
-      let host = urlObj.hostname;
+      let host = urlObj.hostname.replace(/^db\./i, '');
       if (!host.includes('.')) {
         host = `${host}.supabase.co`;
       } else if (!host.endsWith('.supabase.co') && !host.endsWith('.supabase.in') && !host.includes('localhost')) {
@@ -163,9 +167,13 @@ NOTIFY pgrst, 'reload schema';
       }
       return `https://${host}`;
     } catch {
-      const cleanId = cleaned.replace(/https?:\/\//, '').split('/')[0];
+      const cleanId = cleaned.replace(/https?:\/\//i, '').replace(/^db\./i, '').split('/')[0];
       return `https://${cleanId.endsWith('.supabase.co') ? cleanId : cleanId + '.supabase.co'}`;
     }
+  }
+
+  function sanitizeKey(input: string): string {
+    return input.replace(/[\s"'`\u200B-\u200D\uFEFF]+/g, '');
   }
 
   const handleCopySql = () => {
@@ -178,19 +186,31 @@ NOTIFY pgrst, 'reload schema';
 
   const handleSaveAndTest = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!supabaseUrl.trim() || !supabaseKey.trim()) {
+    const rawUrl = supabaseUrl.replace(/[\s"'`<>\u200B-\u200D\uFEFF]+/g, '');
+    const cleanKey = sanitizeKey(supabaseKey);
+
+    if (!rawUrl || !cleanKey) {
       setStatusMessage('Preencha a URL do Projeto e a chave Anon do Supabase.');
       setConnectionStatus('error');
       return;
     }
 
-    const cleanUrl = normalizeSupabaseUrl(supabaseUrl);
+    if (rawUrl.startsWith('eyJ') || rawUrl.startsWith('sb_') || cleanKey.startsWith('http')) {
+      setStatusMessage(
+        'Parece que a URL e a Chave Anon foram coladas nos campos invertidos! Coloque "https://...supabase.co" em Project URL e a chave (eyJ... ou sb_publishable_...) em Project API Key.'
+      );
+      setConnectionStatus('error');
+      return;
+    }
+
+    const cleanUrl = normalizeSupabaseUrl(rawUrl);
     setSupabaseUrl(cleanUrl);
+    setSupabaseKey(cleanKey);
     setIsTesting(true);
     setStatusMessage(null);
 
     try {
-      const client = createClient(cleanUrl, supabaseKey.trim(), {
+      const client = createClient(cleanUrl, cleanKey, {
         auth: { persistSession: false },
       });
 
@@ -199,7 +219,6 @@ NOTIFY pgrst, 'reload schema';
         campCheck.error &&
         (campCheck.error.code === 'PGRST205' || campCheck.error.message?.includes('schema cache'))
       ) {
-        // PostgREST schema cache may still be refreshing right after CREATE TABLE
         await new Promise((r) => setTimeout(r, 2200));
         campCheck = await client.from('autoviral_campaigns').select('id').limit(1);
       }
@@ -214,14 +233,14 @@ NOTIFY pgrst, 'reload schema';
           campErr.message?.includes('schema cache'))
       ) {
         localStorage.setItem('autoviral_supabase_url', cleanUrl);
-        localStorage.setItem('autoviral_supabase_key', supabaseKey.trim());
+        localStorage.setItem('autoviral_supabase_key', cleanKey);
         localStorage.setItem('autoviral_supabase_connected', 'false');
         setConnectionStatus('error');
         const isSchemaCache = campErr.code === 'PGRST205' || campErr.message?.includes('schema cache');
         setStatusMessage(
           isSchemaCache
-            ? 'As tabelas existem ou foram criadas, mas o cache da API do Supabase ainda não atualizou (ou a Project URL é de outro projeto)! Confira se a URL em "Project URL" bate com o projeto onde você rodou o SQL, copie o Script SQL atualizado acima (agora inclui NOTIFY pgrst, \'reload schema\'), rode no SQL Editor e clique em Testar novamente.'
-            : 'Conexão OK, mas faltam as tabelas! Copie o Script SQL do Passo 1 acima, cole no SQL Editor do seu projeto no Supabase (Run) e clique em "Testar, Migrar Tudo & Ativar" novamente.'
+            ? `Tabela não encontrada no cache de ${cleanUrl}. Confira se a URL bate com o projeto onde você rodou o SQL, rode "NOTIFY pgrst, 'reload schema';" no SQL Editor e clique em Testar novamente.`
+            : `Conexão com ${cleanUrl} OK, mas faltam as tabelas! Copie o Script SQL do Passo 1 acima, cole no SQL Editor (Run) e clique em Testar novamente.`
         );
         return;
       }
@@ -232,7 +251,7 @@ NOTIFY pgrst, 'reload schema';
 
       // Store credentials and activate Supabase as Primary DB
       localStorage.setItem('autoviral_supabase_url', cleanUrl);
-      localStorage.setItem('autoviral_supabase_key', supabaseKey.trim());
+      localStorage.setItem('autoviral_supabase_key', cleanKey);
       localStorage.setItem('autoviral_supabase_connected', 'true');
 
       // Migrate ALL local campaigns, Global audiences/groups (e.g. oraciones 1), Brazil audiences/groups, copies, trash
@@ -259,7 +278,14 @@ NOTIFY pgrst, 'reload schema';
     } catch (err: any) {
       console.error(err);
       setConnectionStatus('error');
-      setStatusMessage(`Erro ao conectar com o Supabase: ${err.message || 'Verifique sua URL e chave Anon'}`);
+      const msg = err?.message || String(err || '');
+      if (msg.toLowerCase().includes('failed to fetch')) {
+        setStatusMessage(
+          `Não foi possível alcançar "${cleanUrl}" neste navegador (Failed to fetch). Causas comuns: (1) Alguma extensão do Chrome (AdBlock / Bloqueador de rastreadores) está bloqueando pedidos para *.supabase.co — pause o bloqueador neste site ou teste em Aba Anônima (Ctrl+Shift+N); ou (2) Confira se a Project URL está exatamente como "https://ID-DO-PROJETO.supabase.co" sem espaços ou aspas.`
+        );
+      } else {
+        setStatusMessage(`Erro ao conectar em ${cleanUrl}: ${msg || 'Verifique sua URL e chave Anon'}`);
+      }
     } finally {
       setIsTesting(false);
     }

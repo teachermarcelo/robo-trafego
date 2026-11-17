@@ -9,20 +9,34 @@ let lastKey = '';
 
 const supabaseStoreHashes: Record<string, string> = {};
 
+export function cleanSupabaseCredentialUrl(raw: string): string {
+  const cleaned = (raw || '').replace(/[\s"'`<>\u200B-\u200D\uFEFF]+/g, '');
+  if (!cleaned) return '';
+  const dashboardMatch = cleaned.match(/supabase\.com\/dashboard\/project\/([a-zA-Z0-9_-]+)/i);
+  if (dashboardMatch?.[1]) return `https://${dashboardMatch[1]}.supabase.co`;
+  const hostMatch = cleaned.match(/(?:db\.)?([a-zA-Z0-9_-]+)\.supabase\.(co|in)/i);
+  if (hostMatch?.[1]) return `https://${hostMatch[1]}.supabase.${hostMatch[2].toLowerCase()}`;
+  return cleaned;
+}
+
+export function cleanSupabaseCredentialKey(raw: string): string {
+  return (raw || '').replace(/[\s"'`\u200B-\u200D\uFEFF]+/g, '');
+}
+
 export function getEffectiveSupabaseCredentials(): {
   url: string;
   key: string;
   source: 'local' | 'env' | 'none';
 } {
-  const localUrl = typeof window !== 'undefined' ? localStorage.getItem('autoviral_supabase_url') || '' : '';
-  const localKey = typeof window !== 'undefined' ? localStorage.getItem('autoviral_supabase_key') || '' : '';
+  const localUrl = typeof window !== 'undefined' ? cleanSupabaseCredentialUrl(localStorage.getItem('autoviral_supabase_url') || '') : '';
+  const localKey = typeof window !== 'undefined' ? cleanSupabaseCredentialKey(localStorage.getItem('autoviral_supabase_key') || '') : '';
   if (localUrl && localKey) {
     return { url: localUrl, key: localKey, source: 'local' };
   }
-  const envUrl = ((import.meta as any).env?.VITE_SUPABASE_URL as string | undefined) || '';
-  const envKey = ((import.meta as any).env?.VITE_SUPABASE_ANON_KEY as string | undefined) || '';
+  const envUrl = cleanSupabaseCredentialUrl(((import.meta as any).env?.VITE_SUPABASE_URL as string | undefined) || '');
+  const envKey = cleanSupabaseCredentialKey(((import.meta as any).env?.VITE_SUPABASE_ANON_KEY as string | undefined) || '');
   if (envUrl && envKey) {
-    return { url: envUrl.trim(), key: envKey.trim(), source: 'env' };
+    return { url: envUrl, key: envKey, source: 'env' };
   }
   return { url: '', key: '', source: 'none' };
 }

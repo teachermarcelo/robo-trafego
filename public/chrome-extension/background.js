@@ -1,7 +1,7 @@
 // AutoViral AI Chrome Extension - Background Service Worker (Manifest V3)
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('[AutoViral AI] Extensão v1.4.1 instalada com sucesso!');
+  console.log('[AutoViral AI] Extensão v1.4.2 instalada com sucesso!');
   chrome.storage.local.get(['autoviral_interval', 'autoviral_mapped_groups'], (res) => {
     chrome.storage.local.set({
       autoviral_interval: res.autoviral_interval || 350,
@@ -236,6 +236,149 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     relayToAutoViralTabs(request, (forwardedCount) => {
       sendResponse({ success: true, forwardedCount });
     });
+    return true;
+  }
+
+  if (request.action === 'AUTOVIRAL_MAIN_OPEN_COMPOSER') {
+    const tabId = sender && sender.tab && sender.tab.id;
+    const mode = request.mode === 'simple' ? 'simple' : 'full';
+    if (!tabId || !chrome.scripting || !chrome.scripting.executeScript) {
+      sendResponse({ ok: false });
+      return false;
+    }
+    chrome.scripting.executeScript(
+      {
+        target: { tabId },
+        world: 'MAIN',
+        args: [mode],
+        func: (clickMode) => {
+          try {
+            const candidates = Array.from(
+              document.querySelectorAll('[data-pagelet="GroupInlineComposer"] div[role="button"], div[role="button"], span')
+            );
+            const matched = candidates.find((el) => {
+              const rect = el.getBoundingClientRect();
+              if (rect.width < 60 || rect.height < 16) return false;
+              if (el.closest('div[role="dialog"]')) return false;
+              if (el.closest('[aria-busy="true"]')) return false;
+              const t = (el.innerText || el.getAttribute('aria-label') || '').trim().toLowerCase();
+              return (
+                t === 'escreva algo...' ||
+                t.includes('escreva algo') ||
+                t.includes('no que você está pensando') ||
+                t === 'write something...' ||
+                t.includes('write something') ||
+                t.includes("what's on your mind") ||
+                t.includes('criar publicação pública') ||
+                t.includes('create a public post')
+              );
+            });
+            const trigger = matched ? (matched.closest('div[role="button"]') || matched) : null;
+            if (!trigger) return { found: false };
+            trigger.scrollIntoView({ behavior: 'instant', block: 'center' });
+            const r = trigger.getBoundingClientRect();
+            const cx = Math.round(r.left + r.width / 2);
+            const cy = Math.round(r.top + r.height / 2);
+
+            if (clickMode === 'simple') {
+              trigger.focus();
+              trigger.click();
+              return { found: true, mode: 'simple' };
+            }
+
+            const hoverOpts = {
+              bubbles: true,
+              cancelable: true,
+              view: window,
+              clientX: cx,
+              clientY: cy,
+              pointerId: 1,
+              pointerType: 'mouse',
+              isPrimary: true
+            };
+            trigger.dispatchEvent(new PointerEvent('pointerover', hoverOpts));
+            trigger.dispatchEvent(new MouseEvent('mouseover', hoverOpts));
+
+            setTimeout(() => {
+              const downOpts = {
+                bubbles: true,
+                cancelable: true,
+                view: window,
+                clientX: cx,
+                clientY: cy,
+                button: 0,
+                buttons: 1,
+                pointerId: 1,
+                pointerType: 'mouse',
+                isPrimary: true
+              };
+              const upOpts = { ...downOpts, buttons: 0 };
+              trigger.focus();
+              trigger.dispatchEvent(new PointerEvent('pointerdown', downOpts));
+              trigger.dispatchEvent(new MouseEvent('mousedown', downOpts));
+              trigger.dispatchEvent(new PointerEvent('pointerup', upOpts));
+              trigger.dispatchEvent(new MouseEvent('mouseup', upOpts));
+              trigger.click();
+            }, 350);
+
+            return { found: true, mode: 'full', cx, cy };
+          } catch (err) {
+            return { found: false, error: String(err) };
+          }
+        }
+      },
+      (results) => {
+        void chrome.runtime.lastError;
+        sendResponse({ ok: true, result: results && results[0] ? results[0].result : null });
+      }
+    );
+    return true;
+  }
+
+  if (request.action === 'AUTOVIRAL_MAIN_DISMISS_STUCK_DIALOG') {
+    const tabId = sender && sender.tab && sender.tab.id;
+    if (!tabId || !chrome.scripting || !chrome.scripting.executeScript) {
+      sendResponse({ ok: false });
+      return false;
+    }
+    chrome.scripting.executeScript(
+      {
+        target: { tabId },
+        world: 'MAIN',
+        func: () => {
+          try {
+            const dialogs = Array.from(document.querySelectorAll('div[role="dialog"]'));
+            for (const dlg of dialogs) {
+              const scope = dlg.parentElement || dlg;
+              const closeBtn = scope.querySelector(
+                'div[role="button"][aria-label="Fechar"], div[role="button"][aria-label="Close"], button[aria-label="Fechar"], button[aria-label="Close"]'
+              );
+              if (closeBtn) {
+                closeBtn.click();
+                return true;
+              }
+              dlg.focus && dlg.focus();
+              dlg.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+            }
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+            window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+            const sideBackdrop = document.elementFromPoint(24, Math.round(window.innerHeight / 2));
+            if (sideBackdrop && !dialogs.some((d) => d.contains(sideBackdrop))) {
+              sideBackdrop.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window, clientX: 24, clientY: Math.round(window.innerHeight / 2) }));
+              sideBackdrop.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window, clientX: 24, clientY: Math.round(window.innerHeight / 2) }));
+              sideBackdrop.click();
+            }
+            return true;
+          } catch (e) {
+            return false;
+          }
+        }
+      },
+      () => {
+        void chrome.runtime.lastError;
+        sendResponse({ ok: true });
+      }
+    );
     return true;
   }
 

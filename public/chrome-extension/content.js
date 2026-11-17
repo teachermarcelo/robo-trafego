@@ -1,4 +1,4 @@
-// AutoViral AI Chrome Extension - Content Script V1.4.1
+// AutoViral AI Chrome Extension - Content Script V1.4.2
 // Runs on Facebook, YouTube, Instagram, Pinterest and AutoViral AI Web Platform
 
 (function () {
@@ -691,25 +691,51 @@
       return matched.closest('div[role="button"]') || matched;
     }
 
-    function openComposerWithPreload(trigger) {
+    function copyTextReliably(text) {
+      if (!text) return;
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).catch(() => {});
+        }
+      } catch (e) {}
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0;';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      } catch (e) {}
+    }
+
+    function openComposerWithPreload(trigger, mode) {
       if (!trigger) return;
+      const clickMode = mode === 'simple' ? 'simple' : 'full';
       try {
         trigger.scrollIntoView({ behavior: 'instant', block: 'center' });
       } catch (e) {}
+
+      if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
+        chrome.runtime.sendMessage(
+          { action: 'AUTOVIRAL_MAIN_OPEN_COMPOSER', mode: clickMode },
+          (res) => {
+            if (chrome.runtime.lastError || !res || !res.ok || !res.result || !res.result.found) {
+              try {
+                trigger.focus();
+                trigger.click();
+              } catch (e) {}
+            }
+          }
+        );
+        return;
+      }
+
       try {
-        trigger.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }));
-        trigger.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
-        trigger.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
-      } catch (e) {}
-      setTimeout(() => {
-        try {
-          trigger.focus();
-          trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
-          trigger.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-          trigger.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
-        } catch (e) {}
+        trigger.focus();
         trigger.click();
-      }, 550);
+      } catch (e) {}
     }
 
     function clearStoredPendingGroupPost(slug) {
@@ -817,6 +843,11 @@
 
     function closeStuckCreatePostDialog(dlg) {
       try {
+        if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
+          chrome.runtime.sendMessage({ action: 'AUTOVIRAL_MAIN_DISMISS_STUCK_DIALOG' }, () => {
+            void chrome.runtime.lastError;
+          });
+        }
         if (dlg) {
           const searchScope = dlg.parentElement || dlg;
           const closeBtn = searchScope.querySelector(
@@ -836,12 +867,12 @@
         setTimeout(() => {
           const stillOpen = findCreatePostDialog();
           if (stillOpen) {
-            const cornerEl = document.elementFromPoint(16, 90);
-            if (cornerEl && !stillOpen.contains(cornerEl)) {
-              cornerEl.click();
+            const sideEl = document.elementFromPoint(24, Math.round(window.innerHeight / 2));
+            if (sideEl && !stillOpen.contains(sideEl)) {
+              sideEl.click();
             }
           }
-        }, 160);
+        }, 180);
       } catch (e) {}
     }
 
@@ -1073,9 +1104,7 @@
         scheduleAutoCloseTab(msgEl, cancelAutoBtn, '🚫 Grupo indisponível/excluído (removido da fila)!', 3);
         return;
       }
-      try {
-        navigator.clipboard.writeText(pending.fullText).catch(() => {});
-      } catch (e) {}
+      copyTextReliably(pending.fullText);
 
       let cancelled = false;
       if (cancelAutoBtn) {
@@ -1150,7 +1179,14 @@
 
           // Give Facebook Relay an extra 1.1s after trigger appears so it doesn't open a grey loading skeleton
           setTimeout(() => {
-            openComposerWithPreload(trigger);
+            const reloadKey = `av_skel_reload_${currentSlug}`;
+            const targetTag = String(pending.logId || '1');
+            let prevReloadTag = '';
+            try {
+              prevReloadTag = sessionStorage.getItem(reloadKey) || '';
+            } catch (e) {}
+            const initialMode = prevReloadTag === targetTag ? 'simple' : 'full';
+            openComposerWithPreload(trigger, initialMode);
             if (msgEl) {
               msgEl.textContent = '⏳ Aguardando janela "Criar post" terminar de carregar... NÃO feche esta aba!';
               msgEl.style.color = '#38bdf8';
@@ -1158,14 +1194,17 @@
 
             let boxTries = 0;
             let retriedSkeleton = false;
-            let reopenPauseUntil = Date.now() + 1000;
+            let reopenPauseUntil = Date.now() + 1100;
             const waitTextbox = setInterval(() => {
               if (Date.now() < reopenPauseUntil) return;
               boxTries++;
               const dlg = findCreatePostDialog();
               const textbox = findCreatePostTextbox(dlg);
               if (textbox) {
-                try { sessionStorage.removeItem(`av_skel_reload_${currentSlug}`); } catch (e) {}
+                try {
+                  sessionStorage.removeItem(reloadKey);
+                  sessionStorage.removeItem(`av_skip_auto_modal_${currentSlug}`);
+                } catch (e) {}
                 clearInterval(waitTextbox);
                 setTimeout(() => {
                   textbox.click();
@@ -1207,6 +1246,7 @@
                         }
                         clearInterval(waitPubBtn);
                         if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
+                        copyTextReliably(pending.fullText);
                         if (msgEl) {
                           msgEl.textContent = '📋 Texto copiado na memória! Cole (Ctrl+V) dentro da caixa acima e clique em Postar.';
                           msgEl.style.color = '#fbbf24';
@@ -1243,22 +1283,16 @@
               } else if (boxTries === 16 && !retriedSkeleton) {
                 retriedSkeleton = true;
                 if (msgEl) {
-                  msgEl.textContent = '🔄 Facebook travou ao abrir "Criar post". Tentando destravar...';
+                  msgEl.textContent = '🔄 Facebook travou ao abrir "Criar post". Fechando e tentando clique direto...';
                   msgEl.style.color = '#fbbf24';
                 }
                 closeStuckCreatePostDialog(dlg);
-                reopenPauseUntil = Date.now() + 2600;
+                reopenPauseUntil = Date.now() + 2800;
                 setTimeout(() => {
                   const retryTrigger = findComposerTrigger();
-                  if (retryTrigger) openComposerWithPreload(retryTrigger);
-                }, 1600);
+                  if (retryTrigger) openComposerWithPreload(retryTrigger, 'simple');
+                }, 1700);
               } else if (boxTries === 30) {
-                const reloadKey = `av_skel_reload_${currentSlug}`;
-                const targetTag = String(pending.logId || '1');
-                let prevReloadTag = '';
-                try {
-                  prevReloadTag = sessionStorage.getItem(reloadKey) || '';
-                } catch (e) {}
                 if (prevReloadTag !== targetTag) {
                   clearInterval(waitTextbox);
                   try {
@@ -1273,18 +1307,29 @@
               } else if (boxTries >= 44) {
                 clearInterval(waitTextbox);
                 if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
+                copyTextReliably(pending.fullText);
+                closeStuckCreatePostDialog(dlg);
                 sendRealPostResultToPlatform({
                   logId: pending.logId,
                   groupId: pending.groupId,
                   groupUrl: window.location.href,
                   groupName: pending.groupName,
                   approvalStatus: 'composer_stuck',
-                  note: 'Facebook travou ao abrir "Criar post" (tela cinza). Pause o AdBlock em facebook.com e tente novamente.'
+                  note: 'Facebook travou o modal automático. Texto copiado — clique manual em Escreva algo e Ctrl+V.'
                 });
-                if (msgEl) {
-                  msgEl.textContent = '⚠️ Facebook travou "Criar post" (tela cinza). Pause o AdBlock em facebook.com e clique em "Solicitar Entrada / Preencher Post Agora".';
-                  msgEl.style.color = '#fbbf24';
-                }
+                setTimeout(() => {
+                  const stillBlocked = findCreatePostDialog();
+                  if (stillBlocked && !findCreatePostTextbox(stillBlocked)) {
+                    try {
+                      sessionStorage.setItem(`av_skip_auto_modal_${currentSlug}`, targetTag);
+                    } catch (e) {}
+                    window.location.reload();
+                  } else if (msgEl) {
+                    msgEl.textContent = '📋 Facebook bloqueou o modal automático! Texto já copiado: clique manualmente em "Escreva algo..." e aperte Ctrl+V.';
+                    msgEl.style.color = '#fbbf24';
+                    startSubmissionMonitor(pending, currentSlug, msgEl, false, cancelAutoBtn);
+                  }
+                }, 700);
               }
             }, 480);
           }, 1100);
@@ -1490,7 +1535,13 @@
         };
 
         if (btnFill && pending && pending.fullText) {
-          btnFill.onclick = () => triggerJoinThenPost(true);
+          btnFill.onclick = () => {
+            try {
+              sessionStorage.removeItem(`av_skel_reload_${currentSlug}`);
+              sessionStorage.removeItem(`av_skip_auto_modal_${currentSlug}`);
+            } catch (e) {}
+            triggerJoinThenPost(true);
+          };
         }
 
         if (btnPub && pending) {
@@ -1546,6 +1597,29 @@
             msgEl.textContent = '🚫 Este grupo/link está indisponível ou foi excluído no Facebook ("Este conteúdo não está disponível no momento"). Removido da fila do AutoViral!';
             msgEl.style.color = '#fb7185';
           }
+          return;
+        }
+
+        // If previous run cleared a stuck grey modal, leave screen clean and guide user with copied text
+        let skipAutoModal = false;
+        if (pending && pending.fullText) {
+          const skipKey = `av_skip_auto_modal_${currentSlug}`;
+          const targetTag = String(pending.logId || '1');
+          try {
+            if (sessionStorage.getItem(skipKey) === targetTag) {
+              skipAutoModal = true;
+              sessionStorage.removeItem(skipKey);
+            }
+          } catch (e) {}
+        }
+
+        if (skipAutoModal && pending && pending.fullText) {
+          copyTextReliably(pending.fullText);
+          if (msgEl) {
+            msgEl.textContent = '📋 Tela limpa! Texto copiado: clique manualmente em "Escreva algo..." e aperte Ctrl+V (se abrir normal, o robô confirma sozinho).';
+            msgEl.style.color = '#fbbf24';
+          }
+          startSubmissionMonitor(pending, currentSlug, msgEl, false, cancelAutoBtn);
           return;
         }
 

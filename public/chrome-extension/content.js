@@ -580,7 +580,15 @@
           const rect = el.getBoundingClientRect();
           if (rect.width === 0 || rect.height === 0 || rect.top > 720) continue;
           const txt = ((el.innerText || el.getAttribute('aria-label') || '') + '').trim().toLowerCase();
-          if (txt === 'entrou' || txt === 'joined' || txt.startsWith('entrou ') || txt.startsWith('joined ')) {
+          if (
+            txt === 'entrou' ||
+            txt === 'joined' ||
+            txt === 'unido' ||
+            txt === 'participando' ||
+            txt.startsWith('entrou ') ||
+            txt.startsWith('joined ') ||
+            txt.startsWith('unido ')
+          ) {
             return true;
           }
         }
@@ -596,7 +604,13 @@
           const rect = el.getBoundingClientRect();
           if (rect.width === 0 || rect.height === 0 || rect.top > 760) continue;
           const txt = ((el.innerText || el.getAttribute('aria-label') || '') + '').trim().toLowerCase();
-          if (txt === 'participar do grupo' || txt === 'join group' || txt === 'entrar no grupo') {
+          if (
+            txt === 'participar do grupo' ||
+            txt === 'join group' ||
+            txt === 'entrar no grupo' ||
+            txt === 'unirse al grupo' ||
+            txt === 'solicitar unirse'
+          ) {
             return el;
           }
         }
@@ -616,6 +630,9 @@
             txt === 'cancelar solicitação' ||
             txt === 'cancelar solicitacao' ||
             txt === 'participação pendente' ||
+            txt === 'cancelar solicitud' ||
+            txt === 'solicitud enviada' ||
+            txt === 'pendiente' ||
             txt === 'cancel request' ||
             txt === 'pending' ||
             txt === 'solicitação enviada'
@@ -636,6 +653,8 @@
             txt.includes('responder às perguntas') ||
             txt.includes('perguntas de participação') ||
             txt.includes('regras do grupo') ||
+            txt.includes('responder preguntas') ||
+            txt.includes('reglas del grupo') ||
             txt.includes('answer questions') ||
             txt.includes('membership questions')
           ) {
@@ -655,13 +674,23 @@
         return (
           haystack.includes('você não pode usar este recurso no momento') ||
           haystack.includes('voce nao pode usar este recurso no momento') ||
+          haystack.includes('você está temporariamente bloqueado') ||
+          haystack.includes('voce esta temporariamente bloqueado') ||
+          haystack.includes('você foi bloqueado') ||
           haystack.includes('limitamos a frequência') ||
           haystack.includes('limitamos a frequencia') ||
+          haystack.includes('no puedes usar esta función') ||
+          haystack.includes('no puedes usar esta funcion') ||
+          haystack.includes('bloqueado temporalmente') ||
           haystack.includes("you can't use this feature right now") ||
+          haystack.includes("you're temporarily blocked") ||
+          haystack.includes('you are temporarily blocked') ||
           haystack.includes('we limit how often you can post') ||
           haystack.includes('ação bloqueada') ||
           haystack.includes('action blocked') ||
-          haystack.includes('temporarily blocked')
+          haystack.includes('temporarily blocked') ||
+          haystack.includes('tente novamente mais tarde') ||
+          haystack.includes('try again later')
         );
       } catch (e) {}
       return false;
@@ -1922,15 +1951,15 @@
                 return;
               }
 
-              if (isMembershipPendingApproval() || findJoinGroupButton()) {
+              if (isMembershipPendingApproval()) {
                 if (pending) {
                   if (isJoinOnly) {
                     sendGroupMembershipResultToPlatform({
                       groupId: pending.groupId,
                       groupUrl: window.location.href,
                       groupName: pending.groupName,
-                      membershipStatus: 'join_requested',
-                      note: 'Solicitação de entrada enviada'
+                      membershipStatus: 'awaiting_admin',
+                      note: 'Pendente: solicitação confirmada no Facebook — aguardando admin'
                     });
                   } else {
                     saveWaitingApprovalEntry(pending, currentSlug);
@@ -1951,27 +1980,65 @@
                   msgEl,
                   cancelAutoBtn,
                   isJoinOnly
-                    ? '⏳ Entrada solicitada! Status atualizado no painel.'
+                    ? '⏳ Entrada confirmada como PENDENTE no Facebook!'
                     : '⏳ Entrada solicitada! Cookie & gatilho ativados (fechando aba e postará quando aceitar).',
                   3
                 );
                 return;
               }
 
-              // Joined public group instantly!
+              // If "Join group" button is STILL present after clicking, Facebook ignored/blocked it!
+              if (findJoinGroupButton()) {
+                if (pending) {
+                  if (isJoinOnly) {
+                    sendGroupMembershipResultToPlatform({
+                      groupId: pending.groupId,
+                      groupUrl: window.location.href,
+                      groupName: pending.groupName,
+                      membershipStatus: 'rejected',
+                      note: 'Botão Participar não aceitou clique (tente novamente ou verifique limite)'
+                    });
+                  } else {
+                    sendRealPostResultToPlatform({
+                      logId: pending.logId,
+                      groupId: pending.groupId,
+                      groupUrl: window.location.href,
+                      groupName: pending.groupName,
+                      approvalStatus: 'not_member',
+                      note: 'Botão Participar não respondeu no Facebook'
+                    });
+                  }
+                  clearStoredPendingGroupPost(currentSlug);
+                }
+                if (msgEl) {
+                  msgEl.style.color = '#fb7185';
+                }
+                scheduleAutoCloseTab(msgEl, cancelAutoBtn, '❌ Entrada não confirmada pelo Facebook.', 3);
+                return;
+              }
+
+              // Joined public group — verify real member signal!
+              const confirmedMemberNow = isAlreadyGroupMember();
               if (isJoinOnly && pending) {
                 sendGroupMembershipResultToPlatform({
                   groupId: pending.groupId,
                   groupUrl: window.location.href,
                   groupName: pending.groupName,
-                  membershipStatus: 'authorized',
-                  note: 'Entrada autorizada na hora! Pronto para disparar.'
+                  membershipStatus: confirmedMemberNow ? 'authorized' : 'rejected',
+                  note: confirmedMemberNow
+                    ? 'Aceito na hora! Você já é membro autorizado.'
+                    : 'Sem confirmação clara de entrada no Facebook — verifique o grupo.'
                 });
                 clearStoredPendingGroupPost(currentSlug);
                 if (msgEl) {
-                  msgEl.style.color = '#34d399';
+                  msgEl.style.color = confirmedMemberNow ? '#34d399' : '#fbbf24';
                 }
-                scheduleAutoCloseTab(msgEl, cancelAutoBtn, '✅ Entrada AUTORIZADA na hora! Enviado p/ aba Autorizados.', 2);
+                scheduleAutoCloseTab(
+                  msgEl,
+                  cancelAutoBtn,
+                  confirmedMemberNow ? '✅ ACEITO na hora! Enviado p/ aba Autorizados.' : '⚠️ Sem confirmação direta de membro.',
+                  2
+                );
                 return;
               }
 
@@ -1987,20 +2054,28 @@
             return;
           }
 
-          // Already a member!
+          // Verify real member signal when neither Join nor Pending button is present!
           if (pending && isJoinOnly) {
+            const verifiedMember = isAlreadyGroupMember();
             sendGroupMembershipResultToPlatform({
               groupId: pending.groupId,
               groupUrl: window.location.href,
               groupName: pending.groupName,
-              membershipStatus: 'authorized',
-              note: 'Já é membro autorizado deste grupo!'
+              membershipStatus: verifiedMember ? 'authorized' : 'rejected',
+              note: verifiedMember
+                ? 'Aceito! Já é membro autorizado deste grupo.'
+                : 'Grupo não exibiu botão de membro nem de entrar (verifique acesso/login).'
             });
             clearStoredPendingGroupPost(currentSlug);
             if (msgEl) {
-              msgEl.style.color = '#34d399';
+              msgEl.style.color = verifiedMember ? '#34d399' : '#fbbf24';
             }
-            scheduleAutoCloseTab(msgEl, cancelAutoBtn, '✅ Já é membro AUTORIZADO! Enviado p/ aba Autorizados.', 2);
+            scheduleAutoCloseTab(
+              msgEl,
+              cancelAutoBtn,
+              verifiedMember ? '✅ ACEITO (Já é membro)! Enviado p/ aba Autorizados.' : '⚠️ Status incerto no grupo.',
+              2
+            );
             return;
           }
 

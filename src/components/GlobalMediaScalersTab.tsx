@@ -124,39 +124,63 @@ export interface GlobalGroupItem extends FacebookGroup {
 
 const MEMBERSHIP_STATUS_META: Record<
   GlobalGroupMembershipStatus,
-  { label: string; badgeClass: string }
+  { label: string; shortLabel: string; badgeClass: string; rowClass: string; bannerClass: string }
 > = {
   authorized: {
-    label: '✅ Autorizado',
-    badgeClass: 'bg-emerald-950/70 text-emerald-300 border-emerald-500/50',
+    label: '✅ ACEITO (Membro)',
+    shortLabel: '✅ Aceito',
+    badgeClass: 'bg-emerald-600 text-white border-emerald-400 shadow-sm shadow-emerald-950/60',
+    rowClass: 'border-l-4 border-l-emerald-500 bg-emerald-950/25 hover:bg-emerald-950/40',
+    bannerClass: 'bg-emerald-950/60 border-emerald-500/60 text-emerald-100',
   },
   awaiting_admin: {
-    label: '⏳ Aguardando Admin',
-    badgeClass: 'bg-amber-950/60 text-amber-300 border-amber-500/40',
+    label: '⏳ PENDENTE ADMIN',
+    shortLabel: '⏳ Pendente',
+    badgeClass: 'bg-amber-500 text-slate-950 font-bold border-amber-300 shadow-sm shadow-amber-950/50',
+    rowClass: 'border-l-4 border-l-amber-400 bg-amber-950/25 hover:bg-amber-950/40',
+    bannerClass: 'bg-amber-950/50 border-amber-500/60 text-amber-100',
   },
   join_requested: {
-    label: '📩 Entrada Solicitada',
-    badgeClass: 'bg-sky-950/60 text-sky-300 border-sky-500/40',
+    label: '📩 SOLICITANDO...',
+    shortLabel: '📩 Enviando',
+    badgeClass: 'bg-sky-600 text-white border-sky-400 shadow-sm',
+    rowClass: 'border-l-4 border-l-sky-400 bg-sky-950/25 hover:bg-sky-950/35',
+    bannerClass: 'bg-sky-950/50 border-sky-500/60 text-sky-100',
   },
   questions_pending: {
-    label: '📝 Responder Perguntas',
-    badgeClass: 'bg-indigo-950/60 text-indigo-300 border-indigo-500/40',
-  },
-  rejected: {
-    label: '❌ Não Autorizado',
-    badgeClass: 'bg-rose-950/60 text-rose-300 border-rose-500/40',
+    label: '📝 PERGUNTAS ADMIN',
+    shortLabel: '📝 Perguntas',
+    badgeClass: 'bg-violet-600 text-white border-violet-400 shadow-sm',
+    rowClass: 'border-l-4 border-l-violet-500 bg-violet-950/25 hover:bg-violet-950/40',
+    bannerClass: 'bg-violet-950/50 border-violet-500/60 text-violet-100',
   },
   rate_limited: {
-    label: '🛡️ Limite Temp. FB',
-    badgeClass: 'bg-rose-950/80 text-rose-200 border-rose-500/60',
+    label: '🛡️ BLOQUEADO FB',
+    shortLabel: '🛡️ Bloqueado FB',
+    badgeClass: 'bg-red-600 text-white font-bold border-red-400 shadow-sm shadow-red-950/60',
+    rowClass: 'border-l-4 border-l-red-500 bg-red-950/35 hover:bg-red-950/45',
+    bannerClass: 'bg-red-950/70 border-red-500 text-red-100',
+  },
+  rejected: {
+    label: '❌ RECUSADO / NÃO ENTROU',
+    shortLabel: '❌ Recusado',
+    badgeClass: 'bg-rose-600 text-white border-rose-400 shadow-sm',
+    rowClass: 'border-l-4 border-l-rose-500 bg-rose-950/25 hover:bg-rose-950/35',
+    bannerClass: 'bg-rose-950/60 border-rose-500/60 text-rose-100',
   },
   unavailable: {
-    label: '🚫 Indisponível',
-    badgeClass: 'bg-slate-900 text-slate-400 border-slate-700',
+    label: '🚫 INDISPONÍVEL',
+    shortLabel: '🚫 Indisp.',
+    badgeClass: 'bg-slate-700 text-slate-100 border-slate-500',
+    rowClass: 'border-l-4 border-l-slate-500 bg-slate-900/70 hover:bg-slate-900',
+    bannerClass: 'bg-slate-900 border-slate-600 text-slate-200',
   },
   mapped: {
-    label: '🔵 Mapeado (Novo)',
-    badgeClass: 'bg-slate-900 text-slate-300 border-slate-700',
+    label: '🔵 NOVO (Não Solicitado)',
+    shortLabel: '🔵 Novo',
+    badgeClass: 'bg-blue-900/90 text-blue-100 border-blue-500/70',
+    rowClass: 'border-l-4 border-l-blue-500/80 bg-slate-950 hover:bg-slate-900/80',
+    bannerClass: 'bg-blue-950/50 border-blue-500/50 text-blue-100',
   },
 };
 
@@ -1192,11 +1216,19 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
     updatedAt: string;
   } | null>(null);
   // Staged Membership Pipeline + Authorized vs Status Separation + Numeric Dispatch Limit
-  const [audienceStageFilter, setAudienceStageFilter] = useState<'all' | 'authorized' | 'awaiting' | 'mapped' | 'other'>('all');
+  const [audienceStageFilter, setAudienceStageFilter] = useState<
+    'all' | 'authorized' | 'awaiting' | 'blocked' | 'questions' | 'rejected' | 'mapped'
+  >('all');
   const [batchJoinCountInput, setBatchJoinCountInput] = useState<number>(15);
   const [batchJoinDelaySec, setBatchJoinDelaySec] = useState<number>(12);
   const [isBatchJoinRunning, setIsBatchJoinRunning] = useState<boolean>(false);
   const [batchJoinProgress, setBatchJoinProgress] = useState<{ current: number; total: number; currentGroupName: string } | null>(null);
+  const [lastStage1Response, setLastStage1Response] = useState<{
+    groupName: string;
+    status: GlobalGroupMembershipStatus;
+    note: string;
+    checkedAt: string;
+  } | null>(null);
   const batchJoinTimerRef = useRef<number | null>(null);
 
   const [isVerifyingMemberships, setIsVerifyingMemberships] = useState<boolean>(false);
@@ -1599,23 +1631,46 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
 
     const applyMembershipStatusUpdate = (payload: any) => {
       if (!payload || !payload.membershipStatus) return;
-      const { groupId, groupUrl, membershipStatus, note } = payload;
+      const { groupId, groupUrl, groupName, membershipStatus, note } = payload;
       const cleanSlug = String(groupUrl || '').match(/\/groups\/([^\/?#]+)/i)?.[1]?.toLowerCase() || '';
       const checkedNow = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      const typedStatus = membershipStatus as GlobalGroupMembershipStatus;
 
+      let resolvedName = sanitizeGlobalGroupName(groupName || '');
       setGlobalGroups((prev) =>
         prev.map((g) => {
           const gSlug = String(g.url || '').match(/\/groups\/([^\/?#]+)/i)?.[1]?.toLowerCase() || '';
           const matched = (groupId && g.id === groupId) || (cleanSlug && gSlug === cleanSlug) || (groupUrl && g.url === groupUrl);
           if (!matched) return g;
+          if (!resolvedName) resolvedName = sanitizeGlobalGroupName(g.name);
           return {
             ...g,
-            membershipStatus: membershipStatus as GlobalGroupMembershipStatus,
+            membershipStatus: typedStatus,
             membershipCheckedAt: checkedNow,
             membershipNote: note || '',
           };
         })
       );
+
+      setLastStage1Response({
+        groupName: resolvedName || cleanSlug || 'Grupo Facebook',
+        status: typedStatus,
+        note: note || MEMBERSHIP_STATUS_META[typedStatus]?.label || '',
+        checkedAt: checkedNow,
+      });
+
+      if (typedStatus === 'rate_limited') {
+        if (batchJoinTimerRef.current) {
+          window.clearTimeout(batchJoinTimerRef.current);
+          batchJoinTimerRef.current = null;
+        }
+        setIsBatchJoinRunning(false);
+        setBatchJoinProgress(null);
+        setBanner({
+          message: `🛡️ BLOQUEIO DETECTADO NO FACEBOOK (${resolvedName || 'Grupo'}): envio de solicitações pausado automaticamente para proteger sua conta!`,
+          tone: 'warning',
+        });
+      }
     };
 
     const onMembershipResultEv = (ev: any) => {
@@ -2389,11 +2444,15 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
 
   const handleStartBatchJoin = (limitOverride?: number) => {
     const candidates = activeAudienceGroups.filter(
-      (g) => !g.membershipStatus || g.membershipStatus === 'mapped' || g.membershipStatus === 'rejected'
+      (g) =>
+        !g.membershipStatus ||
+        g.membershipStatus === 'mapped' ||
+        g.membershipStatus === 'rejected' ||
+        g.membershipStatus === 'rate_limited'
     );
     if (candidates.length === 0) {
       setBanner({
-        message: 'Todos os grupos deste público já tiveram entrada solicitada ou estão autorizados!',
+        message: 'Todos os grupos disponíveis deste público já tiveram entrada solicitada, têm perguntas ou estão aceitos!',
         tone: 'info',
       });
       return;
@@ -2407,6 +2466,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
     }
 
     setIsBatchJoinRunning(true);
+    setLastStage1Response(null);
     let idx = 0;
 
     const runStep = () => {
@@ -2414,7 +2474,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
         setIsBatchJoinRunning(false);
         setBatchJoinProgress(null);
         setBanner({
-          message: `Etapa 1 concluída! ${slice.length} solicitações de entrada enviadas. Clique em "Etapa 2: Confirmar Autorizações" para separar os aprovados.`,
+          message: `Etapa 1 concluída! ${slice.length} grupos verificados. Veja os status coloridos abaixo ou clique em "Etapa 2: Confirmar Autorizações".`,
           tone: 'success',
         });
         return;
@@ -2424,7 +2484,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
       const cleanName = sanitizeGlobalGroupName(grp.name);
       setBatchJoinProgress({ current: idx + 1, total: slice.length, currentGroupName: cleanName });
 
-      // Optimistically mark join_requested while extension updates real result
+      // Mark temporarily as in-flight while waiting for real Chrome extension DOM confirmation
       setGlobalGroups((prev) =>
         prev.map((item) =>
           item.id === grp.id
@@ -2432,7 +2492,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                 ...item,
                 membershipStatus: 'join_requested',
                 membershipCheckedAt: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-                membershipNote: 'Solicitando entrada via Etapa 1...',
+                membershipNote: '📩 Abrindo grupo — aguardando resposta real do Facebook...',
               }
             : item
         )
@@ -4378,65 +4438,189 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
 
           {/* STAGED GROUP PIPELINE FOR ACTIVE NAMED AUDIENCE */}
           {activeAudience && (
-            <div className="bg-slate-900 border border-cyan-800/40 rounded-xl p-5 space-y-4">
+            <div className="bg-slate-900 border border-cyan-500/40 rounded-xl p-5 space-y-4 shadow-lg shadow-slate-950/60">
               {(() => {
                 const audAuthorized = activeAudienceGroups.filter((g) => g.membershipStatus === 'authorized');
                 const audAwaiting = activeAudienceGroups.filter(
                   (g) => g.membershipStatus === 'awaiting_admin' || g.membershipStatus === 'join_requested'
                 );
-                const audMapped = activeAudienceGroups.filter((g) => !g.membershipStatus || g.membershipStatus === 'mapped');
-                const audOther = activeAudienceGroups.filter(
-                  (g) =>
-                    g.membershipStatus === 'rejected' ||
-                    g.membershipStatus === 'questions_pending' ||
-                    g.membershipStatus === 'rate_limited' ||
-                    g.membershipStatus === 'unavailable'
+                const audBlocked = activeAudienceGroups.filter((g) => g.membershipStatus === 'rate_limited');
+                const audQuestions = activeAudienceGroups.filter((g) => g.membershipStatus === 'questions_pending');
+                const audRejected = activeAudienceGroups.filter(
+                  (g) => g.membershipStatus === 'rejected' || g.membershipStatus === 'unavailable'
                 );
+                const audMapped = activeAudienceGroups.filter((g) => !g.membershipStatus || g.membershipStatus === 'mapped');
+
                 const filteredStageGroups = activeAudienceGroups.filter((g) => {
                   const st = g.membershipStatus || 'mapped';
                   if (audienceStageFilter === 'all') return true;
                   if (audienceStageFilter === 'authorized') return st === 'authorized';
                   if (audienceStageFilter === 'awaiting') return st === 'awaiting_admin' || st === 'join_requested';
-                  if (audienceStageFilter === 'mapped') return st === 'mapped';
-                  return st === 'rejected' || st === 'questions_pending' || st === 'rate_limited' || st === 'unavailable';
+                  if (audienceStageFilter === 'blocked') return st === 'rate_limited';
+                  if (audienceStageFilter === 'questions') return st === 'questions_pending';
+                  if (audienceStageFilter === 'rejected') return st === 'rejected' || st === 'unavailable';
+                  return st === 'mapped';
                 });
+
+                const stage1AvailableCount = audMapped.length + audRejected.filter((g) => g.membershipStatus === 'rejected').length + audBlocked.length;
 
                 return (
                   <>
-                    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                    {/* Header with direct Audience Selector + Dispatch Shortcut */}
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-800 pb-4">
                       <div>
-                        <div className="flex items-center gap-2 text-xs text-cyan-300 font-semibold">
+                        <div className="flex items-center gap-2 text-sm text-cyan-300 font-bold">
                           <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                          <span>Funil por Etapas do Público Selecionado: {activeAudience.name}</span>
+                          <span>Funil por Etapas & Resposta Real do Facebook</span>
                         </div>
                         <p className="text-xs text-slate-400 mt-0.5">
-                          Etapa 1: Solicitar entrada em lote (sem postar) → Etapa 2: Confirmar autorizações → Etapa 3: Disparar somente nos Autorizados.
+                          Escolha o público abaixo, envie solicitações em lote e acompanhe a resposta real (Aceito, Pendente, Bloqueado, Perguntas ou Recusado).
                         </p>
                       </div>
-                      <div className="flex flex-wrap items-center gap-2">
+
+                      <div className="flex flex-wrap items-center gap-2.5">
+                        {/* Seletor Direto de Público para Solicitar Entrada */}
+                        <div className="flex items-center gap-2 bg-slate-950 border border-cyan-500/50 rounded-lg px-2.5 py-1.5">
+                          <span className="text-[11px] font-bold uppercase tracking-wide text-cyan-300 whitespace-nowrap">
+                            Público Alvo:
+                          </span>
+                          <select
+                            value={activeAudience.id}
+                            onChange={(e) => {
+                              const nextId = e.target.value;
+                              if (batchJoinTimerRef.current) {
+                                window.clearTimeout(batchJoinTimerRef.current);
+                                batchJoinTimerRef.current = null;
+                              }
+                              setIsBatchJoinRunning(false);
+                              setBatchJoinProgress(null);
+                              setLastStage1Response(null);
+                              setSelectedAudienceId(nextId);
+                              setAudienceStageFilter('all');
+                            }}
+                            className="bg-slate-900 border border-slate-700 rounded-md px-2.5 py-1 text-xs font-bold text-white focus:border-cyan-400 focus:outline-none cursor-pointer max-w-[260px]"
+                          >
+                            {globalAudiences.map((aud) => {
+                              const cnt = getGroupsForAudience(aud, globalGroups).length;
+                              return (
+                                <option key={aud.id} value={aud.id}>
+                                  {aud.name} ({aud.countryName} · {cnt} grupos)
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </div>
+
                         <button
                           type="button"
                           onClick={() => {
                             setDispatchQueueSource(audAuthorized.length > 0 ? 'authorized_only' : 'all_audience');
                             setSubTab('bot');
                           }}
-                          className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg inline-flex items-center gap-1.5 cursor-pointer"
+                          className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg inline-flex items-center gap-1.5 cursor-pointer shadow-sm shadow-emerald-950/60"
                         >
                           <Send className="w-3.5 h-3.5" />
-                          <span>Ir p/ Disparo ({audAuthorized.length} Autorizados)</span>
+                          <span>Ir p/ Disparo ({audAuthorized.length} Aceitos)</span>
                         </button>
                       </div>
+                    </div>
+
+                    {/* 6-Tile Colorful Visual Summary Grid (Clickable to Filter) */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => setAudienceStageFilter(audienceStageFilter === 'authorized' ? 'all' : 'authorized')}
+                        className={`text-left rounded-xl p-3 border transition-all cursor-pointer ${
+                          audienceStageFilter === 'authorized'
+                            ? 'bg-emerald-600/30 border-emerald-400 ring-2 ring-emerald-400/50'
+                            : 'bg-emerald-950/35 border-emerald-600/40 hover:border-emerald-400/80'
+                        }`}
+                      >
+                        <div className="text-[11px] font-bold text-emerald-300 uppercase tracking-wide">✅ Aceitos</div>
+                        <div className="text-2xl font-extrabold text-emerald-200 tabular-nums mt-0.5">{audAuthorized.length}</div>
+                        <div className="text-[10px] text-emerald-300/80">Prontos p/ postar</div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setAudienceStageFilter(audienceStageFilter === 'awaiting' ? 'all' : 'awaiting')}
+                        className={`text-left rounded-xl p-3 border transition-all cursor-pointer ${
+                          audienceStageFilter === 'awaiting'
+                            ? 'bg-amber-500/25 border-amber-400 ring-2 ring-amber-400/50'
+                            : 'bg-amber-950/35 border-amber-600/40 hover:border-amber-400/80'
+                        }`}
+                      >
+                        <div className="text-[11px] font-bold text-amber-300 uppercase tracking-wide">⏳ Pendentes</div>
+                        <div className="text-2xl font-extrabold text-amber-200 tabular-nums mt-0.5">{audAwaiting.length}</div>
+                        <div className="text-[10px] text-amber-300/80">Aguardando admin</div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setAudienceStageFilter(audienceStageFilter === 'blocked' ? 'all' : 'blocked')}
+                        className={`text-left rounded-xl p-3 border transition-all cursor-pointer ${
+                          audienceStageFilter === 'blocked'
+                            ? 'bg-red-600/35 border-red-400 ring-2 ring-red-400/50'
+                            : 'bg-red-950/40 border-red-600/50 hover:border-red-400/80'
+                        }`}
+                      >
+                        <div className="text-[11px] font-bold text-red-300 uppercase tracking-wide">🛡️ Bloqueado FB</div>
+                        <div className="text-2xl font-extrabold text-red-200 tabular-nums mt-0.5">{audBlocked.length}</div>
+                        <div className="text-[10px] text-red-300/80">Limite temporário</div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setAudienceStageFilter(audienceStageFilter === 'questions' ? 'all' : 'questions')}
+                        className={`text-left rounded-xl p-3 border transition-all cursor-pointer ${
+                          audienceStageFilter === 'questions'
+                            ? 'bg-violet-600/30 border-violet-400 ring-2 ring-violet-400/50'
+                            : 'bg-violet-950/35 border-violet-600/40 hover:border-violet-400/80'
+                        }`}
+                      >
+                        <div className="text-[11px] font-bold text-violet-300 uppercase tracking-wide">📝 Perguntas</div>
+                        <div className="text-2xl font-extrabold text-violet-200 tabular-nums mt-0.5">{audQuestions.length}</div>
+                        <div className="text-[10px] text-violet-300/80">Exigem questionário</div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setAudienceStageFilter(audienceStageFilter === 'rejected' ? 'all' : 'rejected')}
+                        className={`text-left rounded-xl p-3 border transition-all cursor-pointer ${
+                          audienceStageFilter === 'rejected'
+                            ? 'bg-rose-600/30 border-rose-400 ring-2 ring-rose-400/50'
+                            : 'bg-rose-950/35 border-rose-600/40 hover:border-rose-400/80'
+                        }`}
+                      >
+                        <div className="text-[11px] font-bold text-rose-300 uppercase tracking-wide">❌ Recusados</div>
+                        <div className="text-2xl font-extrabold text-rose-200 tabular-nums mt-0.5">{audRejected.length}</div>
+                        <div className="text-[10px] text-rose-300/80">Não entrou / indisp.</div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setAudienceStageFilter(audienceStageFilter === 'mapped' ? 'all' : 'mapped')}
+                        className={`text-left rounded-xl p-3 border transition-all cursor-pointer ${
+                          audienceStageFilter === 'mapped'
+                            ? 'bg-blue-600/30 border-blue-400 ring-2 ring-blue-400/50'
+                            : 'bg-blue-950/35 border-blue-600/40 hover:border-blue-400/80'
+                        }`}
+                      >
+                        <div className="text-[11px] font-bold text-blue-300 uppercase tracking-wide">🔵 Novos</div>
+                        <div className="text-2xl font-extrabold text-blue-200 tabular-nums mt-0.5">{audMapped.length}</div>
+                        <div className="text-[10px] text-blue-300/80">Aguardando Etapa 1</div>
+                      </button>
                     </div>
 
                     {/* Stage 1 & Stage 2 Controls */}
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                       {/* Etapa 1: Solicitar Entrada em Lote */}
-                      <div className="bg-slate-950 border border-slate-800 rounded-lg p-3.5 space-y-2.5">
+                      <div className="bg-slate-950 border border-cyan-700/40 rounded-lg p-3.5 space-y-2.5">
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-xs font-bold text-white">
-                            Etapa 1 · Solicitar Entrada em Lote ({audMapped.length + audOther.filter((g) => g.membershipStatus === 'rejected').length} disponíveis)
+                            Etapa 1 · Solicitar Entrada em "{activeAudience.name}" ({stage1AvailableCount} disponíveis)
                           </span>
-                          <span className="text-[11px] text-slate-400">Sem postar ainda</span>
+                          <span className="text-[11px] text-cyan-300 font-medium">Sem postar ainda</span>
                         </div>
 
                         <div className="flex flex-wrap items-center gap-2">
@@ -4458,7 +4642,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                               onClick={() => setBatchJoinCountInput(n)}
                               className={`px-2 py-1 text-[11px] rounded border cursor-pointer ${
                                 batchJoinCountInput === n
-                                  ? 'bg-cyan-600/25 border-cyan-400 text-cyan-200 font-bold'
+                                  ? 'bg-cyan-600/30 border-cyan-400 text-cyan-200 font-bold'
                                   : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
                               }`}
                             >
@@ -4501,23 +4685,48 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                             </button>
                           )}
                           {batchJoinProgress && (
-                            <span className="text-[11px] text-cyan-300 font-mono tabular-nums truncate max-w-[240px]">
-                              {batchJoinProgress.current}/{batchJoinProgress.total} · {batchJoinProgress.currentGroupName}
+                            <span className="text-[11px] text-cyan-300 font-mono tabular-nums truncate max-w-[260px]">
+                              ⏳ {batchJoinProgress.current}/{batchJoinProgress.total} · {batchJoinProgress.currentGroupName}
                             </span>
                           )}
                         </div>
+
+                        {/* Live Confirmed Facebook Response Ticker */}
+                        {lastStage1Response && (
+                          <div
+                            className={`rounded-lg border px-3 py-2 text-xs flex flex-wrap items-center justify-between gap-2 ${
+                              (MEMBERSHIP_STATUS_META[lastStage1Response.status] || MEMBERSHIP_STATUS_META.mapped).bannerClass
+                            }`}
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="font-bold truncate">
+                                Última resposta real do Facebook: {lastStage1Response.groupName}
+                              </div>
+                              <div className="text-[11px] opacity-90 truncate">
+                                {lastStage1Response.note} · às {lastStage1Response.checkedAt}
+                              </div>
+                            </div>
+                            <span
+                              className={`px-2 py-0.5 text-[11px] font-bold rounded border shrink-0 ${
+                                (MEMBERSHIP_STATUS_META[lastStage1Response.status] || MEMBERSHIP_STATUS_META.mapped).badgeClass
+                              }`}
+                            >
+                              {(MEMBERSHIP_STATUS_META[lastStage1Response.status] || MEMBERSHIP_STATUS_META.mapped).label}
+                            </span>
+                          </div>
+                        )}
                       </div>
 
                       {/* Etapa 2: Confirmar Autorizações */}
-                      <div className="bg-slate-950 border border-slate-800 rounded-lg p-3.5 space-y-2.5">
+                      <div className="bg-slate-950 border border-emerald-700/40 rounded-lg p-3.5 space-y-2.5">
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-xs font-bold text-white">
-                            Etapa 2 · Confirmar Quem Já Autorizou
+                            Etapa 2 · Confirmar Resposta Real do Facebook
                           </span>
-                          <span className="text-[11px] text-emerald-400">Verifica sem abrir abas</span>
+                          <span className="text-[11px] text-emerald-400 font-medium">Verifica sem abrir abas</span>
                         </div>
                         <p className="text-[11px] text-slate-400">
-                          A plataforma consulta cada grupo via extensão Chrome: aprovados vão para <strong>✅ Autorizado</strong> e os demais recebem status exato.
+                          Confere no Facebook a situação exata de cada grupo: <strong>✅ Aceito</strong>, <strong>⏳ Pendente Admin</strong>, <strong>🛡️ Bloqueado FB</strong>, <strong>📝 Perguntas</strong> ou <strong>❌ Recusado</strong>.
                         </p>
                         <div className="flex flex-wrap items-center gap-2 pt-0.5">
                           <button
@@ -4527,7 +4736,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                             className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold rounded-md inline-flex items-center gap-1.5 cursor-pointer"
                           >
                             <RefreshCw className={`w-3.5 h-3.5 ${isVerifyingMemberships ? 'animate-spin' : ''}`} />
-                            <span>{isVerifyingMemberships ? 'Verificando...' : 'Confirmar Autorizações Pendentes'}</span>
+                            <span>{isVerifyingMemberships ? 'Verificando...' : 'Confirmar Pendentes Agora'}</span>
                           </button>
                           <button
                             type="button"
@@ -4539,21 +4748,26 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                           </button>
                         </div>
                         {verifyProgress && verifyProgress.total > 0 && (
-                          <div className="text-[11px] text-slate-300 font-mono tabular-nums pt-0.5">
-                            Checados: {verifyProgress.checked}/{verifyProgress.total} · ✅ {verifyProgress.authorizedCount} · ⏳ {verifyProgress.awaitingCount} · ❌ {verifyProgress.rejectedCount}
+                          <div className="text-[11px] text-slate-200 font-mono tabular-nums pt-1 flex flex-wrap gap-2">
+                            <span>Checados: {verifyProgress.checked}/{verifyProgress.total}</span>
+                            <span className="text-emerald-300">✅ {verifyProgress.authorizedCount}</span>
+                            <span className="text-amber-300">⏳ {verifyProgress.awaitingCount}</span>
+                            <span className="text-rose-300">❌ {verifyProgress.rejectedCount}</span>
                           </div>
                         )}
                       </div>
                     </div>
 
-                    {/* Stage Filter Tabs: Todos vs Autorizado vs Aguardando vs Mapeados vs Não Autorizados */}
+                    {/* Colorful Stage Filter Pills */}
                     <div className="flex flex-wrap items-center gap-1.5">
                       {[
-                        { id: 'all' as const, label: `Todos (${activeAudienceGroups.length})` },
-                        { id: 'authorized' as const, label: `✅ Autorizados (${audAuthorized.length})` },
-                        { id: 'awaiting' as const, label: `⏳ Aguardando Admin (${audAwaiting.length})` },
-                        { id: 'mapped' as const, label: `🔵 Mapeados (${audMapped.length})` },
-                        { id: 'other' as const, label: `⚠️ Não Autorizados / Perguntas (${audOther.length})` },
+                        { id: 'all' as const, label: `Todos (${activeAudienceGroups.length})`, activeClass: 'bg-cyan-600 text-white border-cyan-400' },
+                        { id: 'authorized' as const, label: `✅ Aceitos (${audAuthorized.length})`, activeClass: 'bg-emerald-600 text-white border-emerald-400' },
+                        { id: 'awaiting' as const, label: `⏳ Pendentes (${audAwaiting.length})`, activeClass: 'bg-amber-500 text-slate-950 border-amber-300 font-bold' },
+                        { id: 'blocked' as const, label: `🛡️ Bloqueados FB (${audBlocked.length})`, activeClass: 'bg-red-600 text-white border-red-400' },
+                        { id: 'questions' as const, label: `📝 Perguntas (${audQuestions.length})`, activeClass: 'bg-violet-600 text-white border-violet-400' },
+                        { id: 'rejected' as const, label: `❌ Recusados (${audRejected.length})`, activeClass: 'bg-rose-600 text-white border-rose-400' },
+                        { id: 'mapped' as const, label: `🔵 Novos (${audMapped.length})`, activeClass: 'bg-blue-600 text-white border-blue-400' },
                       ].map((tab) => (
                         <button
                           key={tab.id}
@@ -4561,10 +4775,8 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                           onClick={() => setAudienceStageFilter(tab.id)}
                           className={`px-3 py-1.5 text-xs font-semibold rounded-lg border cursor-pointer tabular-nums transition-colors ${
                             audienceStageFilter === tab.id
-                              ? tab.id === 'authorized'
-                                ? 'bg-emerald-600/25 border-emerald-500 text-emerald-200'
-                                : 'bg-cyan-600/25 border-cyan-500 text-cyan-200'
-                              : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                              ? tab.activeClass
+                              : 'bg-slate-950 border-slate-800 text-slate-300 hover:text-white hover:border-slate-600'
                           }`}
                         >
                           {tab.label}
@@ -4572,56 +4784,84 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                       ))}
                     </div>
 
-                    {/* Filtered Group Status List */}
-                    <div className="max-h-72 overflow-y-auto divide-y divide-slate-800 border border-slate-800 rounded-lg bg-slate-950">
+                    {/* High-Contrast Color-Coded Group Status List */}
+                    <div className="max-h-80 overflow-y-auto divide-y divide-slate-800/80 border border-slate-700/80 rounded-xl bg-slate-950">
                       {filteredStageGroups.length === 0 ? (
-                        <div className="p-4 text-xs text-slate-400 text-center">
-                          Nenhum grupo nesta aba ainda. Execute a Etapa 1 ou Etapa 2 acima para classificar automaticamente.
+                        <div className="p-5 text-xs text-slate-400 text-center">
+                          Nenhum grupo com este status no público <strong>{activeAudience.name}</strong>.
                         </div>
                       ) : (
-                        filteredStageGroups.slice(0, 120).map((g, idx) => {
+                        filteredStageGroups.slice(0, 150).map((g, idx) => {
                           const st = g.membershipStatus || 'mapped';
                           const meta = MEMBERSHIP_STATUS_META[st] || MEMBERSHIP_STATUS_META.mapped;
                           return (
-                            <div key={g.id} className="px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+                            <div
+                              key={g.id}
+                              className={`px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs transition-colors ${meta.rowClass}`}
+                            >
                               <div className="min-w-0 flex-1">
-                                <div className="font-medium text-white truncate">
-                                  {idx + 1}. {sanitizeGlobalGroupName(g.name)}
+                                <div className="flex items-center gap-2">
+                                  <span className="font-semibold text-white truncate">
+                                    {idx + 1}. {sanitizeGlobalGroupName(g.name)}
+                                  </span>
+                                  <a
+                                    href={g.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-[11px] text-cyan-300 hover:text-cyan-200 underline shrink-0"
+                                  >
+                                    Abrir ↗
+                                  </a>
                                 </div>
-                                <div className="text-[11px] text-slate-400 flex flex-wrap items-center gap-2">
-                                  <span>{(g.membersCount || 0).toLocaleString('pt-BR')} membros</span>
-                                  {g.membershipCheckedAt && <span>· Checado {g.membershipCheckedAt}</span>}
-                                  {g.membershipNote && <span className="truncate max-w-[240px]">· {g.membershipNote}</span>}
+                                <div className="text-[11px] text-slate-300 flex flex-wrap items-center gap-2 mt-0.5">
+                                  <span className="text-slate-400">{(g.membersCount || 0).toLocaleString('pt-BR')} membros</span>
+                                  {g.membershipCheckedAt && (
+                                    <span className="text-slate-400">· Confirmado às {g.membershipCheckedAt}</span>
+                                  )}
+                                  {g.membershipNote && (
+                                    <span className="font-medium text-slate-200 truncate max-w-[340px]">
+                                      · {g.membershipNote}
+                                    </span>
+                                  )}
                                 </div>
                               </div>
                               <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-                                <span className={`px-2 py-0.5 text-[11px] font-semibold rounded border ${meta.badgeClass}`}>
+                                <span className={`px-2.5 py-1 text-[11px] font-bold rounded-md border ${meta.badgeClass}`}>
                                   {meta.label}
                                 </span>
                                 {st !== 'authorized' && (
                                   <button
                                     type="button"
                                     onClick={() => handleManualSetGroupMembership(g.id, 'authorized')}
-                                    className="px-2 py-0.5 bg-emerald-950/60 hover:bg-emerald-900/70 border border-emerald-700/50 text-emerald-300 text-[11px] rounded cursor-pointer"
-                                    title="Confirmar este grupo como Autorizado"
+                                    className="px-2 py-1 bg-emerald-950/70 hover:bg-emerald-900 border border-emerald-600/60 text-emerald-200 text-[11px] font-medium rounded cursor-pointer"
+                                    title="Confirmar este grupo como Aceito"
                                   >
-                                    Autorizar
+                                    Aceito
                                   </button>
                                 )}
                                 {st !== 'awaiting_admin' && (
                                   <button
                                     type="button"
                                     onClick={() => handleManualSetGroupMembership(g.id, 'awaiting_admin')}
-                                    className="px-2 py-0.5 bg-amber-950/50 hover:bg-amber-900/60 border border-amber-700/40 text-amber-300 text-[11px] rounded cursor-pointer"
+                                    className="px-2 py-1 bg-amber-950/70 hover:bg-amber-900 border border-amber-600/60 text-amber-200 text-[11px] font-medium rounded cursor-pointer"
                                   >
-                                    Aguardando
+                                    Pendente
+                                  </button>
+                                )}
+                                {st !== 'rate_limited' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleManualSetGroupMembership(g.id, 'rate_limited')}
+                                    className="px-2 py-1 bg-red-950/70 hover:bg-red-900 border border-red-600/60 text-red-200 text-[11px] font-medium rounded cursor-pointer"
+                                  >
+                                    Bloqueado
                                   </button>
                                 )}
                                 {st !== 'rejected' && (
                                   <button
                                     type="button"
                                     onClick={() => handleManualSetGroupMembership(g.id, 'rejected')}
-                                    className="px-2 py-0.5 bg-rose-950/50 hover:bg-rose-900/60 border border-rose-700/40 text-rose-300 text-[11px] rounded cursor-pointer"
+                                    className="px-2 py-1 bg-rose-950/70 hover:bg-rose-900 border border-rose-600/60 text-rose-200 text-[11px] font-medium rounded cursor-pointer"
                                   >
                                     Recusado
                                   </button>

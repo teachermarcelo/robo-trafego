@@ -25,6 +25,7 @@ import {
   saveTrackingEventToSupabase,
   saveWorkspaceJsonToSupabase,
   fetchWorkspaceJsonFromSupabase,
+  autoFailoverToSupabaseOnQuota,
 } from './supabaseClient';
 
 // Initialize Firebase App
@@ -39,6 +40,14 @@ async function testConnection() {
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error) {
+    if (isQuotaExceededError(error)) {
+      firestoreWritesPausedUntil = Date.now() + 15 * 60 * 1000;
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('autoviral_firebase_quota_exceeded'));
+      }
+      autoFailoverToSupabaseOnQuota().catch(() => {});
+      return;
+    }
     if (error instanceof Error && error.message.includes('the client is offline')) {
       console.warn('Firebase client is offline or starting up.');
     }
@@ -148,20 +157,24 @@ export function resetFirebaseQuotaPause(): void {
   firestoreWritesPausedUntil = 0;
 }
 
+function triggerQuotaExhaustedFailover(note: string) {
+  firestoreWritesPausedUntil = Date.now() + 15 * 60 * 1000;
+  const now = Date.now();
+  if (now - lastQuotaNoticeAt > 30000) {
+    lastQuotaNoticeAt = now;
+    console.warn(note);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('autoviral_firebase_quota_exceeded'));
+    }
+  }
+  autoFailoverToSupabaseOnQuota().catch(() => {});
+}
+
 function handleWriteError(error: unknown, operationType: OperationType, path: string | null): void {
   if (isQuotaExceededError(error)) {
-    // Pause client write attempts for 15 minutes so SDK backoff/retry doesn't flood quota
-    firestoreWritesPausedUntil = Date.now() + 15 * 60 * 1000;
-    const now = Date.now();
-    if (now - lastQuotaNoticeAt > 30000) {
-      lastQuotaNoticeAt = now;
-      console.warn(
-        '[Firebase Quota] Cota diária gratuita de gravações do Firestore atingida. Modo offline/local ativado automaticamente até o reset diário.'
-      );
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('autoviral_firebase_quota_exceeded'));
-      }
-    }
+    triggerQuotaExhaustedFailover(
+      '[Firebase Quota] Cota diária gratuita de gravações do Firestore atingida. Modo offline/failover ativado automaticamente.'
+    );
     return;
   }
   handleFirestoreError(error, operationType, path);
@@ -226,6 +239,9 @@ export function subscribeFirebaseCampaigns(
     },
     (error) => {
       console.warn('Firebase campaigns subscription error:', error);
+      if (isQuotaExceededError(error)) {
+        triggerQuotaExhaustedFailover('[Firebase Quota] Cota diária de leituras do Firestore atingida.');
+      }
       if (onError) onError(error);
     }
   );
@@ -813,6 +829,9 @@ export function subscribeWorkspaceSync(
     },
     (err) => {
       console.warn('Workspace sync subscription error:', err);
+      if (isQuotaExceededError(err)) {
+        triggerQuotaExhaustedFailover('[Firebase Quota] Cota atingida ao ler workspace.');
+      }
       if (onError) onError(err);
     }
   );
@@ -866,6 +885,7 @@ export interface GlobalWorkspaceSyncData {
   globalTrashAudiences?: any[];
   globalGroups?: any[];
   globalOffers?: any[];
+  dismissedRecoveryKeys?: string[];
   updatedAt?: string;
 }
 
@@ -978,6 +998,9 @@ export function subscribeGlobalWorkspaceSync(
     },
     (err) => {
       console.warn('Global workspace sync subscription error:', err);
+      if (isQuotaExceededError(err)) {
+        triggerQuotaExhaustedFailover('[Firebase Quota] Cota atingida ao ler workspace global.');
+      }
       if (onError) onError(err);
     }
   );

@@ -41,6 +41,7 @@ import {
   getPrimaryCloudProvider,
   fetchAllAutoViralFromSupabase,
   pushLocalSnapshotToSupabase,
+  autoFailoverToSupabaseOnQuota,
   CloudDbProvider,
 } from './lib/supabaseClient';
 import {
@@ -156,6 +157,7 @@ export default function App() {
     getPrimaryCloudProvider() === 'supabase' ? 'synced' : 'connecting'
   );
   const [firebaseQuotaExceeded, setFirebaseQuotaExceeded] = useState<boolean>(false);
+  const [autoSwitchedBanner, setAutoSwitchedBanner] = useState<boolean>(false);
   const [cloudCampaignsCount, setCloudCampaignsCount] = useState<number>(0);
   const [isSyncingCloud, setIsSyncingCloud] = useState<boolean>(false);
   const [recoverableCampaigns, setRecoverableCampaigns] = useState<Campaign[]>([]);
@@ -315,8 +317,24 @@ export default function App() {
       }
     };
 
+    // Merge dismissedRecoveryKeys first so already-restored/dismissed trash or orphans never resurrect from cloud
+    if (Array.isArray(cloud.dismissedRecoveryKeys) && cloud.dismissedRecoveryKeys.length > 0) {
+      const prevDismissed: string[] = safeRead('autoviral_global_dismissed_recovery_v1') || [];
+      const mergedDismissedSet = new Set([
+        ...prevDismissed.map((k) => String(k).toLowerCase()),
+        ...cloud.dismissedRecoveryKeys.map((k) => String(k).toLowerCase()),
+      ]);
+      safeWrite('autoviral_global_dismissed_recovery_v1', Array.from(mergedDismissedSet).slice(-400));
+    }
+
+    const dismissedList: string[] = safeRead('autoviral_global_dismissed_recovery_v1') || [];
+    const dismissedSet = new Set(dismissedList.map((k) => String(k).toLowerCase()));
+    const filteredCloudTrash = Array.isArray(cloud.globalTrashAudiences)
+      ? cloud.globalTrashAudiences.filter((t: any) => !t?.id || !dismissedSet.has(`trash:${String(t.id).toLowerCase()}`))
+      : undefined;
+
     mergeArrayByKey('autoviral_global_audiences_v1', cloud.globalAudiences, 'id');
-    mergeArrayByKey('autoviral_global_audiences_trash_v1', cloud.globalTrashAudiences, 'id');
+    mergeArrayByKey('autoviral_global_audiences_trash_v1', filteredCloudTrash, 'id');
     mergeArrayByKey('autoviral_global_fb_groups_v1', cloud.globalGroups, 'url');
     mergeArrayByKey('autoviral_global_offers_v1', cloud.globalOffers, 'id');
 
@@ -484,18 +502,38 @@ export default function App() {
         if (cloudProviderRef.current === 'supabase') return;
         console.warn('Firebase campaigns sync notice:', err);
         setFirebaseSyncStatus('error');
+        const msg = String(err?.message || err || '').toLowerCase();
+        if (msg.includes('quota') || msg.includes('resource-exhausted')) {
+          setFirebaseQuotaExceeded(true);
+          autoFailoverToSupabaseOnQuota().catch(() => {});
+        }
       }
     );
 
     const onQuotaExceeded = () => {
       if (cloudProviderRef.current === 'supabase') return;
       setFirebaseQuotaExceeded(true);
+      autoFailoverToSupabaseOnQuota().then((switched) => {
+        if (switched) {
+          setAutoSwitchedBanner(true);
+          setFirebaseQuotaExceeded(false);
+        }
+      });
+    };
+    const onAutoFailover = () => {
+      cloudProviderRef.current = 'supabase';
+      setCloudProvider('supabase');
+      setFirebaseQuotaExceeded(false);
+      setFirebaseSyncStatus('synced');
+      setAutoSwitchedBanner(true);
     };
     window.addEventListener('autoviral_firebase_quota_exceeded', onQuotaExceeded);
+    window.addEventListener('autoviral_auto_failover_activated', onAutoFailover);
 
     return () => {
       unsubCampaigns();
       window.removeEventListener('autoviral_firebase_quota_exceeded', onQuotaExceeded);
+      window.removeEventListener('autoviral_auto_failover_activated', onAutoFailover);
     };
   }, [deletedCampaignIds, cloudProvider]);
 
@@ -1687,6 +1725,25 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6">
+        {autoSwitchedBanner && cloudProvider === 'supabase' && (
+          <div className="mb-5 rounded-2xl border border-emerald-600/60 bg-emerald-950/60 px-4 py-3 text-xs text-emerald-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="space-y-0.5">
+              <p className="font-bold text-emerald-300">
+                ⚡ Cota do Firebase atingida — Supabase ativado AUTOMATICAMENTE!
+              </p>
+              <p className="text-emerald-100/85">
+                Seus dados continuam salvando na nuvem do projeto Supabase sem limite diário do Spark.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setAutoSwitchedBanner(false)}
+              className="px-3 py-1.5 rounded-lg bg-emerald-800/80 hover:bg-emerald-700 text-white font-semibold whitespace-nowrap self-start sm:self-center cursor-pointer"
+            >
+              OK
+            </button>
+          </div>
+        )}
         {firebaseQuotaExceeded && cloudProvider !== 'supabase' && (
           <div className="mb-5 rounded-2xl border border-amber-700/60 bg-amber-950/60 px-4 py-3 text-xs text-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="space-y-1">
@@ -1694,16 +1751,25 @@ export default function App() {
                 Limite diário gratuito de gravações do Firestore atingido (Cota Spark)
               </p>
               <p className="text-amber-100/90">
-                Suas campanhas e alterações continuam sendo salvas localmente sem perda de dados. A cota gratuita do Firebase reinicia automaticamente amanhã (ou você pode ampliar o plano no console do Firebase).
+                Suas campanhas e alterações continuam sendo salvas localmente sem perda de dados. Conecte seu Supabase em 1 clique para trocar de banco agora e ativar a troca automática sempre que a cota atingir o limite.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => setFirebaseQuotaExceeded(false)}
-              className="px-3 py-1.5 rounded-lg bg-amber-900/80 hover:bg-amber-800 text-amber-100 font-semibold whitespace-nowrap self-start sm:self-center cursor-pointer"
-            >
-              Entendi
-            </button>
+            <div className="flex items-center gap-2 shrink-0 self-start sm:self-center">
+              <button
+                type="button"
+                onClick={() => setIsSupabaseModalOpen(true)}
+                className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold whitespace-nowrap cursor-pointer"
+              >
+                Trocar para Supabase agora →
+              </button>
+              <button
+                type="button"
+                onClick={() => setFirebaseQuotaExceeded(false)}
+                className="px-3 py-1.5 rounded-lg bg-amber-900/80 hover:bg-amber-800 text-amber-100 font-semibold whitespace-nowrap cursor-pointer"
+              >
+                Entendi
+              </button>
+            </div>
           </div>
         )}
         {activeTab === 'dashboard' && (

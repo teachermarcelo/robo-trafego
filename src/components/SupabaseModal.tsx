@@ -11,8 +11,6 @@ import {
   Download,
   ShieldCheck,
 } from 'lucide-react';
-import { createClient } from '@supabase/supabase-js';
-import { Campaign, TrackingEvent } from '../types';
 import {
   getPrimaryCloudProvider,
   setPrimaryCloudProvider,
@@ -20,7 +18,14 @@ import {
   fetchAllAutoViralFromSupabase,
   getEffectiveSupabaseCredentials,
   isSupabaseConnected,
+  createResilientSupabaseClient,
+  cleanSupabaseCredentialUrl,
+  cleanSupabaseCredentialKey,
+  validateSupabaseKeyWarning,
+  isUsingSupabaseProxy,
 } from '../lib/supabaseClient';
+
+import { Campaign, TrackingEvent } from '../types';
 
 interface SupabaseModalProps {
   isOpen: boolean;
@@ -30,6 +35,8 @@ interface SupabaseModalProps {
   onSyncFromSupabase?: () => Promise<void>;
 }
 
+const DEFAULT_FLUENT_URL = 'https://nuyzvpkvawixidotuuio.supabase.co';
+
 export const SupabaseModal: React.FC<SupabaseModalProps> = ({
   isOpen,
   onClose,
@@ -37,10 +44,17 @@ export const SupabaseModal: React.FC<SupabaseModalProps> = ({
   onSyncFromSupabase,
 }) => {
   const [supabaseUrl, setSupabaseUrl] = useState(() => {
-    return getEffectiveSupabaseCredentials().url;
+    return getEffectiveSupabaseCredentials().url || DEFAULT_FLUENT_URL;
   });
   const [supabaseKey, setSupabaseKey] = useState(() => {
     return getEffectiveSupabaseCredentials().key;
+  });
+  const [autoFailover, setAutoFailover] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('autoviral_auto_failover') !== 'disabled';
+    } catch {
+      return true;
+    }
   });
   const [isTesting, setIsTesting] = useState(false);
   const [isPulling, setIsPulling] = useState(false);
@@ -139,7 +153,8 @@ NOTIFY pgrst, 'reload schema';
 `;
 
   function normalizeSupabaseUrl(input: string): string {
-    let cleaned = input.replace(/[\s"'`<>\u200B-\u200D\uFEFF]+/g, '');
+    const preCleaned = cleanSupabaseCredentialUrl(input);
+    let cleaned = preCleaned.replace(/[\s"'`<>\u200B-\u200D\uFEFF]+/g, '');
     const dashboardMatch = cleaned.match(/supabase\.com\/dashboard\/project\/([a-zA-Z0-9_-]+)/i);
     if (dashboardMatch && dashboardMatch[1]) {
       return `https://${dashboardMatch[1]}.supabase.co`;
@@ -173,7 +188,7 @@ NOTIFY pgrst, 'reload schema';
   }
 
   function sanitizeKey(input: string): string {
-    return input.replace(/[\s"'`\u200B-\u200D\uFEFF]+/g, '');
+    return cleanSupabaseCredentialKey(input);
   }
 
   const handleCopySql = () => {
@@ -184,13 +199,21 @@ NOTIFY pgrst, 'reload schema';
     setTimeout(() => setCopiedSql(false), 2000);
   };
 
+  const handleToggleAutoFailover = () => {
+    const next = !autoFailover;
+    setAutoFailover(next);
+    try {
+      localStorage.setItem('autoviral_auto_failover', next ? 'enabled' : 'disabled');
+    } catch {}
+  };
+
   const handleSaveAndTest = async (e: React.FormEvent) => {
     e.preventDefault();
     const rawUrl = supabaseUrl.replace(/[\s"'`<>\u200B-\u200D\uFEFF]+/g, '');
     const cleanKey = sanitizeKey(supabaseKey);
 
     if (!rawUrl || !cleanKey) {
-      setStatusMessage('Preencha a URL do Projeto e a chave Anon do Supabase.');
+      setStatusMessage('Preencha a URL do Projeto e a chave Anon/Publishable do Supabase.');
       setConnectionStatus('error');
       return;
     }
@@ -203,6 +226,13 @@ NOTIFY pgrst, 'reload schema';
       return;
     }
 
+    const keyWarning = validateSupabaseKeyWarning(cleanKey);
+    if (keyWarning) {
+      setStatusMessage(keyWarning);
+      setConnectionStatus('error');
+      return;
+    }
+
     const cleanUrl = normalizeSupabaseUrl(rawUrl);
     setSupabaseUrl(cleanUrl);
     setSupabaseKey(cleanKey);
@@ -210,16 +240,14 @@ NOTIFY pgrst, 'reload schema';
     setStatusMessage(null);
 
     try {
-      const client = createClient(cleanUrl, cleanKey, {
-        auth: { persistSession: false },
-      });
+      const client = createResilientSupabaseClient(cleanUrl, cleanKey);
 
       let campCheck = await client.from('autoviral_campaigns').select('id').limit(1);
       if (
         campCheck.error &&
         (campCheck.error.code === 'PGRST205' || campCheck.error.message?.includes('schema cache'))
       ) {
-        await new Promise((r) => setTimeout(r, 2200));
+        await new Promise((r) => setTimeout(r, 2000));
         campCheck = await client.from('autoviral_campaigns').select('id').limit(1);
       }
 
@@ -258,10 +286,18 @@ NOTIFY pgrst, 'reload schema';
       const pushRes = await pushLocalSnapshotToSupabase(campaigns);
 
       if (pushRes.missingStoreTable) {
+        localStorage.setItem('autoviral_supabase_connected', 'false');
         setConnectionStatus('error');
         setStatusMessage(
           'Falta criar a nova tabela "autoviral_workspace_store"! Copie o SQL atualizado no Passo 1, rode no SQL Editor do Supabase (é 100% seguro, não mexe no fluentimmersion) e clique em Testar novamente.'
         );
+        return;
+      }
+
+      if (!pushRes.ok && pushRes.error) {
+        localStorage.setItem('autoviral_supabase_connected', 'false');
+        setConnectionStatus('error');
+        setStatusMessage(`Erro ao migrar dados para ${cleanUrl}: ${pushRes.error}`);
         return;
       }
 
@@ -272,8 +308,9 @@ NOTIFY pgrst, 'reload schema';
         await onSyncFromSupabase().catch(() => {});
       }
 
+      const viaProxyNote = isUsingSupabaseProxy() ? ' (via Proxy Anti-Bloqueio do servidor!)' : '';
       setStatusMessage(
-        `✅ Supabase conectado e ativado como BANCO PRINCIPAL! (${pushRes.campaignsSaved} campanhas + Públicos & Grupos Globais/Brasil + Lixeira sincronizados com zero limite diário do Firebase).`
+        `✅ Supabase conectado e ativado como BANCO PRINCIPAL${viaProxyNote}! (${pushRes.campaignsSaved} campanhas + Públicos & Grupos Globais/Brasil + Lixeira sincronizados com zero limite diário do Firebase).`
       );
     } catch (err: any) {
       console.error(err);
@@ -281,7 +318,7 @@ NOTIFY pgrst, 'reload schema';
       const msg = err?.message || String(err || '');
       if (msg.toLowerCase().includes('failed to fetch')) {
         setStatusMessage(
-          `Não foi possível alcançar "${cleanUrl}" neste navegador (Failed to fetch). Causas comuns: (1) Alguma extensão do Chrome (AdBlock / Bloqueador de rastreadores) está bloqueando pedidos para *.supabase.co — pause o bloqueador neste site ou teste em Aba Anônima (Ctrl+Shift+N); ou (2) Confira se a Project URL está exatamente como "https://ID-DO-PROJETO.supabase.co" sem espaços ou aspas.`
+          `Não foi possível alcançar "${cleanUrl}" neste navegador mesmo pelo Proxy (Failed to fetch). Pause o bloqueador de anúncios para este site, confira se a Project URL é exatamente "https://nuyzvpkvawixidotuuio.supabase.co" e tente novamente.`
         );
       } else {
         setStatusMessage(`Erro ao conectar em ${cleanUrl}: ${msg || 'Verifique sua URL e chave Anon'}`);
@@ -393,32 +430,46 @@ NOTIFY pgrst, 'reload schema';
                 </div>
               </div>
             </div>
-            {connectionStatus === 'success' && (
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => handleSwitchProvider('supabase')}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer ${
-                    primaryDb === 'supabase'
-                      ? 'bg-emerald-600 text-white'
-                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                  }`}
-                >
-                  Usar Supabase
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSwitchProvider('firebase')}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer ${
-                    primaryDb === 'firebase'
-                      ? 'bg-amber-600 text-white'
-                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                  }`}
-                >
-                  Usar Firebase
-                </button>
-              </div>
-            )}
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleToggleAutoFailover}
+                className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border cursor-pointer transition ${
+                  autoFailover
+                    ? 'bg-cyan-950/70 text-cyan-200 border-cyan-500/50'
+                    : 'bg-slate-900 text-slate-400 border-slate-700'
+                }`}
+                title="Quando a cota do Firebase chegar ao limite, ativa o Supabase automaticamente se as chaves estiverem preenchidas"
+              >
+                {autoFailover ? '⚡ Troca Automática por Cota: ON' : '⚡ Troca Automática por Cota: OFF'}
+              </button>
+              {connectionStatus === 'success' && (
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => handleSwitchProvider('supabase')}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer ${
+                      primaryDb === 'supabase'
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                    }`}
+                  >
+                    Usar Supabase
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSwitchProvider('firebase')}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer ${
+                      primaryDb === 'firebase'
+                        ? 'bg-amber-600 text-white'
+                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                    }`}
+                  >
+                    Usar Firebase
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Status Alert */}
@@ -487,33 +538,52 @@ NOTIFY pgrst, 'reload schema';
             </span>
 
             <div>
-              <label className="text-[11px] font-semibold text-slate-400 block mb-1">
-                Project URL (Ex: https://abcdefghijklm.supabase.co)
-              </label>
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+                <label className="text-[11px] font-semibold text-slate-400">
+                  Project URL (fluent-immersion já preenchido)
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setSupabaseUrl(DEFAULT_FLUENT_URL)}
+                  className="text-[10px] font-semibold text-cyan-300 hover:text-cyan-200 underline cursor-pointer"
+                >
+                  Usar fluent-immersion (nuyzvpkvawixidotuuio)
+                </button>
+              </div>
               <input
                 type="text"
                 required
                 value={supabaseUrl}
                 onChange={(e) => setSupabaseUrl(e.target.value)}
-                placeholder="https://seu-projeto.supabase.co"
+                placeholder="https://nuyzvpkvawixidotuuio.supabase.co"
                 className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500"
               />
             </div>
 
             <div>
-              <label className="text-[11px] font-semibold text-slate-400 block mb-1">
-                Project API Key (Anon / Public Key — começa com eyJ... ou sb_publishable_...)
-              </label>
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+                <label className="text-[11px] font-semibold text-slate-400">
+                  Project API Key (Anon / Publishable — começa com eyJ... ou sb_publishable_...)
+                </label>
+                <a
+                  href="https://supabase.com/dashboard/project/nuyzvpkvawixidotuuio/settings/api-keys"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[10px] font-bold text-emerald-300 hover:text-emerald-200 underline"
+                >
+                  Abrir API Keys do fluent-immersion ↗
+                </a>
+              </div>
               <input
                 type="text"
                 required
                 value={supabaseKey}
                 onChange={(e) => setSupabaseKey(e.target.value)}
-                placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6..."
+                placeholder="Cole aqui sua chave anon public (eyJ...) ou sb_publishable_..."
                 className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono"
               />
               <span className="text-[10px] text-slate-500 mt-1 block">
-                Supabase &gt; Project Settings &gt; Data API / API Keys &gt; Project URL + anon public key.
+                Proxy Anti-Bloqueio ativo: se extensões do Chrome bloquearem *.supabase.co, o sistema conecta automaticamente pelo servidor!
               </span>
             </div>
 

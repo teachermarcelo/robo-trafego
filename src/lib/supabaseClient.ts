@@ -6,11 +6,114 @@ export type CloudDbProvider = 'supabase' | 'firebase';
 let cachedClient: SupabaseClient | null = null;
 let lastUrl = '';
 let lastKey = '';
+let useSupabaseProxyFallback = false;
 
 const supabaseStoreHashes: Record<string, string> = {};
 
+export function isUsingSupabaseProxy(): boolean {
+  return useSupabaseProxyFallback;
+}
+
+export function resetSupabaseProxyMode(): void {
+  useSupabaseProxyFallback = false;
+}
+
+function serializeHeaders(rawHeaders: HeadersInit | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!rawHeaders) return out;
+  if (rawHeaders instanceof Headers) {
+    rawHeaders.forEach((v, k) => {
+      out[k] = v;
+    });
+  } else if (Array.isArray(rawHeaders)) {
+    rawHeaders.forEach(([k, v]) => {
+      if (k) out[k] = String(v);
+    });
+  } else if (typeof rawHeaders === 'object') {
+    Object.entries(rawHeaders).forEach(([k, v]) => {
+      if (v !== undefined) out[k] = String(v);
+    });
+  }
+  return out;
+}
+
+async function callViaSupabaseProxy(targetUrl: string, init?: RequestInit): Promise<Response> {
+  const method = (init?.method || 'GET').toUpperCase();
+  const headers = serializeHeaders(init?.headers);
+  let body: any = undefined;
+  if (init?.body !== undefined && init?.body !== null) {
+    if (typeof init.body === 'string') {
+      body = init.body;
+    } else if (init.body instanceof URLSearchParams) {
+      body = init.body.toString();
+    } else {
+      body = String(init.body);
+    }
+  }
+
+  const proxyRes = await fetch('/api/supabase-proxy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ targetUrl, method, headers, body }),
+    signal: init?.signal,
+  });
+
+  if (proxyRes.status === 404) {
+    throw new Error(
+      'Proxy /api/supabase-proxy não encontrado nesta publicação. Pause o bloqueador de anúncios no Chrome ou atualize o site na Vercel.'
+    );
+  }
+
+  const text = await proxyRes.text();
+  const respHeaders = new Headers();
+  const ct = proxyRes.headers.get('content-type');
+  const cr = proxyRes.headers.get('content-range');
+  if (ct) respHeaders.set('content-type', ct);
+  if (cr) respHeaders.set('content-range', cr);
+
+  return new Response(text, {
+    status: proxyRes.status,
+    statusText: proxyRes.statusText,
+    headers: respHeaders,
+  });
+}
+
+export async function resilientSupabaseFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const targetUrl = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+
+  if (useSupabaseProxyFallback && typeof window !== 'undefined') {
+    return callViaSupabaseProxy(targetUrl, init);
+  }
+
+  try {
+    return await fetch(input, init);
+  } catch (err: any) {
+    const msg = String(err?.message || err || '').toLowerCase();
+    const isNetworkOrBlock =
+      err instanceof TypeError ||
+      msg.includes('failed to fetch') ||
+      msg.includes('networkerror') ||
+      msg.includes('load failed') ||
+      msg.includes('fetch');
+
+    if (isNetworkOrBlock && typeof window !== 'undefined' && targetUrl.startsWith('https://')) {
+      useSupabaseProxyFallback = true;
+      return callViaSupabaseProxy(targetUrl, init);
+    }
+    throw err;
+  }
+}
+
+export function createResilientSupabaseClient(url: string, key: string): SupabaseClient {
+  return createClient(url, key, {
+    auth: { persistSession: false },
+    global: { fetch: resilientSupabaseFetch },
+  });
+}
+
 export function cleanSupabaseCredentialUrl(raw: string): string {
-  const cleaned = (raw || '').replace(/[\s"'`<>\u200B-\u200D\uFEFF]+/g, '');
+  let cleaned = (raw || '').replace(/[\s"'`<>\u200B-\u200D\uFEFF]+/g, '');
+  cleaned = cleaned.replace(/^(?:VITE_|NEXT_PUBLIC_|REACT_APP_)?SUPABASE_URL=/i, '');
   if (!cleaned) return '';
   const dashboardMatch = cleaned.match(/supabase\.com\/dashboard\/project\/([a-zA-Z0-9_-]+)/i);
   if (dashboardMatch?.[1]) return `https://${dashboardMatch[1]}.supabase.co`;
@@ -20,7 +123,31 @@ export function cleanSupabaseCredentialUrl(raw: string): string {
 }
 
 export function cleanSupabaseCredentialKey(raw: string): string {
-  return (raw || '').replace(/[\s"'`\u200B-\u200D\uFEFF]+/g, '');
+  let cleaned = (raw || '').replace(/[\s"'`\u200B-\u200D\uFEFF]+/g, '');
+  cleaned = cleaned.replace(
+    /^(?:VITE_|NEXT_PUBLIC_|REACT_APP_)?(?:SUPABASE_)?(?:ANON_|PUBLISHABLE_)?(?:DEFAULT_)?KEY=/i,
+    ''
+  );
+  return cleaned;
+}
+
+export function validateSupabaseKeyWarning(key: string): string | null {
+  if (!key) return null;
+  if (key.startsWith('sb_secret_')) {
+    return 'Você colou a chave SECRETA (sb_secret_...). Copie a chave PÚBLICA ("Publishable" sb_publishable_... ou "anon public" eyJ...).';
+  }
+  if (key.startsWith('eyJ')) {
+    try {
+      const parts = key.split('.');
+      if (parts.length === 3) {
+        const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+        if (payload?.role === 'service_role') {
+          return 'Você colou a chave "service_role". Por segurança no navegador, use a chave "anon public".';
+        }
+      }
+    } catch {}
+  }
+  return null;
 }
 
 export function getEffectiveSupabaseCredentials(): {
@@ -59,9 +186,7 @@ export function getSupabaseClient(): SupabaseClient | null {
   }
 
   try {
-    cachedClient = createClient(url, key, {
-      auth: { persistSession: false },
-    });
+    cachedClient = createResilientSupabaseClient(url, key);
     lastUrl = url;
     lastKey = key;
     return cachedClient;
@@ -78,6 +203,11 @@ export function isSupabaseConnected(): boolean {
   if (!url || !key) return false;
   if (source === 'env') return true;
   return localStorage.getItem('autoviral_supabase_connected') === 'true';
+}
+
+export function hasSupabaseCredentials(): boolean {
+  const { url, key } = getEffectiveSupabaseCredentials();
+  return Boolean(url && key && !validateSupabaseKeyWarning(key));
 }
 
 export function getPrimaryCloudProvider(): CloudDbProvider {
@@ -97,6 +227,42 @@ export function setPrimaryCloudProvider(provider: CloudDbProvider): void {
     localStorage.setItem('autoviral_primary_db', provider);
     window.dispatchEvent(new CustomEvent('autoviral_db_provider_changed', { detail: { provider } }));
   } catch {}
+}
+
+let failoverInFlight: Promise<boolean> | null = null;
+export async function autoFailoverToSupabaseOnQuota(): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+  if (isPrimarySupabase()) return true;
+  if (localStorage.getItem('autoviral_auto_failover') === 'disabled') return false;
+  if (!hasSupabaseCredentials()) return false;
+  if (failoverInFlight) return failoverInFlight;
+
+  failoverInFlight = (async () => {
+    try {
+      const { url, key } = getEffectiveSupabaseCredentials();
+      const client = createResilientSupabaseClient(url, key);
+      const { error } = await client.from('autoviral_campaigns').select('id').limit(1);
+      if (error && error.code !== 'PGRST116') {
+        return false;
+      }
+      localStorage.setItem('autoviral_supabase_url', url);
+      localStorage.setItem('autoviral_supabase_key', key);
+      localStorage.setItem('autoviral_supabase_connected', 'true');
+      cachedClient = client;
+      lastUrl = url;
+      lastKey = key;
+      await pushLocalSnapshotToSupabase().catch(() => {});
+      setPrimaryCloudProvider('supabase');
+      window.dispatchEvent(new CustomEvent('autoviral_auto_failover_activated', { detail: { provider: 'supabase' } }));
+      return true;
+    } catch {
+      return false;
+    } finally {
+      failoverInFlight = null;
+    }
+  })();
+
+  return failoverInFlight;
 }
 
 // Convert Supabase DB record to Campaign (preserving full extra_json payload)
@@ -152,8 +318,13 @@ export async function fetchSupabaseCampaigns(): Promise<Campaign[] | null> {
 
 // Upsert a campaign to user's Supabase project (retries without extra_json if older table lacks it)
 export async function saveCampaignToSupabase(camp: Campaign): Promise<boolean> {
+  const res = await saveCampaignToSupabaseDetailed(camp);
+  return res.ok;
+}
+
+export async function saveCampaignToSupabaseDetailed(camp: Campaign): Promise<{ ok: boolean; error?: string }> {
   const client = getSupabaseClient();
-  if (!client) return false;
+  if (!client) return { ok: false, error: 'not-connected' };
 
   const basePayload = {
     id: camp.id,
@@ -181,15 +352,15 @@ export async function saveCampaignToSupabase(camp: Campaign): Promise<boolean> {
     if (error) {
       if (error.message?.includes('extra_json')) {
         const retry = await client.from('autoviral_campaigns').upsert(basePayload);
-        return !retry.error;
+        return retry.error ? { ok: false, error: retry.error.message } : { ok: true };
       }
       console.warn('Erro ao salvar campanha no Supabase:', error.message);
-      return false;
+      return { ok: false, error: error.message };
     }
-    return true;
-  } catch (err) {
+    return { ok: true };
+  } catch (err: any) {
     console.warn('Falha ao salvar campanha no Supabase:', err);
-    return false;
+    return { ok: false, error: err?.message || String(err) };
   }
 }
 
@@ -427,10 +598,12 @@ export async function pushLocalSnapshotToSupabase(extraCampaigns?: Campaign[], e
 
   const campaignsToSave: Campaign[] = extraCampaigns || safeParse('autoviral_campaigns') || [];
   let campaignsSaved = 0;
+  let lastCampaignError: string | undefined;
   for (const camp of campaignsToSave) {
     if (camp?.id) {
-      const ok = await saveCampaignToSupabase(camp);
-      if (ok) campaignsSaved++;
+      const res = await saveCampaignToSupabaseDetailed(camp);
+      if (res.ok) campaignsSaved++;
+      else if (res.error && !lastCampaignError) lastCampaignError = res.error;
     }
   }
 
@@ -468,6 +641,7 @@ export async function pushLocalSnapshotToSupabase(extraCampaigns?: Campaign[], e
     globalTrashAudiences: safeParse('autoviral_global_audiences_trash_v1'),
     globalGroups: safeParse('autoviral_global_fb_groups_v1'),
     globalOffers: safeParse('autoviral_global_offers_v1'),
+    dismissedRecoveryKeys: safeParse('autoviral_global_dismissed_recovery_v1'),
   });
 
   const deletedIds = safeParse('autoviral_deleted_campaign_ids') || ['camp-1', 'camp-2', 'camp-3'];
@@ -497,6 +671,6 @@ export async function pushLocalSnapshotToSupabase(extraCampaigns?: Campaign[], e
   return {
     ok: wsRes.ok && glRes.ok,
     campaignsSaved,
-    error: wsRes.error || glRes.error,
+    error: wsRes.error || glRes.error || lastCampaignError,
   };
 }

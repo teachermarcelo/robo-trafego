@@ -1227,9 +1227,17 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
   const [isRecoveryPanelOpen, setIsRecoveryPanelOpen] = useState<boolean>(false);
   const [dismissedRecoveryKeys, setDismissedRecoveryKeys] = useState<string[]>(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEYS.DISMISSED_RECOVERY);
-      const parsed = saved ? JSON.parse(saved) : [];
-      return Array.isArray(parsed) ? parsed.map((k) => String(k).toLowerCase()) : [];
+      const merged = new Set<string>();
+      const rawLocal = localStorage.getItem(STORAGE_KEYS.DISMISSED_RECOVERY);
+      const rawSession = sessionStorage.getItem(STORAGE_KEYS.DISMISSED_RECOVERY);
+      [rawLocal, rawSession].forEach((raw) => {
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((k) => k && merged.add(String(k).toLowerCase()));
+        }
+      });
+      return Array.from(merged);
     } catch {
       return [];
     }
@@ -1367,35 +1375,52 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
     } catch {}
   }, [globalGroups]);
 
+  const safeWriteGlobalStorage = (key: string, value: any) => {
+    const serialized = JSON.stringify(value);
+    try {
+      localStorage.setItem(key, serialized);
+    } catch {
+      // Free heavy rolling backup snapshots if browser 5MB localStorage quota is tight
+      try {
+        localStorage.removeItem(STORAGE_KEYS.BACKUP_AUDIENCES);
+        localStorage.setItem(key, serialized);
+      } catch {
+        try {
+          sessionStorage.setItem(key, serialized);
+        } catch {}
+      }
+    }
+  };
+
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEYS.AUDIENCES, JSON.stringify(globalAudiences));
-      // Keep a rolling safety backup of audiences that never wipes previous entries automatically
+      safeWriteGlobalStorage(STORAGE_KEYS.AUDIENCES, globalAudiences);
+      // Keep a compact safety backup (metadata + URLs, no duplicated heavy snapshots to avoid localStorage 5MB quota exhaustion)
       if (globalAudiences.length > 0) {
         const prevBackupRaw = localStorage.getItem(STORAGE_KEYS.BACKUP_AUDIENCES);
         const prevBackup: GlobalAudience[] = prevBackupRaw ? JSON.parse(prevBackupRaw) : [];
         const byId = new Map<string, GlobalAudience>();
-        (Array.isArray(prevBackup) ? prevBackup : []).forEach((a) => {
-          if (a?.id) byId.set(a.id, a);
+        const compactAud = (a: GlobalAudience): GlobalAudience => ({
+          ...a,
+          groupSnapshots: Array.isArray(a.groupSnapshots) ? a.groupSnapshots.slice(0, 40) : undefined,
+        });
+        (Array.isArray(prevBackup) ? prevBackup : []).slice(0, 25).forEach((a) => {
+          if (a?.id) byId.set(a.id, compactAud(a));
         });
         globalAudiences.forEach((a) => {
-          if (a?.id) byId.set(a.id, a);
+          if (a?.id) byId.set(a.id, compactAud(a));
         });
-        localStorage.setItem(STORAGE_KEYS.BACKUP_AUDIENCES, JSON.stringify(Array.from(byId.values()).slice(0, 120)));
+        localStorage.setItem(STORAGE_KEYS.BACKUP_AUDIENCES, JSON.stringify(Array.from(byId.values()).slice(0, 35)));
       }
     } catch {}
   }, [globalAudiences]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.TRASH_AUDIENCES, JSON.stringify(trashAudiences.slice(0, 60)));
-    } catch {}
+    safeWriteGlobalStorage(STORAGE_KEYS.TRASH_AUDIENCES, trashAudiences.slice(0, 40));
   }, [trashAudiences]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.DISMISSED_RECOVERY, JSON.stringify(dismissedRecoveryKeys.slice(-400)));
-    } catch {}
+    safeWriteGlobalStorage(STORAGE_KEYS.DISMISSED_RECOVERY, dismissedRecoveryKeys.slice(-400));
   }, [dismissedRecoveryKeys]);
 
   const markRecoveryDismissed = (...keys: Array<string | undefined | null>) => {
@@ -1412,11 +1437,13 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
           changed = true;
         }
       });
-      return changed ? Array.from(set) : prev;
+      const nextArr = changed ? Array.from(set).slice(-400) : prev;
+      safeWriteGlobalStorage(STORAGE_KEYS.DISMISSED_RECOVERY, nextArr);
+      return changed ? nextArr : prev;
     });
   };
 
-  // Debounced cloud sync for Global Audiences, Trash, Groups & Offers so nothing is ever lost between sessions/URLs
+  // Debounced cloud sync for Global Audiences, Trash, Groups, Offers & Dismissed Recovery keys so nothing is ever lost or resurrected
   const hasMountedGlobalSyncRef = useRef(false);
   useEffect(() => {
     if (!hasMountedGlobalSyncRef.current) {
@@ -1429,15 +1456,21 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
         globalTrashAudiences: trashAudiences,
         globalGroups,
         globalOffers: offers,
+        dismissedRecoveryKeys,
       }).catch(() => {});
     }, 1800);
     return () => window.clearTimeout(t);
-  }, [globalAudiences, trashAudiences, globalGroups, offers]);
+  }, [globalAudiences, trashAudiences, globalGroups, offers, dismissedRecoveryKeys]);
 
-  // Listen for Firebase Global Workspace sync events (non-destructive merge into state)
+  // Listen for Firebase/Supabase Global Workspace sync events (non-destructive merge into state)
   useEffect(() => {
     const mergeCloudGlobal = (cloud: GlobalWorkspaceSyncData | null | undefined) => {
       if (!cloud || typeof cloud !== 'object') return;
+      let mergedDismissedSet = new Set(dismissedRecoveryKeys.map((k) => k.toLowerCase()));
+      if (Array.isArray(cloud.dismissedRecoveryKeys) && cloud.dismissedRecoveryKeys.length > 0) {
+        cloud.dismissedRecoveryKeys.forEach((k) => k && mergedDismissedSet.add(String(k).toLowerCase()));
+        setDismissedRecoveryKeys(Array.from(mergedDismissedSet).slice(-400));
+      }
       if (Array.isArray(cloud.globalGroups) && cloud.globalGroups.length > 0) {
         setGlobalGroups((prev) => {
           const existingKeys = new Set(prev.map((g) => normalizeGroupUrlKey(g.url) || g.id));
@@ -1461,7 +1494,9 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
       if (Array.isArray(cloud.globalTrashAudiences) && cloud.globalTrashAudiences.length > 0) {
         setTrashAudiences((prev) => {
           const existingIds = new Set(prev.map((t) => t.id));
-          const fresh = cloud.globalTrashAudiences!.filter((t: any) => t?.id && !existingIds.has(t.id));
+          const fresh = cloud.globalTrashAudiences!.filter(
+            (t: any) => t?.id && !existingIds.has(t.id) && !mergedDismissedSet.has(`trash:${String(t.id).toLowerCase()}`)
+          );
           return fresh.length > 0 ? [...prev, ...fresh] : prev;
         });
       }
@@ -1472,7 +1507,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
     };
     window.addEventListener('autoviral_global_workspace_synced', onGlobalSynced);
     return () => window.removeEventListener('autoviral_global_workspace_synced', onGlobalSynced);
-  }, [trashAudiences]);
+  }, [trashAudiences, dismissedRecoveryKeys]);
 
   useEffect(() => {
     try {
@@ -3145,12 +3180,16 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
       createdAt: existing?.createdAt || new Date().toISOString(),
     };
 
-    setGlobalAudiences((prev) =>
-      existing ? prev.map((a) => (a.id === audId ? rebuilt : a)) : [rebuilt, ...prev]
+    const nextAudiences = existing
+      ? globalAudiences.map((a) => (a.id === audId ? rebuilt : a))
+      : [rebuilt, ...globalAudiences];
+    const nextTrash = trashAudiences.filter(
+      (t) => t.id !== audId && (t.name || '').trim().toLowerCase() !== cleanName.toLowerCase()
     );
-    setTrashAudiences((prev) =>
-      prev.filter((t) => t.id !== audId && (t.name || '').trim().toLowerCase() !== cleanName.toLowerCase())
-    );
+    setGlobalAudiences(nextAudiences);
+    setTrashAudiences(nextTrash);
+    safeWriteGlobalStorage(STORAGE_KEYS.AUDIENCES, nextAudiences);
+    safeWriteGlobalStorage(STORAGE_KEYS.TRASH_AUDIENCES, nextTrash);
     markRecoveryDismissed(
       `orphan:${cleanName.toLowerCase()}`,
       `brazil:${cleanName.toLowerCase()}`,
@@ -4037,11 +4076,18 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
               <button
                 type="button"
                 onClick={() => {
+                  const dismissedTrashIds = new Set(visibleTrash.map((t) => t.id));
+                  if (dismissedTrashIds.size > 0) {
+                    const remainingTrash = trashAudiences.filter((t) => !dismissedTrashIds.has(t.id));
+                    setTrashAudiences(remainingTrash);
+                    safeWriteGlobalStorage(STORAGE_KEYS.TRASH_AUDIENCES, remainingTrash);
+                  }
                   markRecoveryDismissed(
                     ...recoverableDiscovery.orphanNiches.map((o) => `orphan:${o.name.trim().toLowerCase()}`),
                     ...recoverableDiscovery.backupMissing.map((b) => `backup:${b.id.toLowerCase()}`),
                     ...recoverableDiscovery.brazilMatches.map((bm) => `brazil:${bm.audName.trim().toLowerCase()}`),
-                    ...visibleTrash.map((t) => `trash:${t.id.toLowerCase()}`)
+                    ...visibleTrash.map((t) => `trash:${t.id.toLowerCase()}`),
+                    ...visibleTrash.map((t) => `orphan:${(t.name || '').trim().toLowerCase()}`)
                   );
                 }}
                 className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 font-semibold rounded-lg cursor-pointer"

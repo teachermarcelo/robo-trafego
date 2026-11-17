@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Globe,
   Plus,
@@ -12,6 +12,7 @@ import {
   Search,
   Users,
   ShieldAlert,
+  ShieldCheck,
   ArrowRightLeft,
   CheckSquare,
   Square,
@@ -81,10 +82,61 @@ export interface GlobalInboxGroup {
   mappedAt: string;
 }
 
+export type GlobalGroupMembershipStatus =
+  | 'mapped'
+  | 'join_requested'
+  | 'awaiting_admin'
+  | 'authorized'
+  | 'rejected'
+  | 'questions_pending'
+  | 'unavailable'
+  | 'rate_limited';
+
 export interface GlobalGroupItem extends FacebookGroup {
   countryName?: string;
   languageName?: string;
+  membershipStatus?: GlobalGroupMembershipStatus;
+  membershipCheckedAt?: string;
+  membershipNote?: string;
 }
+
+const MEMBERSHIP_STATUS_META: Record<
+  GlobalGroupMembershipStatus,
+  { label: string; badgeClass: string }
+> = {
+  authorized: {
+    label: '✅ Autorizado',
+    badgeClass: 'bg-emerald-950/70 text-emerald-300 border-emerald-500/50',
+  },
+  awaiting_admin: {
+    label: '⏳ Aguardando Admin',
+    badgeClass: 'bg-amber-950/60 text-amber-300 border-amber-500/40',
+  },
+  join_requested: {
+    label: '📩 Entrada Solicitada',
+    badgeClass: 'bg-sky-950/60 text-sky-300 border-sky-500/40',
+  },
+  questions_pending: {
+    label: '📝 Responder Perguntas',
+    badgeClass: 'bg-indigo-950/60 text-indigo-300 border-indigo-500/40',
+  },
+  rejected: {
+    label: '❌ Não Autorizado',
+    badgeClass: 'bg-rose-950/60 text-rose-300 border-rose-500/40',
+  },
+  rate_limited: {
+    label: '🛡️ Limite Temp. FB',
+    badgeClass: 'bg-rose-950/80 text-rose-200 border-rose-500/60',
+  },
+  unavailable: {
+    label: '🚫 Indisponível',
+    badgeClass: 'bg-slate-900 text-slate-400 border-slate-700',
+  },
+  mapped: {
+    label: '🔵 Mapeado (Novo)',
+    badgeClass: 'bg-slate-900 text-slate-300 border-slate-700',
+  },
+};
 
 export interface GlobalGeneratedKit {
   source: 'gemini' | 'template';
@@ -1106,6 +1158,30 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
     statusLabel: string;
     updatedAt: string;
   } | null>(null);
+  // Staged Membership Pipeline + Authorized vs Status Separation + Numeric Dispatch Limit
+  const [audienceStageFilter, setAudienceStageFilter] = useState<'all' | 'authorized' | 'awaiting' | 'mapped' | 'other'>('all');
+  const [batchJoinCountInput, setBatchJoinCountInput] = useState<number>(15);
+  const [batchJoinDelaySec, setBatchJoinDelaySec] = useState<number>(12);
+  const [isBatchJoinRunning, setIsBatchJoinRunning] = useState<boolean>(false);
+  const [batchJoinProgress, setBatchJoinProgress] = useState<{ current: number; total: number; currentGroupName: string } | null>(null);
+  const batchJoinTimerRef = useRef<number | null>(null);
+
+  const [isVerifyingMemberships, setIsVerifyingMemberships] = useState<boolean>(false);
+  const [verifyProgress, setVerifyProgress] = useState<{
+    checked: number;
+    total: number;
+    authorizedCount: number;
+    awaitingCount: number;
+    rejectedCount: number;
+    otherCount: number;
+  } | null>(null);
+
+  const [dispatchQueueSource, setDispatchQueueSource] = useState<'authorized_only' | 'all_audience'>('all_audience');
+  const [dispatchLimitCount, setDispatchLimitCount] = useState<number>(20); // 0 = Sem limite (todos)
+  const [sessionDispatchedCount, setSessionDispatchedCount] = useState<number>(0);
+  const sessionDispatchedRef = useRef<number>(0);
+  const [attachImageInComposer, setAttachImageInComposer] = useState<boolean>(true);
+
   const [customPostHeadline, setCustomPostHeadline] = useState('');
   const [customPostBody, setCustomPostBody] = useState('');
   const [botLogs, setBotLogs] = useState<FacebookPostLog[]>(() => {
@@ -1450,6 +1526,108 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
       } else if (normalizedStatus === 'unavailable' && groupUrl) {
         setGlobalGroups((prev) => prev.filter((g) => g.url !== groupUrl));
       }
+
+      // Sync group membership status automatically based on post result
+      if (groupId || groupUrl) {
+        const cleanSlug = String(groupUrl || '').match(/\/groups\/([^\/?#]+)/i)?.[1]?.toLowerCase() || '';
+        const derivedStatus: GlobalGroupMembershipStatus | null =
+          normalizedStatus === 'published' || normalizedStatus === 'awaiting_admin' || normalizedStatus === 'approved_posting'
+            ? 'authorized'
+            : normalizedStatus === 'join_requested'
+            ? 'awaiting_admin'
+            : normalizedStatus === 'not_member'
+            ? 'rejected'
+            : normalizedStatus === 'rate_limited'
+            ? 'rate_limited'
+            : null;
+        if (derivedStatus) {
+          const checkedNow = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+          setGlobalGroups((prev) =>
+            prev.map((g) => {
+              const gSlug = String(g.url || '').match(/\/groups\/([^\/?#]+)/i)?.[1]?.toLowerCase() || '';
+              const matched = (groupId && g.id === groupId) || (cleanSlug && gSlug === cleanSlug) || (groupUrl && g.url === groupUrl);
+              return matched
+                ? {
+                    ...g,
+                    membershipStatus: derivedStatus,
+                    membershipCheckedAt: checkedNow,
+                    membershipNote: (normalizedStatus && statusMap[normalizedStatus]) || note || '',
+                  }
+                : g;
+            })
+          );
+        }
+      }
+    };
+
+    const applyMembershipStatusUpdate = (payload: any) => {
+      if (!payload || !payload.membershipStatus) return;
+      const { groupId, groupUrl, membershipStatus, note } = payload;
+      const cleanSlug = String(groupUrl || '').match(/\/groups\/([^\/?#]+)/i)?.[1]?.toLowerCase() || '';
+      const checkedNow = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+      setGlobalGroups((prev) =>
+        prev.map((g) => {
+          const gSlug = String(g.url || '').match(/\/groups\/([^\/?#]+)/i)?.[1]?.toLowerCase() || '';
+          const matched = (groupId && g.id === groupId) || (cleanSlug && gSlug === cleanSlug) || (groupUrl && g.url === groupUrl);
+          if (!matched) return g;
+          return {
+            ...g,
+            membershipStatus: membershipStatus as GlobalGroupMembershipStatus,
+            membershipCheckedAt: checkedNow,
+            membershipNote: note || '',
+          };
+        })
+      );
+    };
+
+    const onMembershipResultEv = (ev: any) => {
+      applyMembershipStatusUpdate(ev?.detail);
+    };
+
+    const onMembershipBatchProgressEv = (ev: any) => {
+      const d = ev?.detail;
+      if (!d) return;
+      if (d.groupId || d.groupUrl) {
+        applyMembershipStatusUpdate(d);
+      }
+      setVerifyProgress({
+        checked: Number(d.checked) || 0,
+        total: Number(d.total) || 0,
+        authorizedCount: Number(d.authorizedCount) || 0,
+        awaitingCount: Number(d.awaitingCount) || 0,
+        rejectedCount: Number(d.rejectedCount) || 0,
+        otherCount: Number(d.otherCount) || 0,
+      });
+      if (d.done) {
+        setIsVerifyingMemberships(false);
+        if (d.rateLimited) {
+          setBanner({
+            message: `Verificação pausada por proteção anti-bloqueio do Facebook (${d.checked}/${d.total} verificados). Aguarde alguns minutos para continuar.`,
+            tone: 'warning',
+          });
+        } else {
+          setBanner({
+            message: `Conferência concluída (${d.checked}/${d.total}): ✅ ${d.authorizedCount || 0} Autorizados | ⏳ ${d.awaitingCount || 0} Aguardando | ❌ ${d.rejectedCount || 0} Não Autorizados.`,
+            tone: 'success',
+          });
+        }
+      }
+    };
+
+    const onMembershipBatchDoneEv = (ev: any) => {
+      const d = ev?.detail;
+      setIsVerifyingMemberships(false);
+      if (d && d.ok && d.total > 0) {
+        setVerifyProgress({
+          checked: Number(d.checked) || 0,
+          total: Number(d.total) || 0,
+          authorizedCount: Number(d.authorizedCount) || 0,
+          awaitingCount: Number(d.awaitingCount) || 0,
+          rejectedCount: Number(d.rejectedCount) || 0,
+          otherCount: Number(d.otherCount) || 0,
+        });
+      }
     };
 
     const onGroupsEv = (ev: any) => {
@@ -1496,6 +1674,10 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
           ingestYtVideos(ev.data.videos || []);
         } else if (ev.data.action === 'AUTOVIRAL_FB_POST_RESULT') {
           applyPostResult(ev.data);
+        } else if (ev.data.action === 'AUTOVIRAL_GROUP_MEMBERSHIP_RESULT') {
+          applyMembershipStatusUpdate(ev.data);
+        } else if (ev.data.action === 'AUTOVIRAL_MEMBERSHIP_BATCH_PROGRESS') {
+          onMembershipBatchProgressEv({ detail: ev.data });
         } else if (ev.data.action === 'AUTOVIRAL_WAITING_APPROVALS_SYNC') {
           if (Array.isArray(ev.data.waitingApprovals)) setWaitingApprovals(ev.data.waitingApprovals);
         }
@@ -1505,6 +1687,9 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
     window.addEventListener('autoviral_extension_groups_received', onGroupsEv);
     window.addEventListener('autoviral_extension_youtube_videos_received', onYtEv);
     window.addEventListener('autoviral_fb_post_result', onPostResultEv);
+    window.addEventListener('autoviral_group_membership_result', onMembershipResultEv);
+    window.addEventListener('autoviral_membership_batch_progress', onMembershipBatchProgressEv);
+    window.addEventListener('autoviral_membership_batch_done', onMembershipBatchDoneEv);
     window.addEventListener('autoviral_waiting_approvals_synced', onWaitingSyncedEv);
     window.addEventListener('autoviral_waiting_check_done', onWaitingCheckDoneEv);
 
@@ -1517,6 +1702,9 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
       window.removeEventListener('autoviral_extension_groups_received', onGroupsEv);
       window.removeEventListener('autoviral_extension_youtube_videos_received', onYtEv);
       window.removeEventListener('autoviral_fb_post_result', onPostResultEv);
+      window.removeEventListener('autoviral_group_membership_result', onMembershipResultEv);
+      window.removeEventListener('autoviral_membership_batch_progress', onMembershipBatchProgressEv);
+      window.removeEventListener('autoviral_membership_batch_done', onMembershipBatchDoneEv);
       window.removeEventListener('autoviral_waiting_approvals_synced', onWaitingSyncedEv);
       window.removeEventListener('autoviral_waiting_check_done', onWaitingCheckDoneEv);
     };
@@ -1554,6 +1742,8 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
       presellUrl: newOfferPresellUrl.trim() || 'https://global-sell-beta.vercel.app/',
       createdAt: new Date().toISOString(),
     };
+    const autoImg = generateOfferPromoImageDataUrl(created);
+    if (autoImg) created.postImageUrl = autoImg;
     setOffers((prev) => [created, ...prev]);
     setSelectedOfferId(created.id);
     setIsNewOfferOpen(false);
@@ -1561,14 +1751,30 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
     setNewOfferPain('');
     setNewOfferAffiliateUrl('');
     setBanner({
-      message: `Oferta "${created.productName}" (${created.countryName} · ${created.languageName}) salva no Modo Global!`,
+      message: `Oferta "${created.productName}" (${created.countryName} · ${created.languageName}) salva com Imagem automática pronta para o Facebook!`,
       tone: 'success',
     });
+  };
+
+  const syncLandingCampaignImageOnServer = (offer: GlobalOffer, nextImageUrl: string) => {
+    if (!offer.sourceCampaignId) return;
+    const match = campaigns.find((c) => c.id === offer.sourceCampaignId);
+    if (!match) return;
+    try {
+      fetch('/api/campaigns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...match, imageUrl: nextImageUrl }),
+      }).catch(() => {});
+    } catch {}
   };
 
   const handleUpdateOfferField = (field: keyof GlobalOffer, value: string) => {
     if (!activeOffer) return;
     setOffers((prev) => prev.map((o) => (o.id === activeOffer.id ? { ...o, [field]: value } : o)));
+    if (field === 'postImageUrl') {
+      syncLandingCampaignImageOnServer(activeOffer, value);
+    }
   };
 
   const handleDeleteOffer = (id: string) => {
@@ -1959,7 +2165,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
     }
   };
 
-  // Active Audience's Groups for Global Bot
+  // Active Audience's Groups for Global Bot + Membership Separation
   const activeAudience = useMemo(
     () => globalAudiences.find((a) => a.id === selectedAudienceId) || globalAudiences[0] || null,
     [globalAudiences, selectedAudienceId]
@@ -1972,19 +2178,208 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
     return list.length > 0 ? list : globalGroups;
   }, [activeAudience, globalGroups]);
 
-  // Global Bot Execution via Extension v1.4.0
-  const executeSingleGlobalPost = () => {
-    if (activeAudienceGroups.length === 0) {
+  const authorizedAudienceGroups = useMemo(
+    () => activeAudienceGroups.filter((g) => g.membershipStatus === 'authorized'),
+    [activeAudienceGroups]
+  );
+
+  const effectiveDispatchGroups = useMemo(() => {
+    if (dispatchQueueSource === 'authorized_only') {
+      return authorizedAudienceGroups;
+    }
+    return activeAudienceGroups;
+  }, [dispatchQueueSource, authorizedAudienceGroups, activeAudienceGroups]);
+
+  // Stop batch join timer cleanly on unmount
+  useEffect(() => {
+    return () => {
+      if (batchJoinTimerRef.current) {
+        window.clearTimeout(batchJoinTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleStopBatchJoin = () => {
+    if (batchJoinTimerRef.current) {
+      window.clearTimeout(batchJoinTimerRef.current);
+      batchJoinTimerRef.current = null;
+    }
+    setIsBatchJoinRunning(false);
+    setBanner({
+      message: 'Etapa 1 (Solicitar Entrada em Lote) pausada.',
+      tone: 'info',
+    });
+  };
+
+  const handleStartBatchJoin = (limitOverride?: number) => {
+    const candidates = activeAudienceGroups.filter(
+      (g) => !g.membershipStatus || g.membershipStatus === 'mapped' || g.membershipStatus === 'rejected'
+    );
+    if (candidates.length === 0) {
+      setBanner({
+        message: 'Todos os grupos deste público já tiveram entrada solicitada ou estão autorizados!',
+        tone: 'info',
+      });
+      return;
+    }
+    const maxCount = Math.max(1, Math.min(limitOverride ?? batchJoinCountInput, candidates.length));
+    const slice = candidates.slice(0, maxCount);
+
+    if (batchJoinTimerRef.current) {
+      window.clearTimeout(batchJoinTimerRef.current);
+      batchJoinTimerRef.current = null;
+    }
+
+    setIsBatchJoinRunning(true);
+    let idx = 0;
+
+    const runStep = () => {
+      if (idx >= slice.length) {
+        setIsBatchJoinRunning(false);
+        setBatchJoinProgress(null);
+        setBanner({
+          message: `Etapa 1 concluída! ${slice.length} solicitações de entrada enviadas. Clique em "Etapa 2: Confirmar Autorizações" para separar os aprovados.`,
+          tone: 'success',
+        });
+        return;
+      }
+
+      const grp = slice[idx];
+      const cleanName = sanitizeGlobalGroupName(grp.name);
+      setBatchJoinProgress({ current: idx + 1, total: slice.length, currentGroupName: cleanName });
+
+      // Optimistically mark join_requested while extension updates real result
+      setGlobalGroups((prev) =>
+        prev.map((item) =>
+          item.id === grp.id
+            ? {
+                ...item,
+                membershipStatus: 'join_requested',
+                membershipCheckedAt: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+                membershipNote: 'Solicitando entrada via Etapa 1...',
+              }
+            : item
+        )
+      );
+
+      try {
+        window.postMessage(
+          {
+            type: 'AUTOVIRAL_OPEN_GROUP_FOR_POST',
+            logId: `join-${Date.now()}-${idx}`,
+            groupId: grp.id,
+            groupUrl: grp.url,
+            groupName: cleanName,
+            fullText: '',
+            imageDataUrl: '',
+            autoJoinAndPost: true,
+            joinOnly: true,
+          },
+          '*'
+        );
+      } catch {}
+
+      idx++;
+      if (idx < slice.length) {
+        batchJoinTimerRef.current = window.setTimeout(runStep, Math.max(8, batchJoinDelaySec) * 1000);
+      } else {
+        batchJoinTimerRef.current = window.setTimeout(() => {
+          setIsBatchJoinRunning(false);
+          setBatchJoinProgress(null);
+          setBanner({
+            message: `Etapa 1 concluída! ${slice.length} grupos processados. Clique em "Confirmar Autorizações" na Etapa 2 para separar quem já aceitou.`,
+            tone: 'success',
+          });
+        }, 5000);
+      }
+    };
+
+    runStep();
+  };
+
+  const handleStartVerifyMembershipsBatch = (onlyPending = true) => {
+    const targets = onlyPending
+      ? activeAudienceGroups.filter((g) => g.membershipStatus !== 'authorized' && g.membershipStatus !== 'unavailable')
+      : activeAudienceGroups;
+
+    if (targets.length === 0) {
+      setBanner({
+        message: 'Todos os grupos deste público já estão na aba "✅ Autorizados"!',
+        tone: 'success',
+      });
+      return;
+    }
+
+    setIsVerifyingMemberships(true);
+    setVerifyProgress({
+      checked: 0,
+      total: targets.length,
+      authorizedCount: 0,
+      awaitingCount: 0,
+      rejectedCount: 0,
+      otherCount: 0,
+    });
+
+    try {
+      window.postMessage(
+        {
+          type: 'AUTOVIRAL_VERIFY_MEMBERSHIPS_BATCH',
+          batchId: `batch-${Date.now()}`,
+          groups: targets.map((g) => ({ id: g.id, url: g.url, name: sanitizeGlobalGroupName(g.name) })),
+        },
+        '*'
+      );
+      setBanner({
+        message: `Etapa 2 iniciada: conferindo em segundo plano se ${targets.length} grupos foram autorizados pelo Facebook...`,
+        tone: 'info',
+      });
+    } catch {
+      setIsVerifyingMemberships(false);
+    }
+
+    // Safety fallback timeout in case extension is not installed/loaded
+    window.setTimeout(() => {
+      setIsVerifyingMemberships((still) => still && false);
+    }, targets.length * 2200 + 8000);
+  };
+
+  const handleManualSetGroupMembership = (groupId: string, nextStatus: GlobalGroupMembershipStatus) => {
+    const checkedNow = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    setGlobalGroups((prev) =>
+      prev.map((g) =>
+        g.id === groupId
+          ? { ...g, membershipStatus: nextStatus, membershipCheckedAt: checkedNow, membershipNote: 'Definido manualmente' }
+          : g
+      )
+    );
+  };
+
+  // Global Bot Execution via Extension v1.5.2 (respects Authorized-only toggle + Numeric Limit!)
+  const executeSingleGlobalPost = (isManualSingle = false) => {
+    if (effectiveDispatchGroups.length === 0) {
       globalEnBotRunner.stop();
       setIsBotRunning(false);
       setBanner({
-        message: 'Nenhum grupo no Público Global selecionado. Crie um público na aba "03. Triagem & Públicos" primeiro.',
+        message:
+          dispatchQueueSource === 'authorized_only'
+            ? 'Nenhum grupo marcado como "✅ Autorizado" neste público ainda. Verifique autorizações na aba "03. Triagem & Públicos" ou mude a fila para "Todos do Público".'
+            : 'Nenhum grupo no Público Global selecionado. Crie um público na aba "03. Triagem & Públicos" primeiro.',
         tone: 'warning',
       });
       return;
     }
 
-    const group = activeAudienceGroups[currentPostIndex % activeAudienceGroups.length];
+    if (!isManualSingle && dispatchLimitCount > 0 && sessionDispatchedRef.current >= dispatchLimitCount) {
+      globalEnBotRunner.stop();
+      setIsBotRunning(false);
+      setBanner({
+        message: `🎯 Meta numérica atingida! ${sessionDispatchedRef.current}/${dispatchLimitCount} grupos disparados nesta rodada — Robô pausado para proteger sua conta.`,
+        tone: 'success',
+      });
+      return;
+    }
+
+    const group = effectiveDispatchGroups[currentPostIndex % effectiveDispatchGroups.length];
     const presellLink = activeOffer
       ? appendTrackingParam(activeOffer.presellUrl || 'https://global-sell-beta.vercel.app/', 'utm_source', 'facebook_groups')
       : 'https://global-sell-beta.vercel.app/';
@@ -1993,7 +2388,17 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
     const bodyWithLink = customPostBody.replace(/\[PRESELL_LINK\]/g, presellLink).trim();
     const rawFullText = headline ? `${headline}\n\n${bodyWithLink}` : bodyWithLink;
     const fullText = ensureClickableUrlsInText(rawFullText);
-    const postImageUrl = activeOffer?.postImageUrl || '';
+
+    // Guarantee visual asset: auto-create promo image if offer has none and composer attach is active
+    let postImageUrl = activeOffer?.postImageUrl || '';
+    if (attachImageInComposer && !postImageUrl && activeOffer) {
+      const autoGeneratedImg = generateOfferPromoImageDataUrl(activeOffer, customPostHeadline);
+      if (autoGeneratedImg) {
+        postImageUrl = autoGeneratedImg;
+        handleUpdateOfferField('postImageUrl', autoGeneratedImg);
+      }
+    }
+    const imageToSend = attachImageInComposer ? postImageUrl : '';
 
     try {
       navigator.clipboard?.writeText(fullText);
@@ -2027,15 +2432,19 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
       )
     );
 
+    const nextSentCount = sessionDispatchedRef.current + 1;
+    sessionDispatchedRef.current = nextSentCount;
+    setSessionDispatchedCount(nextSentCount);
+
     const cleanGroupName = sanitizeGlobalGroupName(group.name);
     setLastDispatchState({
       groupName: cleanGroupName,
       groupUrl: group.url,
       phase: 'opening',
       statusLabel: autoJoinAndPostEnabled
-        ? postImageUrl
-          ? 'Abrindo aba → Entrando → Postando texto + imagem...'
-          : 'Abrindo aba → Entrando → Postando...'
+        ? imageToSend
+          ? 'Abrindo aba → Postando imagem + link clicável...'
+          : 'Abrindo aba → Postando com card de link...'
         : 'Aberto para postagem manual',
       updatedAt: now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
     });
@@ -2049,20 +2458,31 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
           groupUrl: group.url,
           groupName: cleanGroupName,
           fullText,
-          imageDataUrl: postImageUrl,
+          imageDataUrl: imageToSend,
           autoJoinAndPost: autoJoinAndPostEnabled,
+          joinOnly: false,
         },
         '*'
       );
     } catch {}
 
-    setBanner({
-      message: autoJoinAndPostEnabled
-        ? `Grupo Global "${cleanGroupName}" aberto! Extensão v1.5.1 vai entrar${postImageUrl ? ', anexar a imagem' : ''}, postar com link clicável e fechar a aba.`
-        : `Grupo Global "${cleanGroupName}" aberto e texto copiado para postagem manual assistida.`,
-      tone: 'success',
-    });
-    setCurrentPostIndex((prev) => (prev + 1) % activeAudienceGroups.length);
+    setCurrentPostIndex((prev) => (prev + 1) % effectiveDispatchGroups.length);
+
+    if (!isManualSingle && dispatchLimitCount > 0 && nextSentCount >= dispatchLimitCount) {
+      globalEnBotRunner.stop();
+      setIsBotRunning(false);
+      setBanner({
+        message: `🎯 Disparo ${nextSentCount}/${dispatchLimitCount} enviado para "${cleanGroupName}"! Meta da rodada concluída — Robô pausado automaticamente.`,
+        tone: 'success',
+      });
+    } else {
+      setBanner({
+        message: autoJoinAndPostEnabled
+          ? `Grupo Global "${cleanGroupName}" aberto (${dispatchLimitCount > 0 ? `${nextSentCount}/${dispatchLimitCount}` : `#${nextSentCount}`})! Extensão v1.5.2 vai postar ${imageToSend ? 'imagem + link clicável' : 'card de link clicável'} e fechar a aba.`
+          : `Grupo Global "${cleanGroupName}" aberto e texto copiado para postagem manual assistida.`,
+        tone: 'success',
+      });
+    }
   };
 
   const handleApplyChamativaPreset = (style: ChamativaStyle) => {
@@ -2219,8 +2639,8 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
   };
 
   const handleSkipNextGroup = () => {
-    if (activeAudienceGroups.length <= 1) return;
-    setCurrentPostIndex((prev) => (prev + 1) % activeAudienceGroups.length);
+    if (effectiveDispatchGroups.length <= 1) return;
+    setCurrentPostIndex((prev) => (prev + 1) % effectiveDispatchGroups.length);
   };
 
   const [isDownloadingExt, setIsDownloadingExt] = useState(false);
@@ -2238,17 +2658,17 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
       );
       zip.file(
         'COMO-ATUALIZAR.txt',
-        '1. Extraia este ZIP substituindo os arquivos da pasta anterior (ou em uma pasta nova).\n2. Abra chrome://extensions no Google Chrome.\n3. Clique no ícone de Atualizar (↻) da extensão AutoViral AI v1.5.1.\n4. Recarregue (F5) a aba do AutoViral AI.'
+        '1. Extraia este ZIP substituindo os arquivos da pasta anterior (ou em uma pasta nova).\n2. Abra chrome://extensions no Google Chrome.\n3. Clique no ícone de Atualizar (↻) da extensão AutoViral AI v1.5.2.\n4. Recarregue (F5) a aba do AutoViral AI.'
       );
       const blob = await zip.generateAsync({ type: 'blob' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = 'extensao-autoviral-v1.5.1.zip';
+      link.download = 'extensao-autoviral-v1.5.2.zip';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       setBanner({
-        message: 'Extensão v1.5.1 atualizada baixada! Extraia, recarregue (↻) em chrome://extensions e dê F5 nesta página.',
+        message: 'Extensão v1.5.2 atualizada baixada! Extraia, recarregue (↻) em chrome://extensions e dê F5 nesta página.',
         tone: 'success',
       });
     } catch {
@@ -2320,7 +2740,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
   // Re-attach Global runner callbacks on mount/update
   useEffect(() => {
     globalEnBotRunner.setCallbacks(
-      () => executeSingleGlobalPost(),
+      () => executeSingleGlobalPost(false),
       (rem) => setSecondsRemaining(rem),
       () => {
         setIsBotRunning(false);
@@ -2338,10 +2758,14 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
       globalEnBotRunner.stop();
       setIsBotRunning(false);
     } else {
+      if (dispatchLimitCount > 0 && sessionDispatchedRef.current >= dispatchLimitCount) {
+        sessionDispatchedRef.current = 0;
+        setSessionDispatchedCount(0);
+      }
       globalEnBotRunner.start(
         350,
         true,
-        () => executeSingleGlobalPost(),
+        () => executeSingleGlobalPost(false),
         (rem) => setSecondsRemaining(rem),
         () => {
           setIsBotRunning(false);
@@ -2353,7 +2777,10 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
       );
       setIsBotRunning(true);
       setBanner({
-        message: 'Robô Global ativado (300s–400s)! Se o Robô Brasil estivesse rodando, ele foi pausado automaticamente para proteger sua conta.',
+        message:
+          dispatchLimitCount > 0
+            ? `Robô Global ativado (300s–400s) com meta de ${dispatchLimitCount} grupo(s) nesta rodada!`
+            : 'Robô Global ativado (300s–400s)! Se o Robô Brasil estivesse rodando, ele foi pausado automaticamente.',
         tone: 'success',
       });
     }
@@ -3549,6 +3976,268 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
               </div>
             </div>
           </div>
+
+          {/* STAGED GROUP PIPELINE FOR ACTIVE NAMED AUDIENCE */}
+          {activeAudience && (
+            <div className="bg-slate-900 border border-cyan-800/40 rounded-xl p-5 space-y-4">
+              {(() => {
+                const audAuthorized = activeAudienceGroups.filter((g) => g.membershipStatus === 'authorized');
+                const audAwaiting = activeAudienceGroups.filter(
+                  (g) => g.membershipStatus === 'awaiting_admin' || g.membershipStatus === 'join_requested'
+                );
+                const audMapped = activeAudienceGroups.filter((g) => !g.membershipStatus || g.membershipStatus === 'mapped');
+                const audOther = activeAudienceGroups.filter(
+                  (g) =>
+                    g.membershipStatus === 'rejected' ||
+                    g.membershipStatus === 'questions_pending' ||
+                    g.membershipStatus === 'rate_limited' ||
+                    g.membershipStatus === 'unavailable'
+                );
+                const filteredStageGroups = activeAudienceGroups.filter((g) => {
+                  const st = g.membershipStatus || 'mapped';
+                  if (audienceStageFilter === 'all') return true;
+                  if (audienceStageFilter === 'authorized') return st === 'authorized';
+                  if (audienceStageFilter === 'awaiting') return st === 'awaiting_admin' || st === 'join_requested';
+                  if (audienceStageFilter === 'mapped') return st === 'mapped';
+                  return st === 'rejected' || st === 'questions_pending' || st === 'rate_limited' || st === 'unavailable';
+                });
+
+                return (
+                  <>
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                      <div>
+                        <div className="flex items-center gap-2 text-xs text-cyan-300 font-semibold">
+                          <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                          <span>Funil por Etapas do Público Selecionado: {activeAudience.name}</span>
+                        </div>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          Etapa 1: Solicitar entrada em lote (sem postar) → Etapa 2: Confirmar autorizações → Etapa 3: Disparar somente nos Autorizados.
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDispatchQueueSource(audAuthorized.length > 0 ? 'authorized_only' : 'all_audience');
+                            setSubTab('bot');
+                          }}
+                          className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg inline-flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Send className="w-3.5 h-3.5" />
+                          <span>Ir p/ Disparo ({audAuthorized.length} Autorizados)</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Stage 1 & Stage 2 Controls */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      {/* Etapa 1: Solicitar Entrada em Lote */}
+                      <div className="bg-slate-950 border border-slate-800 rounded-lg p-3.5 space-y-2.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-bold text-white">
+                            Etapa 1 · Solicitar Entrada em Lote ({audMapped.length + audOther.filter((g) => g.membershipStatus === 'rejected').length} disponíveis)
+                          </span>
+                          <span className="text-[11px] text-slate-400">Sem postar ainda</span>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <label className="inline-flex items-center gap-1.5 text-xs text-slate-300">
+                            <span>Qtd:</span>
+                            <input
+                              type="number"
+                              min={1}
+                              max={200}
+                              value={batchJoinCountInput}
+                              onChange={(e) => setBatchJoinCountInput(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                              className="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs font-bold text-white tabular-nums"
+                            />
+                          </label>
+                          {[5, 10, 20, 30, 50].map((n) => (
+                            <button
+                              key={n}
+                              type="button"
+                              onClick={() => setBatchJoinCountInput(n)}
+                              className={`px-2 py-1 text-[11px] rounded border cursor-pointer ${
+                                batchJoinCountInput === n
+                                  ? 'bg-cyan-600/25 border-cyan-400 text-cyan-200 font-bold'
+                                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                              }`}
+                            >
+                              {n}
+                            </button>
+                          ))}
+                          <label className="inline-flex items-center gap-1 text-[11px] text-slate-400 ml-auto">
+                            <span>Intervalo:</span>
+                            <select
+                              value={batchJoinDelaySec}
+                              onChange={(e) => setBatchJoinDelaySec(Number(e.target.value))}
+                              className="bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-white"
+                            >
+                              <option value={10}>10s</option>
+                              <option value={12}>12s</option>
+                              <option value={15}>15s</option>
+                              <option value={20}>20s</option>
+                            </select>
+                          </label>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2 pt-1">
+                          {isBatchJoinRunning ? (
+                            <button
+                              type="button"
+                              onClick={handleStopBatchJoin}
+                              className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold rounded-md inline-flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <Pause className="w-3.5 h-3.5" />
+                              <span>Pausar Solicitações</span>
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleStartBatchJoin()}
+                              className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold rounded-md inline-flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <Play className="w-3.5 h-3.5" />
+                              <span>Solicitar Entrada em {batchJoinCountInput} Grupos</span>
+                            </button>
+                          )}
+                          {batchJoinProgress && (
+                            <span className="text-[11px] text-cyan-300 font-mono tabular-nums truncate max-w-[240px]">
+                              {batchJoinProgress.current}/{batchJoinProgress.total} · {batchJoinProgress.currentGroupName}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Etapa 2: Confirmar Autorizações */}
+                      <div className="bg-slate-950 border border-slate-800 rounded-lg p-3.5 space-y-2.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-bold text-white">
+                            Etapa 2 · Confirmar Quem Já Autorizou
+                          </span>
+                          <span className="text-[11px] text-emerald-400">Verifica sem abrir abas</span>
+                        </div>
+                        <p className="text-[11px] text-slate-400">
+                          A plataforma consulta cada grupo via extensão Chrome: aprovados vão para <strong>✅ Autorizado</strong> e os demais recebem status exato.
+                        </p>
+                        <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                          <button
+                            type="button"
+                            onClick={() => handleStartVerifyMembershipsBatch(true)}
+                            disabled={isVerifyingMemberships}
+                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold rounded-md inline-flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <RefreshCw className={`w-3.5 h-3.5 ${isVerifyingMemberships ? 'animate-spin' : ''}`} />
+                            <span>{isVerifyingMemberships ? 'Verificando...' : 'Confirmar Autorizações Pendentes'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleStartVerifyMembershipsBatch(false)}
+                            disabled={isVerifyingMemberships}
+                            className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 text-xs rounded-md cursor-pointer"
+                          >
+                            Reverificar Todos ({activeAudienceGroups.length})
+                          </button>
+                        </div>
+                        {verifyProgress && verifyProgress.total > 0 && (
+                          <div className="text-[11px] text-slate-300 font-mono tabular-nums pt-0.5">
+                            Checados: {verifyProgress.checked}/{verifyProgress.total} · ✅ {verifyProgress.authorizedCount} · ⏳ {verifyProgress.awaitingCount} · ❌ {verifyProgress.rejectedCount}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Stage Filter Tabs: Todos vs Autorizado vs Aguardando vs Mapeados vs Não Autorizados */}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {[
+                        { id: 'all' as const, label: `Todos (${activeAudienceGroups.length})` },
+                        { id: 'authorized' as const, label: `✅ Autorizados (${audAuthorized.length})` },
+                        { id: 'awaiting' as const, label: `⏳ Aguardando Admin (${audAwaiting.length})` },
+                        { id: 'mapped' as const, label: `🔵 Mapeados (${audMapped.length})` },
+                        { id: 'other' as const, label: `⚠️ Não Autorizados / Perguntas (${audOther.length})` },
+                      ].map((tab) => (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          onClick={() => setAudienceStageFilter(tab.id)}
+                          className={`px-3 py-1.5 text-xs font-semibold rounded-lg border cursor-pointer tabular-nums transition-colors ${
+                            audienceStageFilter === tab.id
+                              ? tab.id === 'authorized'
+                                ? 'bg-emerald-600/25 border-emerald-500 text-emerald-200'
+                                : 'bg-cyan-600/25 border-cyan-500 text-cyan-200'
+                              : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          {tab.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Filtered Group Status List */}
+                    <div className="max-h-72 overflow-y-auto divide-y divide-slate-800 border border-slate-800 rounded-lg bg-slate-950">
+                      {filteredStageGroups.length === 0 ? (
+                        <div className="p-4 text-xs text-slate-400 text-center">
+                          Nenhum grupo nesta aba ainda. Execute a Etapa 1 ou Etapa 2 acima para classificar automaticamente.
+                        </div>
+                      ) : (
+                        filteredStageGroups.slice(0, 120).map((g, idx) => {
+                          const st = g.membershipStatus || 'mapped';
+                          const meta = MEMBERSHIP_STATUS_META[st] || MEMBERSHIP_STATUS_META.mapped;
+                          return (
+                            <div key={g.id} className="px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+                              <div className="min-w-0 flex-1">
+                                <div className="font-medium text-white truncate">
+                                  {idx + 1}. {sanitizeGlobalGroupName(g.name)}
+                                </div>
+                                <div className="text-[11px] text-slate-400 flex flex-wrap items-center gap-2">
+                                  <span>{(g.membersCount || 0).toLocaleString('pt-BR')} membros</span>
+                                  {g.membershipCheckedAt && <span>· Checado {g.membershipCheckedAt}</span>}
+                                  {g.membershipNote && <span className="truncate max-w-[240px]">· {g.membershipNote}</span>}
+                                </div>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                                <span className={`px-2 py-0.5 text-[11px] font-semibold rounded border ${meta.badgeClass}`}>
+                                  {meta.label}
+                                </span>
+                                {st !== 'authorized' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleManualSetGroupMembership(g.id, 'authorized')}
+                                    className="px-2 py-0.5 bg-emerald-950/60 hover:bg-emerald-900/70 border border-emerald-700/50 text-emerald-300 text-[11px] rounded cursor-pointer"
+                                    title="Confirmar este grupo como Autorizado"
+                                  >
+                                    Autorizar
+                                  </button>
+                                )}
+                                {st !== 'awaiting_admin' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleManualSetGroupMembership(g.id, 'awaiting_admin')}
+                                    className="px-2 py-0.5 bg-amber-950/50 hover:bg-amber-900/60 border border-amber-700/40 text-amber-300 text-[11px] rounded cursor-pointer"
+                                  >
+                                    Aguardando
+                                  </button>
+                                )}
+                                {st !== 'rejected' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleManualSetGroupMembership(g.id, 'rejected')}
+                                    className="px-2 py-0.5 bg-rose-950/50 hover:bg-rose-900/60 border border-rose-700/40 text-rose-300 text-[11px] rounded cursor-pointer"
+                                  >
+                                    Recusado
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          )}
         </div>
       )}
 
@@ -3604,12 +4293,14 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
 
           {/* FACEBOOK GROUPS GLOBAL */}
           {botChannel === 'facebook' && (() => {
-            const queueLen = activeAudienceGroups.length;
+            const queueLen = effectiveDispatchGroups.length;
+            const totalAudienceLen = activeAudienceGroups.length;
+            const authorizedCountInAudience = authorizedAudienceGroups.length;
             const currentQueueNum = queueLen > 0 ? (currentPostIndex % queueLen) + 1 : 0;
-            const nextGroup = queueLen > 0 ? activeAudienceGroups[currentPostIndex % queueLen] : null;
+            const nextGroup = queueLen > 0 ? effectiveDispatchGroups[currentPostIndex % queueLen] : null;
             const nextGroupCleanName = nextGroup ? sanitizeGlobalGroupName(nextGroup.name) : '';
             const queueProgressPct = queueLen > 0 ? Math.min(100, Math.round((currentQueueNum / queueLen) * 100)) : 0;
-            const ptCountInQueue = activeAudienceGroups.filter((g) => isLikelyPortugueseGroup(g.name, g.url)).length;
+            const ptCountInQueue = effectiveDispatchGroups.filter((g) => isLikelyPortugueseGroup(g.name, g.url)).length;
 
             const publishedCount = botLogs.filter((l) => l.approvalStatus === 'published').length;
             const adminCount = botLogs.filter((l) => l.approvalStatus === 'awaiting_admin').length;
@@ -3692,6 +4383,9 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
                         <span className="px-2 py-0.5 rounded-md bg-cyan-950/50 border border-cyan-800/50 text-cyan-300 truncate max-w-[240px]">
                           Oferta: <strong>{activeOffer.productName}</strong>
                         </span>
+                        <span className="px-2 py-0.5 rounded-md bg-emerald-950/50 border border-emerald-700/50 text-emerald-300 font-mono tabular-nums">
+                          Rodada: {sessionDispatchedCount}/{dispatchLimitCount > 0 ? dispatchLimitCount : '∞'}
+                        </span>
                       </div>
 
                       <div className="text-sm font-semibold text-white truncate">
@@ -3700,7 +4394,11 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
                             Próximo (#{currentQueueNum} de {queueLen}): <span className="text-cyan-300">{nextGroupCleanName}</span>
                           </span>
                         ) : (
-                          <span>Nenhum grupo na fila deste público</span>
+                          <span>
+                            {dispatchQueueSource === 'authorized_only'
+                              ? 'Nenhum grupo Autorizado nesta fila (confira na aba 03 ou mude para Todos do Público)'
+                              : 'Nenhum grupo na fila deste público'}
+                          </span>
                         )}
                       </div>
                     </div>
@@ -3737,7 +4435,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
 
                       <button
                         type="button"
-                        onClick={executeSingleGlobalPost}
+                        onClick={() => executeSingleGlobalPost(true)}
                         disabled={queueLen === 0}
                         className="px-3.5 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-xs font-semibold text-white rounded-lg inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
                       >
@@ -3758,6 +4456,87 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
                         {isBotRunning ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
                         <span>{isBotRunning ? 'Pausar Robô Global' : 'Iniciar Robô Global'}</span>
                       </button>
+                    </div>
+                  </div>
+
+                  {/* Authorized-only Toggle + Numeric Dispatch Limit Selector */}
+                  <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 flex flex-col xl:flex-row xl:items-center justify-between gap-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-semibold text-slate-300">Fila de Disparo:</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDispatchQueueSource('authorized_only');
+                          setCurrentPostIndex(0);
+                        }}
+                        className={`px-2.5 py-1 text-xs font-semibold rounded-md border cursor-pointer ${
+                          dispatchQueueSource === 'authorized_only'
+                            ? 'bg-emerald-600/25 border-emerald-500 text-emerald-200'
+                            : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        ✅ Somente Autorizados ({authorizedCountInAudience})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDispatchQueueSource('all_audience');
+                          setCurrentPostIndex(0);
+                        }}
+                        className={`px-2.5 py-1 text-xs font-semibold rounded-md border cursor-pointer ${
+                          dispatchQueueSource === 'all_audience'
+                            ? 'bg-cyan-600/25 border-cyan-500 text-cyan-200'
+                            : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        Todos do Público ({totalAudienceLen})
+                      </button>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-semibold text-slate-300">Enviar p/ quantos grupos nesta rodada:</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={500}
+                        value={dispatchLimitCount}
+                        onChange={(e) => setDispatchLimitCount(Math.max(0, parseInt(e.target.value, 10) || 0))}
+                        className="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs font-bold text-cyan-300 tabular-nums"
+                        title="0 = Todos sem parar"
+                      />
+                      {[
+                        { val: 5, label: '5' },
+                        { val: 10, label: '10' },
+                        { val: 20, label: '20' },
+                        { val: 30, label: '30' },
+                        { val: 50, label: '50' },
+                        { val: 0, label: 'Todos' },
+                      ].map((opt) => (
+                        <button
+                          key={opt.val}
+                          type="button"
+                          onClick={() => setDispatchLimitCount(opt.val)}
+                          className={`px-2 py-1 text-[11px] rounded border cursor-pointer ${
+                            dispatchLimitCount === opt.val
+                              ? 'bg-cyan-600 text-white border-cyan-500 font-bold'
+                              : 'bg-slate-900 border-slate-700 text-slate-300 hover:text-white'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                      {sessionDispatchedCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            sessionDispatchedRef.current = 0;
+                            setSessionDispatchedCount(0);
+                          }}
+                          className="text-[11px] text-slate-400 hover:text-white underline ml-1 cursor-pointer"
+                        >
+                          Zerar contador
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -3935,10 +4714,10 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
                           onClick={handleDownloadGlobalExtensionZip}
                           disabled={isDownloadingExt}
                           className="px-3 py-1.5 bg-cyan-600/20 hover:bg-cyan-600/35 border border-cyan-500/40 text-cyan-200 text-[11px] font-semibold rounded-md inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
-                          title="Baixar Extensão v1.5.1 (Imagem no Post + Link Clicável + Cookie Espera + Fluxo Alt Post Anônimo)"
+                          title="Baixar Extensão v1.5.2 (Etapas Entrada + Verificador Autorizados + Imagem no Link/Post + Fluxo Alt Anônimo)"
                         >
                           <Download className="w-3 h-3" />
-                          <span>{isDownloadingExt ? 'Gerando ZIP...' : 'Atualizar Extensão v1.5.1 (ZIP)'}</span>
+                          <span>{isDownloadingExt ? 'Gerando ZIP...' : 'Atualizar Extensão v1.5.2 (ZIP)'}</span>
                         </button>
                       </div>
                       <div className="flex flex-wrap gap-2">
@@ -4116,12 +4895,12 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
                         />
                       </label>
 
-                      {/* Post Image Bar inside Dispatch Config */}
+                      {/* Post Image & OG Link Card Guarantee Bar */}
                       <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 space-y-2.5">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <span className="text-xs font-semibold text-white inline-flex items-center gap-1.5">
                             <ImageIcon className="w-3.5 h-3.5 text-cyan-400" />
-                            <span>Imagem da Postagem (Anexada automaticamente no Facebook)</span>
+                            <span>Imagem do Produto (Post + Imagem no Link Clicável)</span>
                           </span>
                           <div className="flex flex-wrap items-center gap-1.5">
                             <label className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-[11px] font-medium text-white rounded-md inline-flex items-center gap-1 cursor-pointer">
@@ -4158,6 +4937,29 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
                             )}
                           </div>
                         </div>
+
+                        {!activeOffer.postImageUrl && (
+                          <div className="p-2 bg-amber-950/40 border border-amber-600/40 rounded-md flex flex-wrap items-center justify-between gap-2 text-[11px] text-amber-200">
+                            <span>Sem imagem ainda — ao disparar com "Anexar foto" ativado, geraremos uma capa automática para chamar atenção do lead.</span>
+                            <button
+                              type="button"
+                              onClick={handleGenerateOfferPostImage}
+                              className="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded cursor-pointer shrink-0"
+                            >
+                              Gerar Agora
+                            </button>
+                          </div>
+                        )}
+
+                        <label className="flex items-center gap-2 text-[11px] text-emerald-300 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={attachImageInComposer}
+                            onChange={(e) => setAttachImageInComposer(e.target.checked)}
+                            className="rounded border-slate-600 bg-slate-900 text-emerald-500"
+                          />
+                          <span>Anexar imagem diretamente no post do Facebook + Link Clicável (chama mais atenção no feed!)</span>
+                        </label>
 
                         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                           <input
@@ -4296,31 +5098,45 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
                               href={activePresellTrackingUrl}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="border border-slate-800 hover:border-cyan-500/50 bg-slate-950 rounded-lg p-2.5 flex items-center justify-between gap-3 transition-colors group"
+                              className="border border-slate-800 hover:border-cyan-500/50 bg-slate-950 rounded-lg overflow-hidden block transition-colors group"
                             >
-                              <div className="min-w-0">
-                                <div className="text-[10px] text-sky-400 group-hover:text-sky-300 font-mono truncate underline">
-                                  {activePresellTrackingUrl.replace(/^https?:\/\//, '')}
+                              {activeOffer.postImageUrl && (
+                                <div className="relative h-32 w-full bg-slate-900 overflow-hidden border-b border-slate-800">
+                                  <img
+                                    src={activeOffer.postImageUrl}
+                                    alt={`Card OG ${activeOffer.productName}`}
+                                    className="w-full h-full object-cover"
+                                  />
+                                  <span className="absolute top-2 right-2 px-2 py-0.5 rounded bg-emerald-500 text-slate-950 text-[10px] font-black">
+                                    Imagem no Link Ativa
+                                  </span>
                                 </div>
-                                <div className="text-xs font-semibold text-white truncate">
-                                  {activeOffer.productName} · {activeOffer.offerPriceText}
+                              )}
+                              <div className="p-2.5 flex items-center justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="text-[10px] text-sky-400 group-hover:text-sky-300 font-mono truncate underline">
+                                    {activePresellTrackingUrl.replace(/^https?:\/\//, '')}
+                                  </div>
+                                  <div className="text-xs font-semibold text-white truncate">
+                                    {activeOffer.productName} · {activeOffer.offerPriceText}
+                                  </div>
+                                  <div className="text-[11px] text-slate-400 truncate">{activeOffer.discountText}</div>
                                 </div>
-                                <div className="text-[11px] text-slate-400 truncate">{activeOffer.discountText}</div>
-                              </div>
-                              <div className="flex items-center gap-1 text-[10px] font-semibold text-sky-400 shrink-0">
-                                <span>Link Clicável</span>
-                                <ExternalLink className="w-3.5 h-3.5" />
+                                <div className="flex items-center gap-1 text-[10px] font-semibold text-sky-400 shrink-0">
+                                  <span>Link Clicável</span>
+                                  <ExternalLink className="w-3.5 h-3.5" />
+                                </div>
                               </div>
                             </a>
                           </div>
                         </div>
                       )}
 
-                      {/* Auto Join + Auto Post + Auto Close Tab Toggle (Same System as Brazil v1.5.1) */}
+                      {/* Auto Join + Auto Post + Auto Close Tab Toggle (Same System as Brazil v1.5.2) */}
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5">
                         <div className="text-xs">
                           <div className="font-semibold text-white">
-                            Sistema Automático: Abrir → Entrar / Cookie Espera → Postar + Imagem → Fechar Aba (v1.5.1)
+                            Sistema Automático: Abrir → Entrar / Cookie Espera → Postar + Imagem → Fechar Aba (v1.5.2)
                           </div>
                           <div className="text-[11px] text-slate-400">
                             {autoJoinAndPostEnabled
@@ -4346,7 +5162,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
                       </div>
 
                       {/* Queue Preview Collapsible */}
-                      {activeAudienceGroups.length > 0 && (
+                      {effectiveDispatchGroups.length > 0 && (
                         <div className="border border-slate-800 rounded-lg bg-slate-950">
                           <button
                             type="button"
@@ -4383,7 +5199,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({ ca
                                 )}
                               </div>
                               <div className="max-h-48 overflow-y-auto divide-y divide-slate-800">
-                                {activeAudienceGroups
+                                {effectiveDispatchGroups
                                   .filter((g) => {
                                     const clean = sanitizeGlobalGroupName(g.name);
                                     return !queueSearchFilter.trim()

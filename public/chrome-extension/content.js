@@ -1135,6 +1135,26 @@
       }
     }
 
+    function sendGroupMembershipResultToPlatform(payload) {
+      try {
+        const bc = new BroadcastChannel('autoviral_bridge_channel');
+        bc.postMessage({
+          action: 'AUTOVIRAL_GROUP_MEMBERSHIP_RESULT',
+          ...payload,
+          timestamp: new Date().toISOString()
+        });
+        setTimeout(() => bc.close(), 1000);
+      } catch (e) {}
+
+      if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
+        chrome.runtime.sendMessage({
+          action: 'AUTOVIRAL_GROUP_MEMBERSHIP_RESULT',
+          ...payload,
+          timestamp: new Date().toISOString()
+        }, () => { void chrome.runtime.lastError; });
+      }
+    }
+
     function startSubmissionMonitor(pending, currentSlug, msgEl, didAutoClickPublish, cancelAutoBtn) {
       let finished = false;
       let ticks = 0;
@@ -1626,29 +1646,32 @@
         box.id = 'autoviral-post-assistant';
         box.style.cssText = 'border-top: 1px solid #334155; padding-top: 8px; margin-top: 4px; display: flex; flex-direction: column; gap: 6px;';
 
+        const hasTask = Boolean(pending && (pending.fullText || pending.joinOnly));
         const buildPostReadyControls = () => {
           box.innerHTML = `
             <div style="font-size: 10px; color: #34d399; font-weight: 800;">
-              📋 Automação Entrada + Postagem:
+              ${pending && pending.joinOnly ? '🚪 Etapa 1: Solicitar Entrada no Grupo' : '📋 Automação Entrada + Postagem:'}
             </div>
             <div id="autoviral-post-assist-msg" style="font-size: 10px; color: #cbd5e1; line-height: 1.35;">
-              ${pending && pending.fullText ? 'Preparando ação neste grupo...' : 'Grupo monitorado! Dispare uma campanha no painel para preencher e postar aqui.'}
+              ${hasTask ? (pending && pending.joinOnly ? 'Verificando status e solicitando entrada (sem postar agora)...' : 'Preparando ação neste grupo...') : 'Grupo monitorado! Dispare uma campanha no painel para preencher e postar aqui.'}
             </div>
             <button id="autoviral-btn-cancel-auto" style="display: none; background: #1e293b; color: #fbbf24; border: 1px solid #f59e0b; border-radius: 7px; padding: 5px 8px; font-size: 10px; font-weight: 700; cursor: pointer;">
               ⏸️ Pausar Auto-Envio (Revisar antes de publicar)
             </button>
-            ${pending && pending.fullText ? `
+            ${hasTask ? `
               <button id="autoviral-btn-copy-fill" style="background: #2563eb; color: #fff; border: none; border-radius: 7px; padding: 7px 8px; font-size: 10px; font-weight: 700; cursor: pointer;">
-                🔄 Solicitar Entrada / Preencher Post Agora
+                🔄 ${pending && pending.joinOnly ? 'Solicitar Entrada Agora' : 'Solicitar Entrada / Preencher Post Agora'}
               </button>
-              <div style="display: flex; gap: 4px;">
-                <button id="autoviral-btn-confirm-pub" style="flex: 1; background: #10b981; color: #022c22; border: none; border-radius: 7px; padding: 6px; font-size: 10px; font-weight: 800; cursor: pointer;">
-                  ✓ Postagem Feita
-                </button>
-                <button id="autoviral-btn-confirm-admin" style="flex: 1; background: #f59e0b; color: #1c1917; border: none; border-radius: 7px; padding: 6px; font-size: 10px; font-weight: 800; cursor: pointer;">
-                  ⏳ Aguard. Admin
-                </button>
-              </div>
+              ${pending && pending.joinOnly ? '' : `
+                <div style="display: flex; gap: 4px;">
+                  <button id="autoviral-btn-confirm-pub" style="flex: 1; background: #10b981; color: #022c22; border: none; border-radius: 7px; padding: 6px; font-size: 10px; font-weight: 800; cursor: pointer;">
+                    ✓ Postagem Feita
+                  </button>
+                  <button id="autoviral-btn-confirm-admin" style="flex: 1; background: #f59e0b; color: #1c1917; border: none; border-radius: 7px; padding: 6px; font-size: 10px; font-weight: 800; cursor: pointer;">
+                    ⏳ Aguard. Admin
+                  </button>
+                </div>
+              `}
             ` : ''}
           `;
         };
@@ -1663,35 +1686,59 @@
         const btnAdm = document.getElementById('autoviral-btn-confirm-admin');
 
         const triggerJoinThenPost = (autoSubmitPost) => {
+          const isJoinOnly = Boolean(pending && pending.joinOnly);
           if (isFacebookGroupUnavailable()) {
             if (pending) {
-              sendRealPostResultToPlatform({
-                logId: pending.logId,
-                groupId: pending.groupId,
-                groupUrl: window.location.href,
-                groupName: pending.groupName,
-                approvalStatus: 'unavailable',
-                note: 'Facebook exibiu: Este conteúdo não está disponível no momento'
-              });
+              if (isJoinOnly) {
+                sendGroupMembershipResultToPlatform({
+                  groupId: pending.groupId,
+                  groupUrl: window.location.href,
+                  groupName: pending.groupName,
+                  membershipStatus: 'unavailable',
+                  note: 'Grupo indisponível no Facebook'
+                });
+              } else {
+                sendRealPostResultToPlatform({
+                  logId: pending.logId,
+                  groupId: pending.groupId,
+                  groupUrl: window.location.href,
+                  groupName: pending.groupName,
+                  approvalStatus: 'unavailable',
+                  note: 'Facebook exibiu: Este conteúdo não está disponível no momento'
+                });
+              }
             }
             clearStoredPendingGroupPost(currentSlug);
             if (msgEl) {
               msgEl.textContent = '🚫 Este grupo não está disponível no Facebook ("Este conteúdo não está disponível no momento"). Removido da fila!';
               msgEl.style.color = '#fb7185';
             }
+            if (isJoinOnly) {
+              scheduleAutoCloseTab(msgEl, cancelAutoBtn, '🚫 Grupo indisponível.', 2);
+            }
             return;
           }
 
           if (isFacebookRateLimited()) {
             if (pending) {
-              sendRealPostResultToPlatform({
-                logId: pending.logId,
-                groupId: pending.groupId,
-                groupUrl: window.location.href,
-                groupName: pending.groupName,
-                approvalStatus: 'rate_limited',
-                note: 'Facebook exibiu: Você não pode usar este recurso no momento'
-              });
+              if (isJoinOnly) {
+                sendGroupMembershipResultToPlatform({
+                  groupId: pending.groupId,
+                  groupUrl: window.location.href,
+                  groupName: pending.groupName,
+                  membershipStatus: 'rate_limited',
+                  note: 'Facebook limitou entradas temporariamente'
+                });
+              } else {
+                sendRealPostResultToPlatform({
+                  logId: pending.logId,
+                  groupId: pending.groupId,
+                  groupUrl: window.location.href,
+                  groupName: pending.groupName,
+                  approvalStatus: 'rate_limited',
+                  note: 'Facebook exibiu: Você não pode usar este recurso no momento'
+                });
+              }
             }
             if (msgEl) {
               msgEl.textContent = '🛡️ FREIO ANTI-BLOQUEIO: Facebook limitou temporariamente ("Você não pode usar este recurso no momento"). Painel pausado — aguarde 15–30 min!';
@@ -1702,20 +1749,37 @@
 
           if (isMembershipPendingApproval()) {
             if (pending) {
-              saveWaitingApprovalEntry(pending, currentSlug);
-              sendRealPostResultToPlatform({
-                logId: pending.logId,
-                groupId: pending.groupId,
-                groupUrl: window.location.href,
-                groupName: pending.groupName,
-                approvalStatus: 'join_requested'
-              });
+              if (isJoinOnly) {
+                sendGroupMembershipResultToPlatform({
+                  groupId: pending.groupId,
+                  groupUrl: window.location.href,
+                  groupName: pending.groupName,
+                  membershipStatus: 'awaiting_admin',
+                  note: 'Solicitação já pendente — aguardando aceite do admin'
+                });
+              } else {
+                saveWaitingApprovalEntry(pending, currentSlug);
+                sendRealPostResultToPlatform({
+                  logId: pending.logId,
+                  groupId: pending.groupId,
+                  groupUrl: window.location.href,
+                  groupName: pending.groupName,
+                  approvalStatus: 'join_requested'
+                });
+              }
               clearStoredPendingGroupPost(currentSlug);
             }
             if (msgEl) {
               msgEl.style.color = '#38bdf8';
             }
-            scheduleAutoCloseTab(msgEl, cancelAutoBtn, '⏳ Entrada pendente! Cookie & gatilho salvos — postará ao admin aceitar.', 3);
+            scheduleAutoCloseTab(
+              msgEl,
+              cancelAutoBtn,
+              isJoinOnly
+                ? '⏳ Solicitação já enviada! Aguardando admin.'
+                : '⏳ Entrada pendente! Cookie & gatilho salvos — postará ao admin aceitar.',
+              3
+            );
             return;
           }
 
@@ -1730,14 +1794,24 @@
             setTimeout(() => {
               if (isFacebookRateLimited()) {
                 if (pending) {
-                  sendRealPostResultToPlatform({
-                    logId: pending.logId,
-                    groupId: pending.groupId,
-                    groupUrl: window.location.href,
-                    groupName: pending.groupName,
-                    approvalStatus: 'rate_limited',
-                    note: 'Facebook limitou entradas/ações temporariamente'
-                  });
+                  if (isJoinOnly) {
+                    sendGroupMembershipResultToPlatform({
+                      groupId: pending.groupId,
+                      groupUrl: window.location.href,
+                      groupName: pending.groupName,
+                      membershipStatus: 'rate_limited',
+                      note: 'Facebook limitou entradas temporariamente'
+                    });
+                  } else {
+                    sendRealPostResultToPlatform({
+                      logId: pending.logId,
+                      groupId: pending.groupId,
+                      groupUrl: window.location.href,
+                      groupName: pending.groupName,
+                      approvalStatus: 'rate_limited',
+                      note: 'Facebook limitou entradas/ações temporariamente'
+                    });
+                  }
                 }
                 if (msgEl) {
                   msgEl.textContent = '🛡️ FREIO ANTI-BLOQUEIO: Facebook exibiu "Você não pode usar este recurso no momento". Robô pausado para proteger sua conta — aguarde 15–30 min!';
@@ -1748,18 +1822,30 @@
 
               if (hasMembershipQuestionsModalOpen()) {
                 if (pending) {
-                  saveWaitingApprovalEntry(pending, currentSlug);
-                  sendRealPostResultToPlatform({
-                    logId: pending.logId,
-                    groupId: pending.groupId,
-                    groupUrl: window.location.href,
-                    groupName: pending.groupName,
-                    approvalStatus: 'join_requested'
-                  });
+                  if (isJoinOnly) {
+                    sendGroupMembershipResultToPlatform({
+                      groupId: pending.groupId,
+                      groupUrl: window.location.href,
+                      groupName: pending.groupName,
+                      membershipStatus: 'questions_pending',
+                      note: 'Grupo exige responder perguntas de entrada'
+                    });
+                  } else {
+                    saveWaitingApprovalEntry(pending, currentSlug);
+                    sendRealPostResultToPlatform({
+                      logId: pending.logId,
+                      groupId: pending.groupId,
+                      groupUrl: window.location.href,
+                      groupName: pending.groupName,
+                      approvalStatus: 'join_requested'
+                    });
+                  }
                   clearStoredPendingGroupPost(currentSlug);
                 }
                 if (msgEl) {
-                  msgEl.textContent = '📝 Perguntas de entrada abertas! Cookie & gatilho ativados — responda acima e postamos assim que admin aceitar.';
+                  msgEl.textContent = isJoinOnly
+                    ? '📝 Grupo abriu perguntas de entrada! Responda acima para enviar sua solicitação.'
+                    : '📝 Perguntas de entrada abertas! Cookie & gatilho ativados — responda acima e postamos assim que admin aceitar.';
                   msgEl.style.color = '#fbbf24';
                 }
                 return;
@@ -1767,24 +1853,58 @@
 
               if (isMembershipPendingApproval() || findJoinGroupButton()) {
                 if (pending) {
-                  saveWaitingApprovalEntry(pending, currentSlug);
-                  sendRealPostResultToPlatform({
-                    logId: pending.logId,
-                    groupId: pending.groupId,
-                    groupUrl: window.location.href,
-                    groupName: pending.groupName,
-                    approvalStatus: 'join_requested'
-                  });
+                  if (isJoinOnly) {
+                    sendGroupMembershipResultToPlatform({
+                      groupId: pending.groupId,
+                      groupUrl: window.location.href,
+                      groupName: pending.groupName,
+                      membershipStatus: 'join_requested',
+                      note: 'Solicitação de entrada enviada'
+                    });
+                  } else {
+                    saveWaitingApprovalEntry(pending, currentSlug);
+                    sendRealPostResultToPlatform({
+                      logId: pending.logId,
+                      groupId: pending.groupId,
+                      groupUrl: window.location.href,
+                      groupName: pending.groupName,
+                      approvalStatus: 'join_requested'
+                    });
+                  }
                   clearStoredPendingGroupPost(currentSlug);
                 }
                 if (msgEl) {
                   msgEl.style.color = '#38bdf8';
                 }
-                scheduleAutoCloseTab(msgEl, cancelAutoBtn, '⏳ Entrada solicitada! Cookie & gatilho ativados (fechando aba e postará quando aceitar).', 3);
+                scheduleAutoCloseTab(
+                  msgEl,
+                  cancelAutoBtn,
+                  isJoinOnly
+                    ? '⏳ Entrada solicitada! Status atualizado no painel.'
+                    : '⏳ Entrada solicitada! Cookie & gatilho ativados (fechando aba e postará quando aceitar).',
+                  3
+                );
                 return;
               }
 
-              // Joined public group instantly! Wait 3.5s humanized delay before posting!
+              // Joined public group instantly!
+              if (isJoinOnly && pending) {
+                sendGroupMembershipResultToPlatform({
+                  groupId: pending.groupId,
+                  groupUrl: window.location.href,
+                  groupName: pending.groupName,
+                  membershipStatus: 'authorized',
+                  note: 'Entrada autorizada na hora! Pronto para disparar.'
+                });
+                clearStoredPendingGroupPost(currentSlug);
+                if (msgEl) {
+                  msgEl.style.color = '#34d399';
+                }
+                scheduleAutoCloseTab(msgEl, cancelAutoBtn, '✅ Entrada AUTORIZADA na hora! Enviado p/ aba Autorizados.', 2);
+                return;
+              }
+
+              // Wait 3.5s humanized delay before posting!
               if (msgEl) {
                 msgEl.textContent = '✅ Entrada confirmada! Aguardando 3.5s (proteção anti-spam) antes de postar...';
                 msgEl.style.color = '#34d399';
@@ -1796,13 +1916,30 @@
             return;
           }
 
+          // Already a member!
+          if (pending && isJoinOnly) {
+            sendGroupMembershipResultToPlatform({
+              groupId: pending.groupId,
+              groupUrl: window.location.href,
+              groupName: pending.groupName,
+              membershipStatus: 'authorized',
+              note: 'Já é membro autorizado deste grupo!'
+            });
+            clearStoredPendingGroupPost(currentSlug);
+            if (msgEl) {
+              msgEl.style.color = '#34d399';
+            }
+            scheduleAutoCloseTab(msgEl, cancelAutoBtn, '✅ Já é membro AUTORIZADO! Enviado p/ aba Autorizados.', 2);
+            return;
+          }
+
           // Already a member -> proceed straight to post!
           if (pending && pending.fullText) {
             executeAutoPostFlow(pending, currentSlug, msgEl, cancelAutoBtn, autoSubmitPost);
           }
         };
 
-        if (btnFill && pending && pending.fullText) {
+        if (btnFill && hasTask) {
           btnFill.onclick = () => {
             try {
               sessionStorage.removeItem(`av_skel_reload_${currentSlug}`);
@@ -1892,7 +2029,7 @@
         }
 
         // Automatically run Stage 1 (Join) -> Stage 2 (Post) when opened from AutoViral!
-        if (pending && pending.fullText && pending.autoJoinAndPost !== false) {
+        if (hasTask && pending.autoJoinAndPost !== false) {
           triggerJoinThenPost(true);
         } else if (joinBtn && !pending) {
           if (msgEl) {
@@ -2842,6 +2979,14 @@
         window.dispatchEvent(new CustomEvent('autoviral_fb_post_result', {
           detail: data
         }));
+      } else if (data.action === 'AUTOVIRAL_GROUP_MEMBERSHIP_RESULT') {
+        window.dispatchEvent(new CustomEvent('autoviral_group_membership_result', {
+          detail: data
+        }));
+      } else if (data.action === 'AUTOVIRAL_MEMBERSHIP_BATCH_PROGRESS') {
+        window.dispatchEvent(new CustomEvent('autoviral_membership_batch_progress', {
+          detail: data
+        }));
       } else if (data.action === 'AUTOVIRAL_WAITING_APPROVALS_SYNC') {
         window.dispatchEvent(new CustomEvent('autoviral_waiting_approvals_synced', {
           detail: data.waitingApprovals || []
@@ -2896,10 +3041,24 @@
             groupId: ev.data.groupId,
             groupUrl: ev.data.groupUrl,
             groupName: ev.data.groupName,
-            fullText: ev.data.fullText,
+            fullText: ev.data.fullText || '',
             imageDataUrl: ev.data.imageDataUrl || '',
-            autoJoinAndPost: ev.data.autoJoinAndPost !== false
+            autoJoinAndPost: ev.data.autoJoinAndPost !== false,
+            joinOnly: Boolean(ev.data.joinOnly)
           }, () => { void chrome.runtime.lastError; });
+        }
+      } else if (ev.data.type === 'AUTOVIRAL_VERIFY_MEMBERSHIPS_BATCH') {
+        if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
+          chrome.runtime.sendMessage({
+            action: 'AUTOVIRAL_VERIFY_MEMBERSHIPS_BATCH',
+            groups: Array.isArray(ev.data.groups) ? ev.data.groups : [],
+            batchId: ev.data.batchId || `batch-${Date.now()}`
+          }, (res) => {
+            void chrome.runtime.lastError;
+            window.dispatchEvent(new CustomEvent('autoviral_membership_batch_done', {
+              detail: res || { ok: false }
+            }));
+          });
         }
       } else if (ev.data.type === 'AUTOVIRAL_REQUEST_INSTA_SYNC') {
         pullExtensionCacheIntoAutoViral();
@@ -2941,6 +3100,8 @@
         message.action === 'AUTOVIRAL_IMPORT_INSTAGRAM_ACCOUNTS' ||
         message.action === 'AUTOVIRAL_INSTA_ACCOUNT_SYNC' ||
         message.action === 'AUTOVIRAL_FB_POST_RESULT' ||
+        message.action === 'AUTOVIRAL_GROUP_MEMBERSHIP_RESULT' ||
+        message.action === 'AUTOVIRAL_MEMBERSHIP_BATCH_PROGRESS' ||
         message.action === 'AUTOVIRAL_WAITING_APPROVALS_SYNC'
       ) {
         forwardExtensionEvent(message);

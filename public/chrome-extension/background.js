@@ -1,7 +1,7 @@
 // AutoViral AI Chrome Extension - Background Service Worker (Manifest V3)
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('[AutoViral AI] Extensão v1.5.1 instalada com sucesso!');
+  console.log('[AutoViral AI] Extensão v1.5.2 instalada com sucesso!');
   chrome.storage.local.get(['autoviral_interval', 'autoviral_mapped_groups', 'autoviral_waiting_approval_map'], (res) => {
     chrome.storage.local.set({
       autoviral_interval: res.autoviral_interval || 350,
@@ -323,6 +323,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === 'AUTOVIRAL_VERIFY_MEMBERSHIPS_BATCH') {
+    verifyMembershipsBatchNow(request.groups || [], request.batchId || `batch-${Date.now()}`)
+      .then((result) => sendResponse(result))
+      .catch(() => sendResponse({ ok: false, checked: 0, total: 0 }));
+    return true;
+  }
+
   // Relay mapped groups to AutoViral platform tabs
   if (request.action === 'AUTOVIRAL_SYNC_WITH_PLATFORM') {
     const groups = request.groups || [];
@@ -357,6 +364,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       fullText: request.fullText || '',
       imageDataUrl: request.imageDataUrl || '',
       autoJoinAndPost: request.autoJoinAndPost !== false,
+      joinOnly: Boolean(request.joinOnly),
       createdAt: new Date().toISOString()
     };
 
@@ -392,7 +400,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     request.action === 'AUTOVIRAL_IMPORT_INSTAGRAM_ACCOUNTS' ||
     request.action === 'AUTOVIRAL_INSTA_ACCOUNT_SYNC' ||
     request.action === 'AUTOVIRAL_IMPORT_YOUTUBE_VIDEOS_FROM_EXTENSION' ||
-    request.action === 'AUTOVIRAL_FB_POST_RESULT'
+    request.action === 'AUTOVIRAL_FB_POST_RESULT' ||
+    request.action === 'AUTOVIRAL_GROUP_MEMBERSHIP_RESULT'
   ) {
     if (request.action === 'AUTOVIRAL_IMPORT_INSTAGRAM_ACCOUNTS' && Array.isArray(request.accounts)) {
       chrome.storage.local.set({ autoviral_insta_accounts: request.accounts });
@@ -1400,6 +1409,146 @@ async function checkWaitingApprovalsNow(maxCount) {
   });
 
   return { ok: true, checked, approvedCount, waitingCount: Object.keys(waitingMap).length };
+}
+
+async function verifyMembershipsBatchNow(groups, batchId) {
+  const list = Array.isArray(groups)
+    ? groups.filter((g) => g && g.url && String(g.url).includes('/groups/'))
+    : [];
+  const total = list.length;
+  if (total === 0) {
+    relayToAutoViralTabs({
+      action: 'AUTOVIRAL_MEMBERSHIP_BATCH_PROGRESS',
+      batchId,
+      checked: 0,
+      total: 0,
+      done: true,
+      authorizedCount: 0,
+      awaitingCount: 0,
+      rejectedCount: 0,
+      otherCount: 0
+    });
+    return { ok: true, checked: 0, total: 0 };
+  }
+
+  let checked = 0;
+  let authorizedCount = 0;
+  let awaitingCount = 0;
+  let rejectedCount = 0;
+  let otherCount = 0;
+  let rateLimited = false;
+
+  for (const entry of list) {
+    checked++;
+    let membershipStatus = 'awaiting_admin';
+    let note = '';
+
+    try {
+      const resp = await fetch(entry.url, { credentials: 'include', redirect: 'follow' });
+      const html = await resp.text();
+
+      const isRateLimited =
+        /Você não pode usar este recurso no momento/i.test(html) ||
+        /You can't use this feature right now/i.test(html) ||
+        /Temporarily Blocked/i.test(html);
+
+      const isUnavailable =
+        /Este conteúdo não está disponível no momento/i.test(html) ||
+        /This content isn't available right now/i.test(html) ||
+        /Page Not Found/i.test(html);
+
+      const isPending =
+        /"viewer_forum_join_state":"REQUESTED"/i.test(html) ||
+        /"viewer_join_state":"REQUESTED"/i.test(html) ||
+        /"Cancel request"/i.test(html) ||
+        /"Cancelar solicitação"/i.test(html);
+
+      const isMember =
+        !isPending &&
+        (
+          /"viewer_forum_join_state":"MEMBER"/i.test(html) ||
+          /"viewer_join_state":"MEMBER"/i.test(html) ||
+          /"is_viewer_member":true/i.test(html) ||
+          /"GroupInlineComposer"/i.test(html) ||
+          />Escreva algo\.\.\.</i.test(html) ||
+          />Write something\.\.\.</i.test(html)
+        );
+
+      const canRequestJoin =
+        !isMember &&
+        !isPending &&
+        (
+          /"viewer_forum_join_state":"CAN_REQUEST"/i.test(html) ||
+          /"viewer_join_state":"CAN_REQUEST"/i.test(html) ||
+          />Participar do grupo</i.test(html) ||
+          />Join group</i.test(html)
+        );
+
+      if (isRateLimited) {
+        membershipStatus = 'rate_limited';
+        note = 'Facebook limitou verificações temporariamente';
+        rateLimited = true;
+      } else if (isUnavailable) {
+        membershipStatus = 'unavailable';
+        note = 'Grupo indisponível no Facebook';
+      } else if (isMember) {
+        membershipStatus = 'authorized';
+        note = 'Autorizado (Membro confirmado)';
+      } else if (isPending) {
+        membershipStatus = 'awaiting_admin';
+        note = 'Solicitação ainda aguardando admin';
+      } else if (canRequestJoin) {
+        membershipStatus = 'rejected';
+        note = 'Não autorizado / Solicitação recusada ou expirada';
+      } else {
+        membershipStatus = 'awaiting_admin';
+        note = 'Sem confirmação direta de membro — mantido em verificação';
+      }
+    } catch (err) {
+      membershipStatus = 'awaiting_admin';
+      note = 'Erro de rede ao consultar grupo';
+    }
+
+    if (membershipStatus === 'authorized') authorizedCount++;
+    else if (membershipStatus === 'awaiting_admin') awaitingCount++;
+    else if (membershipStatus === 'rejected') rejectedCount++;
+    else otherCount++;
+
+    const isLast = checked >= total || rateLimited;
+    relayToAutoViralTabs({
+      action: 'AUTOVIRAL_MEMBERSHIP_BATCH_PROGRESS',
+      batchId,
+      checked,
+      total,
+      groupId: entry.id,
+      groupUrl: entry.url,
+      groupName: entry.name || '',
+      membershipStatus,
+      note,
+      authorizedCount,
+      awaitingCount,
+      rejectedCount,
+      otherCount,
+      rateLimited,
+      done: isLast
+    });
+
+    if (rateLimited) break;
+    if (!isLast) {
+      await sleepMs(900);
+    }
+  }
+
+  return {
+    ok: true,
+    checked,
+    total,
+    authorizedCount,
+    awaitingCount,
+    rejectedCount,
+    otherCount,
+    rateLimited
+  };
 }
 
 if (chrome.alarms && chrome.alarms.onAlarm) {

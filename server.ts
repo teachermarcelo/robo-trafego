@@ -75,6 +75,13 @@ export interface ServerCampaign {
   checkoutUrl?: string;
   whatsappNumber?: string;
   price: number;
+  oldPrice?: number;
+  headline?: string;
+  subheadline?: string;
+  badgeText?: string;
+  ctaText?: string;
+  guaranteeDays?: number;
+  imageUrl?: string;
   status: 'active' | 'paused';
   createdAt: string;
   antiBanOrganicMode: boolean;
@@ -98,6 +105,10 @@ const DEFAULT_SERVER_CAMPAIGNS: ServerCampaign[] = [
     checkoutUrl: 'https://pay.hotmart.com/U95248783T',
     whatsappNumber: '5541998778348',
     price: 9.90,
+    oldPrice: 47.0,
+    headline: '+ 100 Tarefinhas Lúdicas em PDF para Educação Infantil e Criança Autista',
+    subheadline: 'Material adaptado sem sobrecarga visual, pronto para imprimir e aplicar hoje mesmo.',
+    imageUrl: '/assets/aistudio/image_e9e67204.png',
     status: 'active',
     createdAt: new Date().toISOString(),
     antiBanOrganicMode: true,
@@ -939,6 +950,182 @@ app.post('/api/campaigns/reset-metrics', (req, res) => {
   }));
   saveCampaignsToDisk(serverCampaigns);
   return res.json({ success: true, campaigns: serverCampaigns });
+});
+
+// ===========================================================================
+// OpenGraph Image & Link Card Preview Engine (Facebook / WhatsApp Crawler)
+// ===========================================================================
+function slugifyForMatch(text: string): string {
+  return String(text || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)+/g, '');
+}
+
+function findCampaignForRequest(campId?: string, slugParam?: string): ServerCampaign | null {
+  if (campId) {
+    const exact = serverCampaigns.find((c) => c.id === campId);
+    if (exact) return exact;
+  }
+  if (slugParam) {
+    const s = slugParam.toLowerCase().trim();
+    const bySlug = serverCampaigns.find((c) => {
+      const titleSlug = slugifyForMatch(c.title);
+      if (s === 'tarefinhas' && (c.id === 'camp-tarefinhas-autismo' || titleSlug.includes('tarefinha'))) return true;
+      if (s === 'milhas' && (c.id === 'camp-milhas-3' || titleSlug.includes('milha'))) return true;
+      if (s === 'ecom-club' && (c.id === 'camp-ecom-club' || titleSlug.includes('ecom'))) return true;
+      if (s === 'kit-psico' && titleSlug.includes('psicopedagog')) return true;
+      if (s === 'atividades' && titleSlug.includes('cognitiv')) return true;
+      return titleSlug === s || titleSlug.startsWith(s) || c.id.replace(/^camp-/, '') === s;
+    });
+    if (bySlug) return bySlug;
+  }
+  return null;
+}
+
+function getRequestBaseUrl(req: express.Request): string {
+  const protoHeader = (req.headers['x-forwarded-proto'] as string || '').split(',')[0].trim();
+  const host = req.get('host') || `localhost:${PORT}`;
+  const isLocal = host.startsWith('localhost') || host.startsWith('127.0.0.1');
+  const proto = protoHeader || (!isLocal ? 'https' : req.protocol || 'http');
+  return `${proto}://${host}`;
+}
+
+function escapeHtmlAttr(str: string): string {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function injectOpenGraphMeta(rawHtml: string, req: express.Request): string {
+  const campQuery = typeof req.query.camp === 'string' ? req.query.camp : '';
+  const pQuery = typeof req.query.p === 'string' ? req.query.p : '';
+  const zMatch = req.path.match(/^\/z\/([^/?#]+)/i);
+  const zSlug = zMatch ? zMatch[1] : '';
+
+  const matched = findCampaignForRequest(campQuery, zSlug || pQuery);
+  if (!matched) return rawHtml;
+
+  const baseUrl = getRequestBaseUrl(req);
+  const ogTitle = (matched.headline || matched.title || 'AutoViral AI').trim();
+  const ogDesc = (
+    matched.subheadline ||
+    matched.painPointTargeted ||
+    `${matched.title} — Oferta especial e acesso imediato.`
+  ).trim();
+  const pageUrl = `${baseUrl}${req.originalUrl}`;
+  const ogImageUrl =
+    matched.imageUrl && /^https?:\/\//i.test(matched.imageUrl) && !matched.imageUrl.startsWith('data:')
+      ? matched.imageUrl
+      : `${baseUrl}/api/og-image/${encodeURIComponent(matched.id)}?v=${Date.now().toString(36).slice(-4)}`;
+
+  let html = rawHtml;
+  html = html.replace(/<title>[\s\S]*?<\/title>/i, `<title>${escapeHtmlAttr(ogTitle)}</title>`);
+  html = html.replace(
+    /<meta\s+name=["']description["'][^>]*>/i,
+    `<meta name="description" content="${escapeHtmlAttr(ogDesc)}" />`
+  );
+  html = html.replace(
+    /<meta\s+property=["']og:title["'][^>]*>/i,
+    `<meta property="og:title" content="${escapeHtmlAttr(ogTitle)}" />`
+  );
+  html = html.replace(
+    /<meta\s+property=["']og:description["'][^>]*>/i,
+    `<meta property="og:description" content="${escapeHtmlAttr(ogDesc)}" />`
+  );
+
+  const extraTags = [
+    `<meta property="og:url" content="${escapeHtmlAttr(pageUrl)}" />`,
+    `<meta property="og:image" content="${escapeHtmlAttr(ogImageUrl)}" />`,
+    `<meta property="og:image:secure_url" content="${escapeHtmlAttr(ogImageUrl)}" />`,
+    `<meta property="og:image:width" content="1200" />`,
+    `<meta property="og:image:height" content="800" />`,
+    `<meta property="og:image:alt" content="${escapeHtmlAttr(ogTitle)}" />`,
+    `<meta name="twitter:title" content="${escapeHtmlAttr(ogTitle)}" />`,
+    `<meta name="twitter:description" content="${escapeHtmlAttr(ogDesc)}" />`,
+    `<meta name="twitter:image" content="${escapeHtmlAttr(ogImageUrl)}" />`,
+  ].join('\n    ');
+
+  html = html.replace(/<\/head>/i, `    ${extraTags}\n  </head>`);
+  return html;
+}
+
+app.get('/api/og-image/:id', async (req, res) => {
+  try {
+    const rawId = decodeURIComponent(req.params.id || '');
+    const camp = findCampaignForRequest(rawId, rawId);
+    const imgRef = (camp?.imageUrl || '').trim();
+
+    if (imgRef.startsWith('data:image/')) {
+      const m = imgRef.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,([\s\S]+)$/);
+      if (m) {
+        const mime = m[1];
+        const buf = Buffer.from(m[2], 'base64');
+        res.setHeader('Content-Type', mime);
+        res.setHeader('Content-Length', buf.length);
+        res.setHeader('Cache-Control', 'public, max-age=300');
+        return res.end(buf);
+      }
+    }
+
+    if (imgRef.startsWith('/')) {
+      const rel = imgRef.replace(/^\/+/, '');
+      const localCandidates = [
+        path.resolve(process.cwd(), 'public', rel),
+        path.resolve(process.cwd(), 'dist', rel),
+      ];
+      const hit = localCandidates.find((p) => fs.existsSync(p));
+      if (hit) {
+        res.setHeader('Cache-Control', 'public, max-age=300');
+        return res.sendFile(hit);
+      }
+    }
+
+    if (/^https?:\/\//i.test(imgRef)) {
+      return res.redirect(302, imgRef);
+    }
+
+    // Fallback: serve guaranteed visual cover from public assets
+    const fallbackCandidates = [
+      path.resolve(process.cwd(), 'public', 'assets', 'aistudio', 'image_e9e67204.png'),
+      path.resolve(process.cwd(), 'public', 'apple-touch-icon.png'),
+      path.resolve(process.cwd(), 'dist', 'assets', 'aistudio', 'image_e9e67204.png'),
+    ];
+    const fallbackHit = fallbackCandidates.find((p) => fs.existsSync(p));
+    if (fallbackHit) {
+      res.setHeader('Cache-Control', 'public, max-age=300');
+      return res.sendFile(fallbackHit);
+    }
+    return res.status(404).end();
+  } catch (err) {
+    return res.status(500).end();
+  }
+});
+
+app.get('/api/og-preview-check', (req, res) => {
+  const id = typeof req.query.id === 'string' ? req.query.id : '';
+  const slug = typeof req.query.p === 'string' ? req.query.p : '';
+  const matched = findCampaignForRequest(id, slug);
+  const baseUrl = getRequestBaseUrl(req);
+  if (!matched) {
+    return res.json({ found: false });
+  }
+  const ogImageUrl =
+    matched.imageUrl && /^https?:\/\//i.test(matched.imageUrl) && !matched.imageUrl.startsWith('data:')
+      ? matched.imageUrl
+      : `${baseUrl}/api/og-image/${encodeURIComponent(matched.id)}`;
+  return res.json({
+    found: true,
+    campaignId: matched.id,
+    ogTitle: matched.headline || matched.title,
+    ogDescription: matched.subheadline || matched.painPointTargeted || '',
+    ogImageUrl,
+    hasImage: Boolean(matched.imageUrl),
+  });
 });
 
 // ===========================================================================
@@ -2394,12 +2581,12 @@ app.get('/api/extension/download', async (req, res) => {
 
     zip.file(
       'COMO-INSTALAR.txt',
-      `INSTRUÇÕES DE INSTALAÇÃO NO GOOGLE CHROME (AutoViral AI v1.5.1):\n\n1. Extraia este arquivo ZIP em uma pasta nova no seu computador.\n2. No Chrome, acesse chrome://extensions e REMOVA extensões AutoViral antigas (deixe APENAS UMA v1.5.1 para não dar conflito!).\n3. Ative a chave "Modo do desenvolvedor" (canto superior direito).\n4. Clique em "Carregar sem compactação" e selecione a pasta extraída.\n5. Abra Facebook (grupos), Instagram (busca/seguidores) ou YouTube (busca/vídeo), clique no botão Mapear do canal e depois em Enviar Tudo para o Painel.`
+      `INSTRUÇÕES DE INSTALAÇÃO NO GOOGLE CHROME (AutoViral AI v1.5.2):\n\n1. Extraia este arquivo ZIP em uma pasta nova no seu computador.\n2. No Chrome, acesse chrome://extensions e REMOVA extensões AutoViral antigas (deixe APENAS UMA v1.5.2 para não dar conflito!).\n3. Ative a chave "Modo do desenvolvedor" (canto superior direito).\n4. Clique em "Carregar sem compactação" e selecione a pasta extraída.\n5. Abra Facebook (grupos), Instagram (busca/seguidores) ou YouTube (busca/vídeo), clique no botão Mapear do canal e depois em Enviar Tudo para o Painel.`
     );
 
     const buffer = await zip.generateAsync({ type: 'nodebuffer' });
     res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', 'attachment; filename="extensao-autoviral-v1.5.1.zip"');
+    res.setHeader('Content-Disposition', 'attachment; filename="extensao-autoviral-v1.5.2.zip"');
     res.setHeader('Cache-Control', 'no-store');
     return res.send(buffer);
   } catch (err: any) {
@@ -2559,13 +2746,39 @@ async function startServer() {
       server: { middlewareMode: true },
       appType: 'spa',
     });
+
+    // Inject dynamic OpenGraph tags (og:image, og:title, og:description) for Landing URLs (?camp=, ?p=, /z/:slug)
+    app.get(['/', '/z/:slug'], async (req, res, next) => {
+      const hasCampaignSignal = Boolean(req.query.camp || req.query.p || req.path.startsWith('/z/'));
+      if (!hasCampaignSignal) return next();
+      try {
+        const templatePath = path.resolve(process.cwd(), 'index.html');
+        const rawHtml = fs.readFileSync(templatePath, 'utf-8');
+        const transformed = await vite.transformIndexHtml(req.originalUrl, rawHtml);
+        const withOg = injectOpenGraphMeta(transformed, req);
+        return res.status(200).set({ 'Content-Type': 'text/html' }).end(withOg);
+      } catch (e) {
+        return next(e);
+      }
+    });
+
     app.use(vite.middlewares);
   } else {
     const distPath = path.resolve(process.cwd(), 'dist');
     if (fs.existsSync(distPath)) {
-      app.use(express.static(distPath));
+      app.use(express.static(distPath, { index: false }));
       app.get('*', (req, res) => {
-        res.sendFile(path.resolve(distPath, 'index.html'));
+        const indexPath = path.resolve(distPath, 'index.html');
+        try {
+          const rawHtml = fs.readFileSync(indexPath, 'utf-8');
+          const hasCampaignSignal = Boolean(req.query.camp || req.query.p || req.path.startsWith('/z/'));
+          if (hasCampaignSignal) {
+            return res.status(200).set({ 'Content-Type': 'text/html' }).send(injectOpenGraphMeta(rawHtml, req));
+          }
+          return res.sendFile(indexPath);
+        } catch {
+          return res.sendFile(indexPath);
+        }
       });
     } else {
       // Emergency fallback if dist hasn't finished building

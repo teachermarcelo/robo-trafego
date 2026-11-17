@@ -72,12 +72,24 @@ export interface GlobalOffer {
   createdAt: string;
 }
 
+export interface GlobalAudienceSnapshot {
+  id: string;
+  name: string;
+  url: string;
+  membersCount?: number;
+  countryName?: string;
+  languageName?: string;
+  niche?: string;
+}
+
 export interface GlobalAudience {
   id: string;
   name: string;
   countryName: string;
   languageName: string;
   groupIds: string[];
+  groupUrls?: string[];
+  groupSnapshots?: GlobalAudienceSnapshot[];
   createdAt: string;
 }
 
@@ -515,6 +527,49 @@ function sanitizeGlobalGroupName(rawName: string): string {
     .replace(/\s+/g, ' ')
     .trim();
   return cleaned || 'Facebook Group';
+}
+
+function normalizeGroupUrlKey(rawUrl: string): string {
+  const s = String(rawUrl || '').trim().toLowerCase();
+  if (!s) return '';
+  const m = s.match(/\/groups\/([^/?#]+)/i);
+  if (m && m[1]) return `fbgroup:${m[1].toLowerCase()}`;
+  return s.replace(/[?#].*$/, '').replace(/\/+$/, '');
+}
+
+function getGroupsForAudience(aud: GlobalAudience | null, allGroups: GlobalGroupItem[]): GlobalGroupItem[] {
+  if (!aud) return allGroups;
+  const setIds = new Set(aud.groupIds || []);
+  const setUrls = new Set((aud.groupUrls || []).map(normalizeGroupUrlKey).filter(Boolean));
+  const audNameNorm = (aud.name || '').trim().toLowerCase();
+
+  const matched = allGroups.filter((g) => {
+    if (setIds.has(g.id)) return true;
+    const gKey = normalizeGroupUrlKey(g.url);
+    if (gKey && setUrls.has(gKey)) return true;
+    if (audNameNorm && (g.niche || '').trim().toLowerCase() === audNameNorm) return true;
+    return false;
+  });
+
+  if (matched.length > 0) return matched;
+  if (Array.isArray(aud.groupSnapshots) && aud.groupSnapshots.length > 0) {
+    return aud.groupSnapshots.map((s) => ({
+      id: s.id,
+      name: sanitizeGlobalGroupName(s.name),
+      url: s.url,
+      membersCount: s.membersCount || 0,
+      privacy: 'Público',
+      niche: s.niche || aud.name,
+      mappedAt: 'Sincronizado',
+      dispatchCount: 0,
+      status: 'ready',
+      countryName: s.countryName || aud.countryName,
+      languageName: s.languageName || aud.languageName,
+      isVerifiedReal: true,
+      validationStatus: 'verified',
+    }));
+  }
+  return [];
 }
 
 function isLikelyPortugueseGroup(name: string, url?: string): boolean {
@@ -1481,7 +1536,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
         join_requested: 'Entrada Solicitada (Cookie Ativo)',
         approved_posting: 'ADMIN ACEITOU! Gatilho disparado → Postando agora!',
         not_member: 'Precisa Participar',
-        composer_stuck: 'Janela Travada no FB (Atualize Extensão v1.5.3)',
+        composer_stuck: 'Janela Travada no FB (Atualize Extensão v1.5.4)',
         rate_limited: 'Limite Temporário FB',
         unavailable: 'Grupo Indisponível',
       };
@@ -2091,46 +2146,86 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
       routeAudienceName.trim() || `${finalCountry} · Público (${selectedItems.length} grupos)`;
 
     if (destination === 'global') {
-      const newGlobalGroupObjs: GlobalGroupItem[] = selectedItems.map((item) => ({
-        id: `gfb-${item.id}`,
-        name: item.name,
-        url: item.url,
-        membersCount: item.membersCount || 0,
-        privacy: 'Público',
-        niche: audienceLabel,
-        mappedAt: item.mappedAt,
-        dispatchCount: 0,
-        status: 'ready',
-        countryName: finalCountry,
-        languageName: finalLang,
-        isVerifiedReal: true,
-        validationStatus: 'verified',
-      }));
+      const existingByUrl = new Map<string, GlobalGroupItem>();
+      globalGroups.forEach((eg) => {
+        const key = normalizeGroupUrlKey(eg.url);
+        if (key) existingByUrl.set(key, eg);
+      });
 
-      let updatedGroupsList: GlobalGroupItem[] = [];
+      const resolvedIds: string[] = [];
+      const resolvedUrls: string[] = [];
+      const addedGroups: GlobalGroupItem[] = [];
+      const updatedExistingMap = new Map<string, GlobalGroupItem>();
+
+      selectedItems.forEach((item) => {
+        const key = normalizeGroupUrlKey(item.url);
+        const existing = key ? existingByUrl.get(key) : undefined;
+        if (existing) {
+          resolvedIds.push(existing.id);
+          resolvedUrls.push(existing.url);
+          updatedExistingMap.set(existing.id, {
+            ...existing,
+            countryName: finalCountry,
+            languageName: finalLang,
+            niche: existing.niche || audienceLabel,
+          });
+        } else {
+          const newId = `gfb-${item.id}`;
+          const newObj: GlobalGroupItem = {
+            id: newId,
+            name: item.name,
+            url: item.url,
+            membersCount: item.membersCount || 0,
+            privacy: 'Público',
+            niche: audienceLabel,
+            mappedAt: item.mappedAt,
+            dispatchCount: 0,
+            status: 'ready',
+            countryName: finalCountry,
+            languageName: finalLang,
+            isVerifiedReal: true,
+            validationStatus: 'verified',
+          };
+          resolvedIds.push(newId);
+          resolvedUrls.push(newObj.url);
+          addedGroups.push(newObj);
+        }
+      });
+
       setGlobalGroups((prev) => {
-        const merged = [...newGlobalGroupObjs, ...prev];
-        updatedGroupsList = merged.filter(
-          (g, i, self) => i === self.findIndex((t) => t.url.toLowerCase() === g.url.toLowerCase())
+        const refreshedPrev = prev.map((g) => updatedExistingMap.get(g.id) || g);
+        const merged = [...addedGroups, ...refreshedPrev];
+        return merged.filter(
+          (g, i, self) => i === self.findIndex((t) => normalizeGroupUrlKey(t.url) === normalizeGroupUrlKey(g.url))
         );
-        return updatedGroupsList;
       });
 
-      const resolvedIds = newGlobalGroupObjs.map((g) => {
-        const existing = globalGroups.find((eg) => eg.url.toLowerCase() === g.url.toLowerCase());
-        return existing ? existing.id : g.id;
-      });
+      const allSnapshots: GlobalAudienceSnapshot[] = [...addedGroups, ...Array.from(updatedExistingMap.values())].map((g) => ({
+        id: g.id,
+        name: g.name,
+        url: g.url,
+        membersCount: g.membersCount,
+        countryName: g.countryName,
+        languageName: g.languageName,
+        niche: audienceLabel,
+      }));
 
       const newAudId = `gaud-${Date.now()}`;
       setGlobalAudiences((prev) => {
         const existingIdx = prev.findIndex((a) => a.name.toLowerCase() === audienceLabel.toLowerCase());
         if (existingIdx >= 0) {
           const copy = [...prev];
+          const prevSnaps = copy[existingIdx].groupSnapshots || [];
+          const mergedSnaps = [...allSnapshots, ...prevSnaps].filter(
+            (s, i, self) => i === self.findIndex((t) => t.id === s.id || normalizeGroupUrlKey(t.url) === normalizeGroupUrlKey(s.url))
+          );
           copy[existingIdx] = {
             ...copy[existingIdx],
             countryName: finalCountry,
             languageName: finalLang,
             groupIds: Array.from(new Set([...copy[existingIdx].groupIds, ...resolvedIds])),
+            groupUrls: Array.from(new Set([...(copy[existingIdx].groupUrls || []), ...resolvedUrls])),
+            groupSnapshots: mergedSnaps,
           };
           setSelectedAudienceId(copy[existingIdx].id);
           return copy;
@@ -2142,13 +2237,18 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
             name: audienceLabel,
             countryName: finalCountry,
             languageName: finalLang,
-            groupIds: resolvedIds,
+            groupIds: Array.from(new Set(resolvedIds)),
+            groupUrls: Array.from(new Set(resolvedUrls)),
+            groupSnapshots: allSnapshots,
             createdAt: new Date().toISOString(),
           },
           ...prev,
         ];
       });
 
+      setCurrentPostIndex(0);
+      sessionDispatchedRef.current = 0;
+      setSessionDispatchedCount(0);
       setInboxGroups((prev) => prev.filter((g) => !selectedInboxIds.includes(g.id)));
       setSelectedInboxIds([]);
       setRouteAudienceName('');
@@ -2221,9 +2321,37 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
 
   const activeAudienceGroups = useMemo(() => {
     if (!activeAudience) return globalGroups;
-    const setIds = new Set(activeAudience.groupIds);
-    const list = globalGroups.filter((g) => setIds.has(g.id));
-    return list.length > 0 ? list : globalGroups;
+    return getGroupsForAudience(activeAudience, globalGroups);
+  }, [activeAudience, globalGroups]);
+
+  // Self-heal globalGroups if activeAudience holds recovered snapshots missing from globalGroups
+  useEffect(() => {
+    if (!activeAudience || !Array.isArray(activeAudience.groupSnapshots) || activeAudience.groupSnapshots.length === 0) return;
+    const existingKeys = new Set(globalGroups.map((g) => normalizeGroupUrlKey(g.url)));
+    const existingIds = new Set(globalGroups.map((g) => g.id));
+    const missing = activeAudience.groupSnapshots.filter(
+      (s) => !existingIds.has(s.id) && !existingKeys.has(normalizeGroupUrlKey(s.url))
+    );
+    if (missing.length > 0) {
+      setGlobalGroups((prev) => [
+        ...prev,
+        ...missing.map((s) => ({
+          id: s.id,
+          name: sanitizeGlobalGroupName(s.name),
+          url: s.url,
+          membersCount: s.membersCount || 0,
+          privacy: 'Público' as const,
+          niche: s.niche || activeAudience.name,
+          mappedAt: 'Recuperado',
+          dispatchCount: 0,
+          status: 'ready' as const,
+          countryName: s.countryName || activeAudience.countryName,
+          languageName: s.languageName || activeAudience.languageName,
+          isVerifiedReal: true,
+          validationStatus: 'verified' as const,
+        })),
+      ]);
+    }
   }, [activeAudience, globalGroups]);
 
   const authorizedAudienceGroups = useMemo(
@@ -2526,7 +2654,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
     } else {
       setBanner({
         message: autoJoinAndPostEnabled
-          ? `Grupo Global "${cleanGroupName}" aberto (${dispatchLimitCount > 0 ? `${nextSentCount}/${dispatchLimitCount}` : `#${nextSentCount}`})! Extensão v1.5.3 vai postar ${imageToSend ? 'imagem + link clicável' : 'card de link clicável'} e fechar a aba.`
+          ? `Grupo Global "${cleanGroupName}" aberto (${dispatchLimitCount > 0 ? `${nextSentCount}/${dispatchLimitCount}` : `#${nextSentCount}`})! Extensão v1.5.4 vai postar ${imageToSend ? 'imagem + link clicável' : 'card de link clicável'} e fechar a aba.`
           : `Grupo Global "${cleanGroupName}" aberto e texto copiado para postagem manual assistida.`,
         tone: 'success',
       });
@@ -2679,6 +2807,55 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
     document.body.removeChild(link);
   };
 
+  const handleCopyOfferPostImage = async () => {
+    if (!activeOffer?.postImageUrl) {
+      handleGenerateOfferPostImage();
+      return;
+    }
+    try {
+      const img = new Image();
+      if (!activeOffer.postImageUrl.startsWith('data:')) {
+        img.crossOrigin = 'anonymous';
+      }
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error('load_error'));
+        img.src = activeOffer.postImageUrl!;
+      });
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth || 1080;
+      canvas.height = img.naturalHeight || 1080;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('canvas_error');
+      ctx.drawImage(img, 0, 0);
+      const pngBlob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+      if (!pngBlob || !navigator.clipboard || typeof ClipboardItem === 'undefined') {
+        throw new Error('clipboard_image_unsupported');
+      }
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })]);
+      setCopiedId('copy-image-clipboard');
+      setTimeout(() => setCopiedId((prev) => (prev === 'copy-image-clipboard' ? null : prev)), 2200);
+      setBanner({
+        message: 'Imagem copiada! Agora clique dentro da caixa do Facebook e aperte Ctrl+V (se aparecer caixinha cinza do link, clique no X dela para ficar só a imagem linda + link clicável).',
+        tone: 'success',
+      });
+    } catch {
+      handleDownloadOfferPostImage();
+      setBanner({
+        message: 'Imagem baixada no seu computador (.jpg)! Arraste ela para dentro do post no Facebook para ficar só a imagem + link clicável.',
+        tone: 'info',
+      });
+    }
+  };
+
+  // Guarantee every selected offer always has a ready visual flyer image (no empty gray Global Presell cards!)
+  useEffect(() => {
+    if (!activeOffer || activeOffer.postImageUrl) return;
+    const autoImg = generateOfferPromoImageDataUrl(activeOffer, customPostHeadline, flyerTheme);
+    if (!autoImg) return;
+    setOffers((prev) => prev.map((o) => (o.id === activeOffer.id && !o.postImageUrl ? { ...o, postImageUrl: autoImg } : o)));
+  }, [activeOffer?.id]);
+
   const handleCheckWaitingApprovalsNow = () => {
     setCheckingApprovals(true);
     try {
@@ -2739,17 +2916,17 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
       );
       zip.file(
         'COMO-ATUALIZAR.txt',
-        '1. Extraia este ZIP substituindo os arquivos da pasta anterior (ou em uma pasta nova).\n2. Abra chrome://extensions no Google Chrome.\n3. Clique no ícone de Atualizar (↻) da extensão AutoViral AI v1.5.3.\n4. Recarregue (F5) a aba do AutoViral AI.'
+        '1. Extraia este ZIP substituindo os arquivos da pasta anterior (ou em uma pasta nova).\n2. Abra chrome://extensions no Google Chrome.\n3. Clique no ícone de Atualizar (↻) da extensão AutoViral AI v1.5.4.\n4. Recarregue (F5) a aba do AutoViral AI.'
       );
       const blob = await zip.generateAsync({ type: 'blob' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = 'extensao-autoviral-v1.5.3.zip';
+      link.download = 'extensao-autoviral-v1.5.4.zip';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       setBanner({
-        message: 'Extensão v1.5.3 atualizada baixada! Extraia, recarregue (↻) em chrome://extensions e dê F5 nesta página.',
+        message: 'Extensão v1.5.4 atualizada baixada! Extraia, recarregue (↻) em chrome://extensions e dê F5 nesta página.',
         tone: 'success',
       });
     } catch {
@@ -3388,14 +3565,24 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                       <span>Mudar Ângulo</span>
                     </button>
                     {activeOffer.postImageUrl && (
-                      <button
-                        type="button"
-                        onClick={handleDownloadOfferPostImage}
-                        className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-semibold rounded-lg inline-flex items-center gap-1 cursor-pointer"
-                      >
-                        <Download className="w-3 h-3" />
-                        <span>Baixar Imagem</span>
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          onClick={handleCopyOfferPostImage}
+                          className="px-2.5 py-1.5 bg-purple-600/30 hover:bg-purple-600/45 border border-purple-500/45 text-purple-200 text-[11px] font-bold rounded-lg inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          {copiedId === 'copy-image-clipboard' ? <Check className="w-3 h-3" /> : <ImageIcon className="w-3 h-3" />}
+                          <span>{copiedId === 'copy-image-clipboard' ? 'Imagem Copiada!' : 'Copiar Imagem (Ctrl+V)'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleDownloadOfferPostImage}
+                          className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-semibold rounded-lg inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          <Download className="w-3 h-3" />
+                          <span>Baixar Imagem</span>
+                        </button>
+                      </>
                     )}
                     <button
                       type="button"
@@ -3410,6 +3597,9 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                 <div className="bg-slate-900 border border-slate-800 rounded-lg p-3 text-[11px] text-slate-200 space-y-1.5 max-h-40 overflow-y-auto whitespace-pre-line">
                   {customPostHeadline && <div className="font-bold text-white">{customPostHeadline}</div>}
                   <div>{customPostBody}</div>
+                </div>
+                <div className="text-[11px] text-amber-200/90 bg-amber-950/30 border border-amber-500/25 rounded-lg px-3 py-2">
+                  💡 <strong>Dica Facebook (sem caixinha cinza sem foto):</strong> ao colar manualmente, clique em <strong>Copiar Imagem (Ctrl+V)</strong> e cole no Facebook (ou anexe a imagem baixada). Se o Facebook abrir a prévia cinza de link embaixo, clique no <strong>X</strong> dela — assim fica <strong>somente sua imagem chamativa + link clicável no texto</strong>!
                 </div>
               </div>
 
@@ -4101,8 +4291,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                 ) : (
                   <div className="divide-y divide-slate-800 border border-slate-800 rounded-lg bg-slate-950">
                     {globalAudiences.map((aud) => {
-                      const setIds = new Set(aud.groupIds);
-                      const matched = globalGroups.filter((g) => setIds.has(g.id));
+                      const matched = getGroupsForAudience(aud, globalGroups);
                       const totalMembers = matched.reduce((acc, g) => acc + (g.membersCount || 0), 0);
                       const isActive = activeAudience?.id === aud.id;
 
@@ -4924,10 +5113,10 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                           onClick={handleDownloadGlobalExtensionZip}
                           disabled={isDownloadingExt}
                           className="px-3 py-1.5 bg-cyan-600/20 hover:bg-cyan-600/35 border border-cyan-500/40 text-cyan-200 text-[11px] font-semibold rounded-md inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
-                          title="Baixar Extensão v1.5.3 (Correção Anti-Travamento Janela FB + Etapas Entrada + Imagem no Link/Post)"
+                          title="Baixar Extensão v1.5.4 (Anexa Imagem ANTES do Link + Remove Caixinha Cinza FB + Públicos Isolados)"
                         >
                           <Download className="w-3 h-3" />
-                          <span>{isDownloadingExt ? 'Gerando ZIP...' : 'Atualizar Extensão v1.5.3 (ZIP)'}</span>
+                          <span>{isDownloadingExt ? 'Gerando ZIP...' : 'Atualizar Extensão v1.5.4 (ZIP)'}</span>
                         </button>
                       </div>
                       <div className="flex flex-wrap gap-2">
@@ -5012,17 +5201,22 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                             onChange={(e) => {
                               setSelectedAudienceId(e.target.value);
                               setCurrentPostIndex(0);
+                              sessionDispatchedRef.current = 0;
+                              setSessionDispatchedCount(0);
                             }}
                             className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white"
                           >
                             {globalAudiences.length === 0 && (
                               <option value="">Todos os Grupos Globais ({globalGroups.length})</option>
                             )}
-                            {globalAudiences.map((aud) => (
-                              <option key={aud.id} value={aud.id}>
-                                {aud.name} ({aud.countryName} · {aud.groupIds.length} grupos)
-                              </option>
-                            ))}
+                            {globalAudiences.map((aud) => {
+                              const realMatched = getGroupsForAudience(aud, globalGroups).length;
+                              return (
+                                <option key={aud.id} value={aud.id}>
+                                  {aud.name} ({aud.countryName} · {realMatched} grupos ativos{realMatched === 0 && aud.groupIds.length > 0 ? ` de ${aud.groupIds.length} antigos` : ''})
+                                </option>
+                              );
+                            })}
                           </select>
                         </label>
 
@@ -5047,6 +5241,21 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                         </label>
                       </div>
 
+                      {activeAudience && activeAudienceGroups.length === 0 && (
+                        <div className="p-3 rounded-lg bg-amber-950/50 border border-amber-500/45 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-200">
+                          <span>
+                            O público <strong>"{activeAudience.name}"</strong> está com <strong>0 grupos ativos</strong> salvos neste navegador (o robô NÃO vai misturar grupos de outros públicos). Mapeie/envie grupos para ele na Triagem.
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setSubTab('triage')}
+                            className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-md cursor-pointer shrink-0"
+                          >
+                            Ir para 03. Triagem &amp; Públicos
+                          </button>
+                        </div>
+                      )}
+
                       {/* 1-Click Postagem Chamativa Style Bar */}
                       <div className="space-y-2">
                         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -5054,6 +5263,16 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                             Gerar Postagem Chamativa em 1 Clique ({activeOffer.languageName})
                           </span>
                           <div className="flex flex-wrap items-center gap-2">
+                            {activeOffer.postImageUrl && (
+                              <button
+                                type="button"
+                                onClick={handleCopyOfferPostImage}
+                                className="px-2.5 py-1 bg-purple-600/30 hover:bg-purple-600/45 border border-purple-500/45 text-purple-200 text-[11px] font-bold rounded-md inline-flex items-center gap-1 cursor-pointer"
+                              >
+                                {copiedId === 'copy-image-clipboard' ? <Check className="w-3 h-3" /> : <ImageIcon className="w-3 h-3" />}
+                                <span>{copiedId === 'copy-image-clipboard' ? 'Imagem Copiada!' : 'Copiar Imagem'}</span>
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={handleCopyFullManualPost}
@@ -5319,56 +5538,56 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                                   alt={`Prévia visual ${activeOffer.productName}`}
                                   className="w-full max-h-[420px] object-contain bg-slate-900"
                                 />
-                                <div className="px-3 py-1.5 bg-slate-950/90 border-t border-slate-800 flex items-center justify-between gap-2 text-[11px]">
+                                <div className="px-3 py-1.5 bg-slate-950/90 border-t border-slate-800 flex flex-wrap items-center justify-between gap-2 text-[11px]">
                                   <span className="text-emerald-300 font-medium">
-                                    Imagem anexada (vai junto no Facebook)
+                                    ✅ Post vai SOMENTE com esta Imagem + Link clicável no texto (sem caixinha cinza!)
                                   </span>
-                                  <button
-                                    type="button"
-                                    onClick={handleDownloadOfferPostImage}
-                                    className="text-cyan-300 hover:text-cyan-200 inline-flex items-center gap-1 cursor-pointer"
-                                  >
-                                    <Download className="w-3 h-3" />
-                                    <span>Baixar Imagem</span>
-                                  </button>
+                                  <div className="flex items-center gap-3">
+                                    <button
+                                      type="button"
+                                      onClick={handleCopyOfferPostImage}
+                                      className="text-purple-300 hover:text-purple-200 inline-flex items-center gap-1 cursor-pointer font-semibold"
+                                    >
+                                      <ImageIcon className="w-3 h-3" />
+                                      <span>Copiar Imagem</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={handleDownloadOfferPostImage}
+                                      className="text-cyan-300 hover:text-cyan-200 inline-flex items-center gap-1 cursor-pointer"
+                                    >
+                                      <Download className="w-3 h-3" />
+                                      <span>Baixar Imagem</span>
+                                    </button>
+                                  </div>
                                 </div>
                               </div>
                             )}
 
-                            <a
-                              href={activePresellTrackingUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="border border-slate-800 hover:border-cyan-500/50 bg-slate-950 rounded-lg overflow-hidden block transition-colors group"
-                            >
-                              {activeOffer.postImageUrl && (
-                                <div className="relative h-40 w-full bg-slate-900 overflow-hidden border-b border-slate-800">
-                                  <img
-                                    src={activeOffer.postImageUrl}
-                                    alt={`Card OG ${activeOffer.productName}`}
-                                    className="w-full h-full object-contain"
-                                  />
-                                  <span className="absolute top-2 right-2 px-2 py-0.5 rounded bg-emerald-500 text-slate-950 text-[10px] font-black">
-                                    Imagem no Link Ativa
-                                  </span>
-                                </div>
-                              )}
-                              <div className="p-2.5 flex items-center justify-between gap-3">
-                                <div className="min-w-0">
-                                  <div className="text-[10px] text-sky-400 group-hover:text-sky-300 font-mono truncate underline">
-                                    {activePresellTrackingUrl.replace(/^https?:\/\//, '')}
+                            {(!activeOffer.postImageUrl || !attachImageInComposer) && (
+                              <a
+                                href={activePresellTrackingUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="border border-slate-800 hover:border-cyan-500/50 bg-slate-950 rounded-lg overflow-hidden block transition-colors group"
+                              >
+                                <div className="p-2.5 flex items-center justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <div className="text-[10px] text-sky-400 group-hover:text-sky-300 font-mono truncate underline">
+                                      {activePresellTrackingUrl.replace(/^https?:\/\//, '')}
+                                    </div>
+                                    <div className="text-xs font-semibold text-white truncate">
+                                      {activeOffer.productName} · {activeOffer.offerPriceText}
+                                    </div>
+                                    <div className="text-[11px] text-slate-400 truncate">{activeOffer.discountText}</div>
                                   </div>
-                                  <div className="text-xs font-semibold text-white truncate">
-                                    {activeOffer.productName} · {activeOffer.offerPriceText}
+                                  <div className="flex items-center gap-1 text-[10px] font-semibold text-sky-400 shrink-0">
+                                    <span>Link Clicável</span>
+                                    <ExternalLink className="w-3.5 h-3.5" />
                                   </div>
-                                  <div className="text-[11px] text-slate-400 truncate">{activeOffer.discountText}</div>
                                 </div>
-                                <div className="flex items-center gap-1 text-[10px] font-semibold text-sky-400 shrink-0">
-                                  <span>Link Clicável</span>
-                                  <ExternalLink className="w-3.5 h-3.5" />
-                                </div>
-                              </div>
-                            </a>
+                              </a>
+                            )}
                           </div>
                         </div>
                       )}
@@ -5377,7 +5596,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5">
                         <div className="text-xs">
                           <div className="font-semibold text-white">
-                            Sistema Automático: Abrir → Entrar / Cookie Espera → Postar + Imagem → Fechar Aba (v1.5.3)
+                            Sistema Automático: Abrir → Entrar / Cookie Espera → Imagem 1º + Link → Fechar Aba (v1.5.4)
                           </div>
                           <div className="text-[11px] text-slate-400">
                             {autoJoinAndPostEnabled

@@ -1,4 +1,4 @@
-// AutoViral AI Chrome Extension - Content Script V1.5.3
+// AutoViral AI Chrome Extension - Content Script V1.5.4
 // Runs on Facebook, YouTube, Instagram, Pinterest and AutoViral AI Web Platform
 
 (function () {
@@ -912,7 +912,7 @@
         return;
       }
       if (msgEl) {
-        msgEl.textContent = '🖼️ Anexando imagem + link clicável em "Criar post"...';
+        msgEl.textContent = '🖼️ Anexando imagem da oferta primeiro em "Criar post"...';
         msgEl.style.color = '#38bdf8';
       }
       chrome.runtime.sendMessage({ action: 'AUTOVIRAL_FETCH_IMAGE_DATAURL', imageUrl }, (fetchRes) => {
@@ -929,14 +929,25 @@
             const hasAttachedPreview = dlg && Array.from(dlg.querySelectorAll('img')).some((img) => {
               const r = img.getBoundingClientRect();
               const src = img.getAttribute('src') || '';
-              return (src.startsWith('blob:') || r.height > 72) && r.width > 72;
+              return (src.startsWith('blob:') || src.startsWith('data:image/') || r.height > 72) && r.width > 72;
             });
-            if (hasAttachedPreview || tries >= 8) {
+            if (hasAttachedPreview || tries >= 12) {
               clearInterval(waitPreview);
               if (onDone) onDone(Boolean(hasAttachedPreview || (attRes && attRes.result && attRes.result.attached)));
             }
-          }, 320);
+          }, 350);
         });
+      });
+    }
+
+    function dismissFacebookLinkPreviewCardIfPhotoPresent(onDone) {
+      if (!chrome || !chrome.runtime || !chrome.runtime.sendMessage) {
+        if (onDone) onDone();
+        return;
+      }
+      chrome.runtime.sendMessage({ action: 'AUTOVIRAL_DISMISS_LINK_PREVIEW' }, () => {
+        void chrome.runtime.lastError;
+        if (onDone) onDone();
       });
     }
 
@@ -1497,111 +1508,126 @@
                 clearInterval(waitTextbox);
                 clearWaitingApprovalCookie(currentSlug);
                 if (msgEl) {
-                  msgEl.textContent = '✍️ Etapa 2/4: Caixa carregada! Inserindo texto da postagem...';
+                  msgEl.textContent = pending.imageDataUrl
+                    ? '🖼️ Etapa 2/4: Anexando imagem da oferta antes do texto/link...'
+                    : '✍️ Etapa 2/4: Caixa carregada! Inserindo texto da postagem...';
                   msgEl.style.color = '#38bdf8';
                 }
                 setTimeout(() => {
-                  textbox.click();
-                  textbox.focus();
-                  insertTextIntoFacebookComposer(textbox, pending.fullText);
-
-                  const continueAfterInsert = () => {
-                    if (!autoSubmit) {
-                      if (msgEl) {
-                        msgEl.textContent = '✅ Texto & link inseridos em "Criar post"! Revise e clique em Publicar.';
-                        msgEl.style.color = '#34d399';
-                      }
-                      startSubmissionMonitor(pending, currentSlug, msgEl, false, cancelAutoBtn);
-                      return;
-                    }
-
+                  const runTextAndPublish = () => {
+                    const currentDlg = findCreatePostDialog() || dlg;
+                    const freshBox = findCreatePostTextbox(currentDlg) || textbox;
+                    try {
+                      freshBox.click();
+                      freshBox.focus();
+                    } catch (e) {}
                     if (msgEl) {
-                      msgEl.textContent = '⏳ Etapa 3/4: Confirmando link clicável & botão Postar...';
-                      msgEl.style.color = '#34d399';
+                      msgEl.textContent = '✍️ Etapa 2/4: Inserindo copy + link clicável junto à imagem...';
+                      msgEl.style.color = '#38bdf8';
                     }
+                    insertTextIntoFacebookComposer(freshBox, pending.fullText);
 
-                    setTimeout(() => {
-                      if (cancelled) {
-                        startSubmissionMonitor(pending, currentSlug, msgEl, false, cancelAutoBtn);
-                        return;
-                      }
-                      let pubTries = 0;
-                      const waitPubBtn = setInterval(() => {
-                        pubTries++;
-                        if (cancelled) {
-                          clearInterval(waitPubBtn);
-                          return;
-                        }
-                        const activeDlg = findCreatePostDialog() || textbox.closest('div[role="dialog"]');
-                        const freshTb = findCreatePostTextbox(activeDlg) || textbox;
-                        const currentContent = (freshTb.innerText || freshTb.textContent || '').trim();
-                        if (currentContent.length < 5) {
-                          if (pubTries === 1 || pubTries === 3 || pubTries === 6) {
-                            insertTextIntoFacebookComposer(freshTb, pending.fullText);
-                          }
-                          if (pubTries < 10) return;
-                          clearInterval(waitPubBtn);
-                          if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
-                          copyTextReliably(pending.fullText);
+                    const continueAfterInsert = () => {
+                      dismissFacebookLinkPreviewCardIfPhotoPresent(() => {
+                        if (!autoSubmit) {
                           if (msgEl) {
-                            msgEl.textContent = '📋 Caixa não aceitou auto-colagem! Texto já copiado: aperte Ctrl+V acima e clique em Postar.';
-                            msgEl.style.color = '#fbbf24';
-                          }
-                          startSubmissionMonitor(pending, currentSlug, msgEl, false, cancelAutoBtn);
-                          return;
-                        }
-                        const pubBtn = findPublishButtonInDialog(activeDlg);
-                        if (pubBtn) {
-                          clearInterval(waitPubBtn);
-                          if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
-                          if (msgEl) {
-                            msgEl.textContent = '🚀 Etapa 4/4: Clicando em Postar e confirmando no Facebook...';
+                            msgEl.textContent = '✅ Imagem + Texto & link inseridos! Revise e clique em Publicar.';
                             msgEl.style.color = '#34d399';
                           }
-                          if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
-                            chrome.runtime.sendMessage({ action: 'AUTOVIRAL_MAIN_CLICK_PUBLISH' }, (pubRes) => {
-                              if (!chrome.runtime.lastError && pubRes && pubRes.ok && pubRes.result && pubRes.result.clicked) {
-                                startSubmissionMonitor(pending, currentSlug, msgEl, true, cancelAutoBtn);
-                                return;
-                              }
-                              chrome.runtime.sendMessage({ action: 'AUTOVIRAL_REAL_CLICK_PUBLISH' }, (realPubRes) => {
-                                if (chrome.runtime.lastError || !realPubRes || !realPubRes.ok || !realPubRes.result || !realPubRes.result.clicked) {
-                                  try {
-                                    pubBtn.focus();
-                                    pubBtn.click();
-                                  } catch (e) {}
-                                }
-                                startSubmissionMonitor(pending, currentSlug, msgEl, true, cancelAutoBtn);
-                              });
-                            });
-                          } else {
-                            try {
-                              pubBtn.focus();
-                              pubBtn.click();
-                            } catch (e) {}
-                            startSubmissionMonitor(pending, currentSlug, msgEl, true, cancelAutoBtn);
-                          }
-                        } else if (pubTries >= 24) {
-                          clearInterval(waitPubBtn);
-                          if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
-                          if (msgEl) {
-                            msgEl.textContent = '✅ Texto colado em "Criar post"! Clique no botão azul "Postar / Publicar" acima para finalizar.';
-                            msgEl.style.color = '#38bdf8';
-                          }
                           startSubmissionMonitor(pending, currentSlug, msgEl, false, cancelAutoBtn);
+                          return;
                         }
-                      }, 450);
-                    }, 1800);
+
+                        if (msgEl) {
+                          msgEl.textContent = '⏳ Etapa 3/4: Confirmando imagem, link clicável & botão Postar...';
+                          msgEl.style.color = '#34d399';
+                        }
+
+                        setTimeout(() => {
+                          if (cancelled) {
+                            startSubmissionMonitor(pending, currentSlug, msgEl, false, cancelAutoBtn);
+                            return;
+                          }
+                          dismissFacebookLinkPreviewCardIfPhotoPresent();
+                          let pubTries = 0;
+                          const waitPubBtn = setInterval(() => {
+                            pubTries++;
+                            if (cancelled) {
+                              clearInterval(waitPubBtn);
+                              return;
+                            }
+                            const activeDlg = findCreatePostDialog() || freshBox.closest('div[role="dialog"]');
+                            const freshTb = findCreatePostTextbox(activeDlg) || freshBox;
+                            const currentContent = (freshTb.innerText || freshTb.textContent || '').trim();
+                            if (currentContent.length < 5) {
+                              if (pubTries === 1 || pubTries === 3 || pubTries === 6) {
+                                insertTextIntoFacebookComposer(freshTb, pending.fullText);
+                              }
+                              if (pubTries < 10) return;
+                              clearInterval(waitPubBtn);
+                              if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
+                              copyTextReliably(pending.fullText);
+                              if (msgEl) {
+                                msgEl.textContent = '📋 Caixa não aceitou auto-colagem! Texto já copiado: aperte Ctrl+V acima e clique em Postar.';
+                                msgEl.style.color = '#fbbf24';
+                              }
+                              startSubmissionMonitor(pending, currentSlug, msgEl, false, cancelAutoBtn);
+                              return;
+                            }
+                            const pubBtn = findPublishButtonInDialog(activeDlg);
+                            if (pubBtn) {
+                              clearInterval(waitPubBtn);
+                              if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
+                              if (msgEl) {
+                                msgEl.textContent = '🚀 Etapa 4/4: Clicando em Postar e confirmando no Facebook...';
+                                msgEl.style.color = '#34d399';
+                              }
+                              if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
+                                chrome.runtime.sendMessage({ action: 'AUTOVIRAL_MAIN_CLICK_PUBLISH' }, (pubRes) => {
+                                  if (!chrome.runtime.lastError && pubRes && pubRes.ok && pubRes.result && pubRes.result.clicked) {
+                                    startSubmissionMonitor(pending, currentSlug, msgEl, true, cancelAutoBtn);
+                                    return;
+                                  }
+                                  chrome.runtime.sendMessage({ action: 'AUTOVIRAL_REAL_CLICK_PUBLISH' }, (realPubRes) => {
+                                    if (chrome.runtime.lastError || !realPubRes || !realPubRes.ok || !realPubRes.result || !realPubRes.result.clicked) {
+                                      try {
+                                        pubBtn.focus();
+                                        pubBtn.click();
+                                      } catch (e) {}
+                                    }
+                                    startSubmissionMonitor(pending, currentSlug, msgEl, true, cancelAutoBtn);
+                                  });
+                                });
+                              } else {
+                                try {
+                                  pubBtn.focus();
+                                  pubBtn.click();
+                                } catch (e) {}
+                                startSubmissionMonitor(pending, currentSlug, msgEl, true, cancelAutoBtn);
+                              }
+                            } else if (pubTries >= 24) {
+                              clearInterval(waitPubBtn);
+                              if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
+                              if (msgEl) {
+                                msgEl.textContent = '✅ Conteúdo pronto em "Criar post"! Clique no botão azul "Postar / Publicar" acima para finalizar.';
+                                msgEl.style.color = '#38bdf8';
+                              }
+                              startSubmissionMonitor(pending, currentSlug, msgEl, false, cancelAutoBtn);
+                            }
+                          }, 450);
+                        }, 1800);
+                      });
+                    };
+
+                    setTimeout(continueAfterInsert, 700);
                   };
 
                   if (pending.imageDataUrl) {
-                    setTimeout(() => {
-                      attachImageToFacebookComposer(pending.imageDataUrl, msgEl, () => {
-                        continueAfterInsert();
-                      });
-                    }, 900);
+                    attachImageToFacebookComposer(pending.imageDataUrl, msgEl, () => {
+                      setTimeout(runTextAndPublish, 450);
+                    });
                   } else {
-                    continueAfterInsert();
+                    runTextAndPublish();
                   }
                 }, 480);
               } else if (boxTries === 11 && !retriedDebuggerClick) {

@@ -1,7 +1,7 @@
 // AutoViral AI Chrome Extension - Background Service Worker (Manifest V3)
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('[AutoViral AI] Extensão v1.5.3 instalada com sucesso!');
+  console.log('[AutoViral AI] Extensão v1.5.4 instalada com sucesso!');
   chrome.storage.local.get(['autoviral_interval', 'autoviral_mapped_groups', 'autoviral_waiting_approval_map'], (res) => {
     chrome.storage.local.set({
       autoviral_interval: res.autoviral_interval || 350,
@@ -1165,8 +1165,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             if (!dlg) return { attached: false, reason: 'no_dialog' };
 
             const findImgFileInput = () => {
-              const inputs = Array.from(dlg.querySelectorAll('input[type="file"]'));
-              return inputs.find((inp) => (inp.accept || '').includes('image')) || inputs[0] || null;
+              const inDlg = Array.from(dlg.querySelectorAll('input[type="file"]'));
+              const dlgImg = inDlg.find((inp) => (inp.accept || '').includes('image')) || inDlg[0];
+              if (dlgImg) return dlgImg;
+              const docInputs = Array.from(document.querySelectorAll('input[type="file"]'));
+              const matchingDoc = docInputs.filter((inp) => (inp.accept || '').includes('image'));
+              return matchingDoc[matchingDoc.length - 1] || docInputs[docInputs.length - 1] || null;
             };
 
             const fileInput = findImgFileInput();
@@ -1177,17 +1181,86 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               return { attached: true, method: 'file_input' };
             }
 
-            // Paste directly into Lexical textbox without clicking photo icon (avoids OS file dialog popup blocking tab!)
+            // Paste / Drop directly into Lexical textbox without opening OS file dialog!
             const tb = dlg.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]');
             if (tb) {
               tb.focus();
-              tb.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
-              return { attached: true, method: 'clipboard_paste' };
+              try {
+                tb.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+              } catch (e) {}
+              try {
+                tb.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+              } catch (e) {}
+              return { attached: true, method: 'clipboard_drop' };
             }
 
             return { attached: false, reason: 'no_target' };
           } catch (err) {
             return { attached: false, error: String(err) };
+          }
+        }
+      },
+      (results) => {
+        void chrome.runtime.lastError;
+        sendResponse({ ok: true, result: results && results[0] ? results[0].result : null });
+      }
+    );
+    return true;
+  }
+
+  if (request.action === 'AUTOVIRAL_DISMISS_LINK_PREVIEW') {
+    const tabId = sender && sender.tab && sender.tab.id;
+    if (!tabId || !chrome.scripting || !chrome.scripting.executeScript) {
+      sendResponse({ ok: false });
+      return false;
+    }
+    chrome.scripting.executeScript(
+      {
+        target: { tabId },
+        world: 'MAIN',
+        func: () => {
+          try {
+            const dialogs = Array.from(document.querySelectorAll('div[role="dialog"]')).filter((d) => {
+              const r = d.getBoundingClientRect();
+              return r.width > 200 && r.height > 150;
+            });
+            const dlg = dialogs.find((d) => {
+              if (d.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]')) return true;
+              const txt = (d.innerText || '').toLowerCase();
+              return txt.includes('criar post') || txt.includes('create post') || txt.includes('criar publicação');
+            }) || dialogs[dialogs.length - 1];
+            if (!dlg) return { dismissed: false, reason: 'no_dialog' };
+
+            const hasPhotoAttached = Array.from(dlg.querySelectorAll('img')).some((img) => {
+              const r = img.getBoundingClientRect();
+              const src = img.getAttribute('src') || '';
+              return (src.startsWith('blob:') || src.startsWith('data:image/') || r.height > 90) && r.width > 90;
+            });
+            if (!hasPhotoAttached) return { dismissed: false, reason: 'no_photo_attached' };
+
+            // Explicit Link Preview close/remove buttons in PT & EN Facebook
+            const explicitBtns = Array.from(
+              dlg.querySelectorAll(
+                '[aria-label*="Remover prévia" i], [aria-label*="Remove link" i], [aria-label*="Fechar prévia" i], [aria-label*="Close preview" i], [aria-label*="Remove attachment" i], [aria-label*="Remover anexo" i]'
+              )
+            );
+            for (const btn of explicitBtns) {
+              const r = btn.getBoundingClientRect();
+              if (r.width === 0 || r.height === 0) continue;
+              // Never click a remove button sitting directly over an uploaded photo preview!
+              const parentBox = btn.closest('div');
+              const boxHasBigImg = parentBox && Array.from(parentBox.querySelectorAll('img')).some((im) => {
+                const ir = im.getBoundingClientRect();
+                const src = im.getAttribute('src') || '';
+                return (src.startsWith('blob:') || src.startsWith('data:image/')) && ir.width > 100 && ir.height > 90;
+              });
+              if (boxHasBigImg) continue;
+              btn.click();
+              return { dismissed: true, method: 'explicit_aria' };
+            }
+            return { dismissed: false, reason: 'no_preview_card' };
+          } catch (err) {
+            return { dismissed: false, error: String(err) };
           }
         }
       },

@@ -1,4 +1,4 @@
-// AutoViral AI Chrome Extension - Content Script V1.4.3
+// AutoViral AI Chrome Extension - Content Script V1.4.4
 // Runs on Facebook, YouTube, Instagram, Pinterest and AutoViral AI Web Platform
 
 (function () {
@@ -13,6 +13,7 @@
   const isAutoViral = currentHost.includes('localhost') ||
                       currentHost.includes('ais-') ||
                       currentHost.includes('run.app') ||
+                      currentHost.includes('robo-trafego.vercel.app') ||
                       document.title.includes('AutoViral');
 
   // Shared helper to make any floating AutoViral popup draggable, minimizable, and closable
@@ -571,12 +572,29 @@
       return m ? m[1].toLowerCase() : '';
     }
 
-    function findJoinGroupButton() {
+    function isAlreadyGroupMember() {
       try {
+        if (findComposerTrigger()) return true;
         const btns = Array.from(document.querySelectorAll('div[role="button"], button, a[role="button"]'));
         for (const el of btns) {
           const rect = el.getBoundingClientRect();
-          if (rect.width === 0 || rect.height === 0) continue;
+          if (rect.width === 0 || rect.height === 0 || rect.top > 720) continue;
+          const txt = ((el.innerText || el.getAttribute('aria-label') || '') + '').trim().toLowerCase();
+          if (txt === 'entrou' || txt === 'joined' || txt.startsWith('entrou ') || txt.startsWith('joined ')) {
+            return true;
+          }
+        }
+      } catch (e) {}
+      return false;
+    }
+
+    function findJoinGroupButton() {
+      try {
+        if (isAlreadyGroupMember()) return null;
+        const btns = Array.from(document.querySelectorAll('div[role="button"], button, a[role="button"]'));
+        for (const el of btns) {
+          const rect = el.getBoundingClientRect();
+          if (rect.width === 0 || rect.height === 0 || rect.top > 760) continue;
           const txt = ((el.innerText || el.getAttribute('aria-label') || '') + '').trim().toLowerCase();
           if (txt === 'participar do grupo' || txt === 'join group' || txt === 'entrar no grupo') {
             return el;
@@ -588,10 +606,11 @@
 
     function isMembershipPendingApproval() {
       try {
+        if (isAlreadyGroupMember()) return false;
         const btns = Array.from(document.querySelectorAll('div[role="button"], button, a[role="button"]'));
         for (const el of btns) {
           const rect = el.getBoundingClientRect();
-          if (rect.width === 0 || rect.height === 0) continue;
+          if (rect.width === 0 || rect.height === 0 || rect.top > 760) continue;
           const txt = ((el.innerText || el.getAttribute('aria-label') || '') + '').trim().toLowerCase();
           if (
             txt === 'cancelar solicitação' ||
@@ -1351,7 +1370,7 @@
                     } catch (e) {}
                     window.location.reload();
                   } else if (msgEl) {
-                    msgEl.textContent = '📋 Facebook bloqueou o modal automático! Texto já copiado: clique manualmente em "Escreva algo..." e aperte Ctrl+V.';
+                    msgEl.textContent = '⚠️ Facebook manteve "Criar post" cinza! Pause o AdBlock em facebook.com, feche abas antigas e teste clicar manualmente em "Escreva algo..." para confirmar se a conta está com limite temporário.';
                     msgEl.style.color = '#fbbf24';
                     startSubmissionMonitor(pending, currentSlug, msgEl, false, cancelAutoBtn);
                   }

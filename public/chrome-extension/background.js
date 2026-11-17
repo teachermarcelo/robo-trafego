@@ -1,7 +1,7 @@
 // AutoViral AI Chrome Extension - Background Service Worker (Manifest V3)
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('[AutoViral AI] Extensão v1.4.3 instalada com sucesso!');
+  console.log('[AutoViral AI] Extensão v1.4.4 instalada com sucesso!');
   chrome.storage.local.get(['autoviral_interval', 'autoviral_mapped_groups'], (res) => {
     chrome.storage.local.set({
       autoviral_interval: res.autoviral_interval || 350,
@@ -17,6 +17,7 @@ function isAutoViralTab(tab) {
     url.includes('ais-') ||
     url.includes('localhost') ||
     url.includes('run.app') ||
+    url.includes('robo-trafego.vercel.app') ||
     url.includes('aistudio.google.com') ||
     title.includes('AutoViral')
   );
@@ -84,7 +85,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'AUTOVIRAL_FOCUS_OR_OPEN_PLATFORM') {
     chrome.tabs.query({}, (tabs) => {
       const existingTab =
-        tabs.find(t => (t.url || '').includes('run.app') || (t.url || '').includes('localhost')) ||
+        tabs.find(t => (t.url || '').includes('run.app') || (t.url || '').includes('robo-trafego.vercel.app') || (t.url || '').includes('localhost')) ||
         tabs.find(t => (t.title || '').includes('AutoViral'));
       if (existingTab) {
         chrome.windows.update(existingTab.windowId, { focused: true }, () => {

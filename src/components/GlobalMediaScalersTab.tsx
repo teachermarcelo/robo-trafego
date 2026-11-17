@@ -1595,7 +1595,7 @@ export const GlobalMediaScalersTab: React.FC = () => {
 
     setBanner({
       message: autoJoinAndPostEnabled
-        ? `Grupo Global "${cleanGroupName}" aberto! Extensão v1.4.0 vai entrar (se precisar), postar e fechar a aba automaticamente.`
+        ? `Grupo Global "${cleanGroupName}" aberto! Extensão v1.4.4 vai entrar (se precisar), postar e fechar a aba automaticamente.`
         : `Grupo Global "${cleanGroupName}" aberto e texto copiado para postagem manual assistida.`,
       tone: 'success',
     });
@@ -1660,17 +1660,17 @@ export const GlobalMediaScalersTab: React.FC = () => {
       );
       zip.file(
         'COMO-ATUALIZAR.txt',
-        '1. Extraia este ZIP substituindo os arquivos da pasta anterior (ou em uma pasta nova).\n2. Abra chrome://extensions no Google Chrome.\n3. Clique no ícone de Atualizar (↻) da extensão AutoViral AI v1.4.3.\n4. Recarregue (F5) a aba do AutoViral AI.'
+        '1. Extraia este ZIP substituindo os arquivos da pasta anterior (ou em uma pasta nova).\n2. Abra chrome://extensions no Google Chrome.\n3. Clique no ícone de Atualizar (↻) da extensão AutoViral AI v1.4.4.\n4. Recarregue (F5) a aba do AutoViral AI.'
       );
       const blob = await zip.generateAsync({ type: 'blob' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = 'extensao-autoviral-v1.4.3.zip';
+      link.download = 'extensao-autoviral-v1.4.4.zip';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       setBanner({
-        message: 'Extensão v1.4.3 atualizada baixada! Extraia, recarregue (↻) em chrome://extensions e dê F5 nesta página.',
+        message: 'Extensão v1.4.4 atualizada baixada! Extraia, recarregue (↻) em chrome://extensions e dê F5 nesta página.',
         tone: 'success',
       });
     } catch {
@@ -2920,7 +2920,12 @@ export const GlobalMediaScalersTab: React.FC = () => {
               (l) => l.approvalStatus === 'join_requested' || l.approvalStatus === 'not_member'
             ).length;
             const errorCount = botLogs.filter(
-              (l) => l.approvalStatus === 'rate_limited' || l.approvalStatus === 'unavailable' || l.status === 'error'
+              (l) =>
+                l.approvalStatus !== 'not_member' &&
+                (l.approvalStatus === 'rate_limited' ||
+                  l.approvalStatus === 'unavailable' ||
+                  l.approvalStatus === 'composer_stuck' ||
+                  l.status === 'error')
             ).length;
 
             const latestLog = botLogs[0] || null;
@@ -3107,10 +3112,10 @@ export const GlobalMediaScalersTab: React.FC = () => {
                           onClick={handleDownloadGlobalExtensionZip}
                           disabled={isDownloadingExt}
                           className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-cyan-300 text-[11px] font-medium rounded-md inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
-                          title="Baixar Extensão v1.4.3 atualizada (inserção e clique Postar no contexto real + preservação Brasil)"
+                          title="Baixar Extensão v1.4.4 atualizada (proteção contra falso Participar em grupos já aceitos + suporte completo)"
                         >
                           <Download className="w-3 h-3" />
-                          <span>{isDownloadingExt ? 'Gerando ZIP...' : 'Atualizar Extensão v1.4.3 (ZIP)'}</span>
+                          <span>{isDownloadingExt ? 'Gerando ZIP...' : 'Atualizar Extensão v1.4.4 (ZIP)'}</span>
                         </button>
                       </div>
                       <div className="flex flex-wrap gap-2">
@@ -3325,7 +3330,7 @@ export const GlobalMediaScalersTab: React.FC = () => {
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5">
                         <div className="text-xs">
                           <div className="font-semibold text-white">
-                            Sistema Automático: Abrir → Entrar no Grupo → Postar → Fechar Aba (v1.4.3)
+                            Sistema Automático: Abrir → Entrar no Grupo → Postar → Fechar Aba (v1.4.4)
                           </div>
                           <div className="text-[11px] text-slate-400">
                             {autoJoinAndPostEnabled
@@ -3482,10 +3487,11 @@ export const GlobalMediaScalersTab: React.FC = () => {
                         label: `Erros (${
                           botLogs.filter(
                             (l) =>
-                              l.approvalStatus === 'rate_limited' ||
-                              l.approvalStatus === 'unavailable' ||
-                              l.approvalStatus === 'composer_stuck' ||
-                              l.status === 'error'
+                              l.approvalStatus !== 'not_member' &&
+                              (l.approvalStatus === 'rate_limited' ||
+                                l.approvalStatus === 'unavailable' ||
+                                l.approvalStatus === 'composer_stuck' ||
+                                l.status === 'error')
                           ).length
                         })`,
                       },
@@ -3517,10 +3523,11 @@ export const GlobalMediaScalersTab: React.FC = () => {
                         if (logStatusFilter === 'all') return true;
                         if (logStatusFilter === 'error') {
                           return (
-                            log.approvalStatus === 'rate_limited' ||
-                            log.approvalStatus === 'unavailable' ||
-                            log.approvalStatus === 'composer_stuck' ||
-                            log.status === 'error'
+                            log.approvalStatus !== 'not_member' &&
+                            (log.approvalStatus === 'rate_limited' ||
+                              log.approvalStatus === 'unavailable' ||
+                              log.approvalStatus === 'composer_stuck' ||
+                              log.status === 'error')
                           );
                         }
                         return log.approvalStatus === logStatusFilter;

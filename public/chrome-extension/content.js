@@ -1,4 +1,4 @@
-// AutoViral AI Chrome Extension - Content Script V1.5.1
+// AutoViral AI Chrome Extension - Content Script V1.5.3
 // Runs on Facebook, YouTube, Instagram, Pinterest and AutoViral AI Web Platform
 
 (function () {
@@ -686,42 +686,34 @@
     }
 
     function findComposerTrigger() {
+      const FORBIDDEN = ['anônim', 'anonim', 'anonym', 'enquete', 'poll', 'sentimento', 'feeling', 'foto', 'photo', 'vídeo', 'video', 'ao vivo', 'live', 'comentar', 'comment', 'responder', 'reply'];
+      const hasForbidden = (s) => FORBIDDEN.some((w) => s.includes(w));
+
       const composerTriggers = Array.from(
-        document.querySelectorAll('[data-pagelet="GroupInlineComposer"] div[role="button"], [data-pagelet="GroupInlineComposer"] span, div[role="button"], span')
+        document.querySelectorAll('[data-pagelet="GroupInlineComposer"] div[role="button"], [data-pagelet="GroupInlineComposer"] span, [role="main"] div[role="button"], [role="main"] span, div[role="button"], span')
       );
       let best = null;
       let bestScore = -Infinity;
       for (const el of composerTriggers) {
         const rect = el.getBoundingClientRect();
-        if (rect.width < 60 || rect.height < 16 || rect.height > 78) continue;
+        if (rect.width < 55 || rect.height < 14 || rect.height > 78) continue;
         if (rect.top < 0 || rect.top > window.innerHeight * 1.4) continue;
-        if (el.closest('div[role="dialog"]')) continue;
-        if (el.closest('div[role="article"]')) continue;
-        if (el.closest('[aria-busy="true"]')) continue;
+        if (el.closest('div[role="dialog"]') || el.closest('div[role="article"]') || el.closest('[role="complementary"]') || el.closest('[aria-busy="true"]')) continue;
         const t = (el.innerText || el.getAttribute('aria-label') || '').trim().toLowerCase();
-        if (!t || t.length > 90) continue;
-        if (
-          t.includes('anônim') ||
-          t.includes('anonim') ||
-          t.includes('anonym') ||
-          t.includes('enquete') ||
-          t.includes('poll') ||
-          t.includes('sentimento') ||
-          t.includes('feeling') ||
-          t.includes('foto') ||
-          t.includes('photo') ||
-          t.includes('vídeo') ||
-          t.includes('video') ||
-          t.includes('ao vivo') ||
-          t.includes('live')
-        ) {
-          continue;
+        if (!t || t.length > 90 || hasForbidden(t)) continue;
+        const btnAncestor = el.closest('div[role="button"]');
+        if (btnAncestor) {
+          const br = btnAncestor.getBoundingClientRect();
+          const bt = (btnAncestor.innerText || btnAncestor.getAttribute('aria-label') || '').trim().toLowerCase();
+          if (br.height > 90 || hasForbidden(bt)) continue;
         }
         const isExact =
           t === 'escreva algo...' ||
           t === 'write something...' ||
           t === 'no que você está pensando?' ||
-          t === "what's on your mind?";
+          t === "what's on your mind?" ||
+          t === 'escreva uma publicação pública...' ||
+          t === 'write a public post...';
         const isMatch =
           isExact ||
           t.includes('escreva algo') ||
@@ -729,9 +721,11 @@
           t.includes('write something') ||
           t.includes("what's on your mind") ||
           t.includes('criar publicação pública') ||
-          t.includes('create a public post');
+          t.includes('create a public post') ||
+          t.includes('write a public post') ||
+          t.includes('escreva uma publicação');
         if (!isMatch) continue;
-        const inInline = el.closest('[data-pagelet="GroupInlineComposer"]') ? 20000 : 0;
+        const inInline = el.closest('[data-pagelet="GroupInlineComposer"]') ? 25000 : 0;
         const isSpanBoost = el.tagName === 'SPAN' ? 8000 : 0;
         const exactBoost = isExact ? 100000 : 40000;
         const area = Math.max(1, rect.width * rect.height);
@@ -745,7 +739,7 @@
       const btn = best.closest('div[role="button"]');
       if (btn) {
         const br = btn.getBoundingClientRect();
-        if (br.height <= 78 && br.width >= 60) return btn;
+        if (br.height <= 85 && br.width >= 55) return btn;
       }
       return best;
     }
@@ -771,27 +765,39 @@
 
     function openComposerWithPreload(trigger, mode) {
       if (!trigger) return;
+      if (findCreatePostTextbox()) return;
       const clickMode = mode === 'simple' ? 'simple' : 'full';
       try {
         trigger.scrollIntoView({ behavior: 'instant', block: 'center' });
       } catch (e) {}
 
       if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
+        if (clickMode === 'simple') {
+          // Primary attempt: clean MAIN-world click without chrome.debugger infobar shift
+          chrome.runtime.sendMessage({ action: 'AUTOVIRAL_MAIN_OPEN_COMPOSER', mode: 'full' }, (res) => {
+            if (chrome.runtime.lastError || !res || !res.ok || !res.result || !res.result.found) {
+              try {
+                trigger.focus();
+                trigger.click();
+              } catch (e) {}
+            }
+          });
+          return;
+        }
+
+        // Escalated attempt: real hardware click via debugger with post-attach coordinate measurement
         chrome.runtime.sendMessage({ action: 'AUTOVIRAL_REAL_CLICK_COMPOSER' }, (realRes) => {
           if (!chrome.runtime.lastError && realRes && realRes.ok && realRes.result && realRes.result.found) {
             return;
           }
-          chrome.runtime.sendMessage(
-            { action: 'AUTOVIRAL_MAIN_OPEN_COMPOSER', mode: clickMode },
-            (res) => {
-              if (chrome.runtime.lastError || !res || !res.ok || !res.result || !res.result.found) {
-                try {
-                  trigger.focus();
-                  trigger.click();
-                } catch (e) {}
-              }
+          chrome.runtime.sendMessage({ action: 'AUTOVIRAL_MAIN_OPEN_COMPOSER', mode: 'full' }, (res) => {
+            if (chrome.runtime.lastError || !res || !res.ok || !res.result || !res.result.found) {
+              try {
+                trigger.focus();
+                trigger.click();
+              } catch (e) {}
             }
-          );
+          });
         });
         return;
       }
@@ -870,14 +876,29 @@
 
       if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
         chrome.runtime.sendMessage({ action: 'AUTOVIRAL_REAL_INSERT_TEXT', text }, (realRes) => {
+          const checkAfterReal = () => {
+            const tbNow = findCreatePostTextbox(findCreatePostDialog()) || textbox;
+            const txtNow = tbNow ? (tbNow.innerText || tbNow.textContent || '').trim() : '';
+            if (txtNow.length >= Math.min(5, text.trim().length)) return;
+            chrome.runtime.sendMessage({ action: 'AUTOVIRAL_MAIN_INSERT_TEXT', text }, (res) => {
+              if (chrome.runtime.lastError || !res || !res.ok || !res.result || !res.result.ok) {
+                localFallbackInsert();
+              } else {
+                setTimeout(() => {
+                  const tbAfterMain = findCreatePostTextbox(findCreatePostDialog()) || textbox;
+                  const txtAfterMain = tbAfterMain ? (tbAfterMain.innerText || tbAfterMain.textContent || '').trim() : '';
+                  if (txtAfterMain.length < Math.min(5, text.trim().length)) {
+                    localFallbackInsert();
+                  }
+                }, 360);
+              }
+            });
+          };
           if (!chrome.runtime.lastError && realRes && realRes.ok && realRes.result && realRes.result.ok) {
+            setTimeout(checkAfterReal, 220);
             return;
           }
-          chrome.runtime.sendMessage({ action: 'AUTOVIRAL_MAIN_INSERT_TEXT', text }, (res) => {
-            if (chrome.runtime.lastError || !res || !res.ok || !res.result || !res.result.ok) {
-              localFallbackInsert();
-            }
-          });
+          checkAfterReal();
         });
         return;
       }
@@ -925,6 +946,8 @@
         return r.width > 200 && r.height > 150;
       });
       return dialogs.find((d) => {
+        const hasTb = Boolean(d.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]'));
+        if (hasTb) return true;
         const txt = (d.innerText || '').toLowerCase();
         const aria = (d.getAttribute('aria-label') || '').toLowerCase();
         const isComposerTitle =
@@ -932,6 +955,8 @@
           txt.includes('create post') ||
           txt.includes('criar publicação') ||
           txt.includes('create a public post') ||
+          txt.includes('publicação anônima') ||
+          txt.includes('anonymous post') ||
           aria.includes('criar post') ||
           aria.includes('create post');
         const hasPublishBtn = Array.from(d.querySelectorAll('div[role="button"], button')).some((b) => {
@@ -947,14 +972,14 @@
       if (!scope) return null;
       const boxes = Array.from(
         scope.querySelectorAll(
-          'div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"], div[contenteditable="true"][aria-label]'
+          'div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"], div[contenteditable="true"][aria-placeholder], div[contenteditable="true"][aria-label]'
         )
       );
       return boxes.find((tb) => {
         const rect = tb.getBoundingClientRect();
         if (rect.width < 40 || rect.height < 20) return false;
-        const label = ((tb.getAttribute('aria-label') || tb.getAttribute('placeholder') || '') + '').toLowerCase();
-        if (label.includes('coment') || label.includes('comment') || label.includes('responder') || label.includes('reply')) {
+        const label = ((tb.getAttribute('aria-label') || tb.getAttribute('aria-placeholder') || tb.getAttribute('placeholder') || '') + '').toLowerCase();
+        if (label.includes('coment') || label.includes('comment') || label.includes('responder') || label.includes('reply') || label.includes('pesquis') || label.includes('search')) {
           return false;
         }
         return true;
@@ -1109,7 +1134,7 @@
         const rect = el.getBoundingClientRect();
         if (rect.width === 0 || rect.height === 0) return false;
         const txt = ((el.innerText || el.getAttribute('aria-label') || '') + '').trim().toLowerCase();
-        if (txt !== 'postar' && txt !== 'publicar' && txt !== 'post') return false;
+        if (txt !== 'postar' && txt !== 'publicar' && txt !== 'post' && txt !== 'enviar' && txt !== 'submit') return false;
         const disabled = el.getAttribute('aria-disabled') === 'true' || el.disabled || el.getAttribute('tabindex') === '-1';
         return !disabled;
       });
@@ -1170,7 +1195,7 @@
         const candidates = Array.from(dlg.querySelectorAll('div[role="button"], button'));
         candidates.forEach((btn) => {
           const bt = ((btn.innerText || btn.getAttribute('aria-label') || '') + '').trim().toLowerCase();
-          if ((bt === 'postar' || bt === 'publicar' || bt === 'post') && !btn.dataset.avHooked) {
+          if ((bt === 'postar' || bt === 'publicar' || bt === 'post' || bt === 'enviar' || bt === 'submit') && !btn.dataset.avHooked) {
             btn.dataset.avHooked = '1';
             btn.addEventListener('click', () => {
               userClickedPublish = true;
@@ -1245,6 +1270,14 @@
         if (activeDialog) {
           sawDialogOpen = true;
           dialogClosedStreak = 0;
+          if (didAutoClickPublish && ticks === 4) {
+            const stillEnabledPub = findPublishButtonInDialog(activeDialog);
+            if (stillEnabledPub && chrome && chrome.runtime && chrome.runtime.sendMessage) {
+              chrome.runtime.sendMessage({ action: 'AUTOVIRAL_REAL_CLICK_PUBLISH' }, () => {
+                void chrome.runtime.lastError;
+              });
+            }
+          }
         } else if (sawDialogOpen || userClickedPublish) {
           dialogClosedStreak++;
         }
@@ -1410,6 +1443,7 @@
             }
 
             let boxTries = 0;
+            let retriedDebuggerClick = false;
             let retriedSkeleton = false;
             let anonDialogCount = 0;
             let reopenPauseUntil = Date.now() + 900;
@@ -1525,13 +1559,13 @@
                             msgEl.style.color = '#34d399';
                           }
                           if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
-                            chrome.runtime.sendMessage({ action: 'AUTOVIRAL_REAL_CLICK_PUBLISH' }, (realPubRes) => {
-                              if (!chrome.runtime.lastError && realPubRes && realPubRes.ok && realPubRes.result && realPubRes.result.clicked) {
+                            chrome.runtime.sendMessage({ action: 'AUTOVIRAL_MAIN_CLICK_PUBLISH' }, (pubRes) => {
+                              if (!chrome.runtime.lastError && pubRes && pubRes.ok && pubRes.result && pubRes.result.clicked) {
                                 startSubmissionMonitor(pending, currentSlug, msgEl, true, cancelAutoBtn);
                                 return;
                               }
-                              chrome.runtime.sendMessage({ action: 'AUTOVIRAL_MAIN_CLICK_PUBLISH' }, (pubRes) => {
-                                if (chrome.runtime.lastError || !pubRes || !pubRes.ok || !pubRes.result || !pubRes.result.clicked) {
+                              chrome.runtime.sendMessage({ action: 'AUTOVIRAL_REAL_CLICK_PUBLISH' }, (realPubRes) => {
+                                if (chrome.runtime.lastError || !realPubRes || !realPubRes.ok || !realPubRes.result || !realPubRes.result.clicked) {
                                   try {
                                     pubBtn.focus();
                                     pubBtn.click();
@@ -1565,24 +1599,35 @@
                       attachImageToFacebookComposer(pending.imageDataUrl, msgEl, () => {
                         continueAfterInsert();
                       });
-                    }, 1100);
+                    }, 900);
                   } else {
                     continueAfterInsert();
                   }
                 }, 480);
-              } else if (boxTries === 22 && !retriedSkeleton) {
+              } else if (boxTries === 11 && !retriedDebuggerClick) {
+                retriedDebuggerClick = true;
+                if (!dlg) {
+                  if (msgEl) {
+                    msgEl.textContent = '🎯 Reforçando clique real em "Escreva algo..." para abrir "Criar post"...';
+                    msgEl.style.color = '#38bdf8';
+                  }
+                  const retryTrigger = findComposerTrigger();
+                  if (retryTrigger) openComposerWithPreload(retryTrigger, 'full');
+                  reopenPauseUntil = Date.now() + 1100;
+                }
+              } else if (boxTries === 26 && !retriedSkeleton) {
                 retriedSkeleton = true;
                 if (msgEl) {
                   msgEl.textContent = '🔄 Facebook demorou em "Criar post". Fechando e tentando clique com pré-carregamento...';
                   msgEl.style.color = '#fbbf24';
                 }
                 closeStuckCreatePostDialog(dlg);
-                reopenPauseUntil = Date.now() + 2000;
+                reopenPauseUntil = Date.now() + 1800;
                 setTimeout(() => {
                   const retryTrigger = findComposerTrigger();
                   if (retryTrigger) openComposerWithPreload(retryTrigger, 'full');
-                }, 1200);
-              } else if (boxTries === 38) {
+                }, 1100);
+              } else if (boxTries === 42) {
                 if (prevReloadTag !== targetTag) {
                   clearInterval(waitTextbox);
                   try {
@@ -1594,7 +1639,7 @@
                   }
                   setTimeout(() => window.location.reload(), 800);
                 }
-              } else if (boxTries >= 54) {
+              } else if (boxTries >= 62) {
                 clearInterval(waitTextbox);
                 if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
                 copyTextReliably(pending.fullText);
@@ -1606,7 +1651,7 @@
                   groupUrl: window.location.href,
                   groupName: pending.groupName,
                   approvalStatus: 'composer_stuck',
-                  note: 'Facebook travou o modal automático. Aba fechada com segurança e texto copiado.'
+                  note: 'Facebook travou o modal automático (Atualize p/ Extensão v1.5.3 ou pause AdBlock). Texto copiado.'
                 });
                 if (msgEl) {
                   msgEl.style.color = '#fbbf24';

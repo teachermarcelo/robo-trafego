@@ -1,7 +1,7 @@
 // AutoViral AI Chrome Extension - Background Service Worker (Manifest V3)
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('[AutoViral AI] Extensão v1.5.2 instalada com sucesso!');
+  console.log('[AutoViral AI] Extensão v1.5.3 instalada com sucesso!');
   chrome.storage.local.get(['autoviral_interval', 'autoviral_mapped_groups', 'autoviral_waiting_approval_map'], (res) => {
     chrome.storage.local.set({
       autoviral_interval: res.autoviral_interval || 350,
@@ -435,58 +435,79 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         args: [mode],
         func: (clickMode) => {
           try {
+            // If composer dialog is already open, do not click trigger again
+            const existingDialog = Array.from(document.querySelectorAll('div[role="dialog"]')).find((d) => {
+              const r = d.getBoundingClientRect();
+              if (r.width < 200 || r.height < 150) return false;
+              const tb = d.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]');
+              if (tb) return true;
+              const txt = (d.innerText || '').toLowerCase();
+              return (
+                txt.includes('criar post') ||
+                txt.includes('create post') ||
+                txt.includes('criar publicação') ||
+                txt.includes('create a public post') ||
+                txt.includes('publicação anônima') ||
+                txt.includes('anonymous post')
+              );
+            });
+            if (existingDialog) {
+              return { found: true, alreadyOpen: true, mode: 'already_open' };
+            }
+
+            const FORBIDDEN = ['anônim', 'anonim', 'anonym', 'enquete', 'poll', 'sentimento', 'feeling', 'foto', 'photo', 'vídeo', 'video', 'ao vivo', 'live', 'comentar', 'comment', 'responder', 'reply'];
+            const hasForbidden = (s) => FORBIDDEN.some((w) => s.includes(w));
+
             const candidates = Array.from(
-              document.querySelectorAll('[data-pagelet="GroupInlineComposer"] div[role="button"], [data-pagelet="GroupInlineComposer"] span, div[role="button"], span')
+              document.querySelectorAll('[data-pagelet="GroupInlineComposer"] div[role="button"], [data-pagelet="GroupInlineComposer"] span, [role="main"] div[role="button"], [role="main"] span, div[role="button"], span')
             );
             const scored = [];
             for (const el of candidates) {
               const rect = el.getBoundingClientRect();
               if (rect.width < 55 || rect.height < 14 || rect.height > 78) continue;
-              if (el.closest('div[role="dialog"]') || el.closest('div[role="article"]') || el.closest('[aria-busy="true"]')) continue;
+              if (el.closest('div[role="dialog"]') || el.closest('div[role="article"]') || el.closest('[role="complementary"]') || el.closest('[aria-busy="true"]')) continue;
               const t = (el.innerText || el.getAttribute('aria-label') || '').trim().toLowerCase();
-              if (!t || t.includes('anônim') || t.includes('anonym') || t.includes('enquete') || t.includes('poll') || t.includes('sentimento') || t.includes('feeling')) continue;
-              const isMatch =
+              if (!t || t.length > 90 || hasForbidden(t)) continue;
+              const btnAncestor = el.closest('div[role="button"]');
+              if (btnAncestor) {
+                const br = btnAncestor.getBoundingClientRect();
+                const bt = (btnAncestor.innerText || btnAncestor.getAttribute('aria-label') || '').trim().toLowerCase();
+                if (br.height > 90 || hasForbidden(bt)) continue;
+              }
+              const isExact =
                 t === 'escreva algo...' ||
                 t === 'write something...' ||
+                t === 'no que você está pensando?' ||
+                t === "what's on your mind?" ||
+                t === 'escreva uma publicação pública...' ||
+                t === 'write a public post...';
+              const isMatch =
+                isExact ||
                 t.includes('escreva algo') ||
                 t.includes('no que você está pensando') ||
                 t.includes('write something') ||
                 t.includes("what's on your mind") ||
                 t.includes('criar publicação pública') ||
-                t.includes('create a public post');
+                t.includes('create a public post') ||
+                t.includes('write a public post') ||
+                t.includes('escreva uma publicação');
               if (!isMatch) continue;
-              const exact = t === 'escreva algo...' || t === 'write something...' ? 0 : 1;
-              scored.push({ el, score: exact * 100000 + rect.width * rect.height });
+              const inInline = el.closest('[data-pagelet="GroupInlineComposer"]') ? -50000 : 0;
+              const exactRank = isExact ? 0 : 100000;
+              scored.push({ el, score: exactRank + inInline + rect.width * rect.height });
             }
             scored.sort((a, b) => a.score - b.score);
             const hit = scored[0] ? scored[0].el : null;
-            const trigger = hit ? (hit.closest('div[role="button"]') || hit) : null;
+            const ancestorBtn = hit ? hit.closest('div[role="button"]') : null;
+            const trigger = ancestorBtn && ancestorBtn.getBoundingClientRect().height <= 85 ? ancestorBtn : hit;
             if (!trigger || !hit) return { found: false };
+
             hit.scrollIntoView({ behavior: 'instant', block: 'center' });
             const r = hit.getBoundingClientRect();
             const cx = Math.round(r.left + Math.min(r.width * 0.45, 140));
             const cy = Math.round(r.top + r.height / 2);
 
-            if (clickMode === 'simple') {
-              trigger.focus();
-              hit.click();
-              return { found: true, mode: 'simple' };
-            }
-
-            const hoverOpts = {
-              bubbles: true,
-              cancelable: true,
-              view: window,
-              clientX: cx,
-              clientY: cy,
-              pointerId: 1,
-              pointerType: 'mouse',
-              isPrimary: true
-            };
-            trigger.dispatchEvent(new PointerEvent('pointerover', hoverOpts));
-            trigger.dispatchEvent(new MouseEvent('mouseover', hoverOpts));
-
-            setTimeout(() => {
+            const fireClickSequence = () => {
               const downOpts = {
                 bubbles: true,
                 cancelable: true,
@@ -500,13 +521,35 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 isPrimary: true
               };
               const upOpts = { ...downOpts, buttons: 0 };
-              trigger.focus();
-              trigger.dispatchEvent(new PointerEvent('pointerdown', downOpts));
-              trigger.dispatchEvent(new MouseEvent('mousedown', downOpts));
-              trigger.dispatchEvent(new PointerEvent('pointerup', upOpts));
-              trigger.dispatchEvent(new MouseEvent('mouseup', upOpts));
-              trigger.click();
-            }, 350);
+              try { trigger.focus(); } catch (e) {}
+              try { trigger.dispatchEvent(new PointerEvent('pointerdown', downOpts)); } catch (e) {}
+              try { trigger.dispatchEvent(new MouseEvent('mousedown', downOpts)); } catch (e) {}
+              try { trigger.dispatchEvent(new PointerEvent('pointerup', upOpts)); } catch (e) {}
+              try { trigger.dispatchEvent(new MouseEvent('mouseup', upOpts)); } catch (e) {}
+              try { hit.click(); } catch (e) {}
+              if (trigger !== hit) {
+                try { trigger.click(); } catch (e) {}
+              }
+            };
+
+            if (clickMode === 'simple') {
+              fireClickSequence();
+              return { found: true, mode: 'simple', cx, cy };
+            }
+
+            const hoverOpts = {
+              bubbles: true,
+              cancelable: true,
+              view: window,
+              clientX: cx,
+              clientY: cy,
+              pointerId: 1,
+              pointerType: 'mouse',
+              isPrimary: true
+            };
+            try { trigger.dispatchEvent(new PointerEvent('pointerover', hoverOpts)); } catch (e) {}
+            try { trigger.dispatchEvent(new MouseEvent('mouseover', hoverOpts)); } catch (e) {}
+            setTimeout(fireClickSequence, 320);
 
             return { found: true, mode: 'full', cx, cy };
           } catch (err) {
@@ -588,6 +631,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               return r.width > 200 && r.height > 150;
             });
             const dlg = dialogs.find((d) => {
+              if (d.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]')) return true;
               const txt = (d.innerText || '').toLowerCase();
               const aria = (d.getAttribute('aria-label') || '').toLowerCase();
               return (
@@ -595,6 +639,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 txt.includes('create post') ||
                 txt.includes('criar publicação') ||
                 txt.includes('create a public post') ||
+                txt.includes('publicação anônima') ||
+                txt.includes('anonymous post') ||
                 aria.includes('criar post') ||
                 aria.includes('create post')
               );
@@ -603,14 +649,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
             const boxes = Array.from(
               dlg.querySelectorAll(
-                'div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"], div[contenteditable="true"][aria-label]'
+                'div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"], div[contenteditable="true"][aria-placeholder], div[contenteditable="true"][aria-label]'
               )
             );
             const tb = boxes.find((el) => {
               const rect = el.getBoundingClientRect();
               if (rect.width < 40 || rect.height < 20) return false;
-              const lbl = ((el.getAttribute('aria-label') || el.getAttribute('placeholder') || '') + '').toLowerCase();
-              return !lbl.includes('coment') && !lbl.includes('comment') && !lbl.includes('responder') && !lbl.includes('reply');
+              const lbl = ((el.getAttribute('aria-label') || el.getAttribute('aria-placeholder') || el.getAttribute('placeholder') || '') + '').toLowerCase();
+              return !lbl.includes('coment') && !lbl.includes('comment') && !lbl.includes('responder') && !lbl.includes('reply') && !lbl.includes('pesquis') && !lbl.includes('search');
             });
             if (!tb) return { ok: false, reason: 'no_textbox' };
 
@@ -677,6 +723,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               return r.width > 200 && r.height > 150;
             });
             const dlg = dialogs.find((d) => {
+              if (d.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]')) return true;
               const txt = (d.innerText || '').toLowerCase();
               const aria = (d.getAttribute('aria-label') || '').toLowerCase();
               return (
@@ -684,6 +731,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 txt.includes('create post') ||
                 txt.includes('criar publicação') ||
                 txt.includes('create a public post') ||
+                txt.includes('publicação anônima') ||
+                txt.includes('anonymous post') ||
                 aria.includes('criar post') ||
                 aria.includes('create post')
               );
@@ -695,7 +744,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               const rect = el.getBoundingClientRect();
               if (rect.width === 0 || rect.height === 0) return false;
               const txt = ((el.innerText || el.getAttribute('aria-label') || '') + '').trim().toLowerCase();
-              if (txt !== 'postar' && txt !== 'publicar' && txt !== 'post') return false;
+              if (txt !== 'postar' && txt !== 'publicar' && txt !== 'post' && txt !== 'enviar' && txt !== 'submit') return false;
               const disabled = el.getAttribute('aria-disabled') === 'true' || el.disabled || el.getAttribute('tabindex') === '-1';
               return !disabled;
             });
@@ -739,140 +788,124 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           });
         } catch (e) {}
 
-        const prepResults = await new Promise((resolve) => {
-          chrome.scripting.executeScript(
-            {
-              target: { tabId },
-              world: 'MAIN',
-              func: () => {
-                const candidates = Array.from(
-                  document.querySelectorAll('[data-pagelet="GroupInlineComposer"] div[role="button"], [data-pagelet="GroupInlineComposer"] span, div[role="button"], span')
-                );
-                const scored = [];
-                for (const el of candidates) {
-                  const rect = el.getBoundingClientRect();
-                  if (rect.width < 55 || rect.height < 14 || rect.height > 78) continue;
-                  if (el.closest('div[role="dialog"]') || el.closest('div[role="article"]') || el.closest('[aria-busy="true"]')) continue;
-                  const t = (el.innerText || el.getAttribute('aria-label') || '').trim().toLowerCase();
-                  if (!t || t.includes('anônim') || t.includes('anonym') || t.includes('enquete') || t.includes('poll') || t.includes('sentimento') || t.includes('feeling')) continue;
-                  const isMatch =
-                    t === 'escreva algo...' ||
-                    t === 'write something...' ||
-                    t.includes('escreva algo') ||
-                    t.includes('no que você está pensando') ||
-                    t.includes('write something') ||
-                    t.includes("what's on your mind") ||
-                    t.includes('criar publicação pública') ||
-                    t.includes('create a public post');
-                  if (!isMatch) continue;
-                  const exact = t === 'escreva algo...' || t === 'write something...' ? 0 : 1;
-                  scored.push({ el, score: exact * 100000 + rect.width * rect.height });
+        const measureComposerCoords = () =>
+          new Promise((resolve) => {
+            chrome.scripting.executeScript(
+              {
+                target: { tabId },
+                world: 'MAIN',
+                func: () => {
+                  const existingDialog = Array.from(document.querySelectorAll('div[role="dialog"]')).find((d) => {
+                    const r = d.getBoundingClientRect();
+                    return r.width > 200 && r.height > 150 && Boolean(d.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]'));
+                  });
+                  if (existingDialog) return { found: true, alreadyOpen: true };
+
+                  const FORBIDDEN = ['anônim', 'anonim', 'anonym', 'enquete', 'poll', 'sentimento', 'feeling', 'foto', 'photo', 'vídeo', 'video', 'ao vivo', 'live', 'comentar', 'comment', 'responder', 'reply'];
+                  const hasForbidden = (s) => FORBIDDEN.some((w) => s.includes(w));
+
+                  const candidates = Array.from(
+                    document.querySelectorAll('[data-pagelet="GroupInlineComposer"] div[role="button"], [data-pagelet="GroupInlineComposer"] span, [role="main"] div[role="button"], [role="main"] span, div[role="button"], span')
+                  );
+                  const scored = [];
+                  for (const el of candidates) {
+                    const rect = el.getBoundingClientRect();
+                    if (rect.width < 55 || rect.height < 14 || rect.height > 78) continue;
+                    if (el.closest('div[role="dialog"]') || el.closest('div[role="article"]') || el.closest('[role="complementary"]') || el.closest('[aria-busy="true"]')) continue;
+                    const t = (el.innerText || el.getAttribute('aria-label') || '').trim().toLowerCase();
+                    if (!t || t.length > 90 || hasForbidden(t)) continue;
+                    const btnAncestor = el.closest('div[role="button"]');
+                    if (btnAncestor) {
+                      const br = btnAncestor.getBoundingClientRect();
+                      const bt = (btnAncestor.innerText || btnAncestor.getAttribute('aria-label') || '').trim().toLowerCase();
+                      if (br.height > 90 || hasForbidden(bt)) continue;
+                    }
+                    const isExact =
+                      t === 'escreva algo...' ||
+                      t === 'write something...' ||
+                      t === 'no que você está pensando?' ||
+                      t === "what's on your mind?" ||
+                      t === 'escreva uma publicação pública...' ||
+                      t === 'write a public post...';
+                    const isMatch =
+                      isExact ||
+                      t.includes('escreva algo') ||
+                      t.includes('no que você está pensando') ||
+                      t.includes('write something') ||
+                      t.includes("what's on your mind") ||
+                      t.includes('criar publicação pública') ||
+                      t.includes('create a public post') ||
+                      t.includes('write a public post') ||
+                      t.includes('escreva uma publicação');
+                    if (!isMatch) continue;
+                    const inInline = el.closest('[data-pagelet="GroupInlineComposer"]') ? -50000 : 0;
+                    const exactRank = isExact ? 0 : 100000;
+                    scored.push({ el, score: exactRank + inInline + rect.width * rect.height });
+                  }
+                  scored.sort((a, b) => a.score - b.score);
+                  const hit = scored[0] ? scored[0].el : null;
+                  if (!hit) return { found: false };
+                  hit.scrollIntoView({ behavior: 'instant', block: 'center' });
+                  const r = hit.getBoundingClientRect();
+                  const cx = Math.round(r.left + Math.min(r.width * 0.45, 140));
+                  const cy = Math.round(r.top + r.height / 2);
+                  const topEl = document.elementFromPoint(cx, cy);
+                  const topText = ((topEl && (topEl.innerText || topEl.getAttribute('aria-label'))) || '').trim().toLowerCase();
+                  if (topText && hasForbidden(topText)) {
+                    return { found: false, blockedBy: topText };
+                  }
+                  return { found: true, cx, cy };
                 }
-                scored.sort((a, b) => a.score - b.score);
-                const hit = scored[0] ? scored[0].el : null;
-                if (!hit) return { found: false };
-                hit.scrollIntoView({ behavior: 'instant', block: 'center' });
-                const r = hit.getBoundingClientRect();
-                return {
-                  found: true,
-                  cx: Math.round(r.left + Math.min(r.width * 0.45, 140)),
-                  cy: Math.round(r.top + r.height / 2)
-                };
+              },
+              (results) => {
+                void chrome.runtime.lastError;
+                resolve(results && results[0] ? results[0].result : null);
               }
-            },
-            (results) => {
-              void chrome.runtime.lastError;
-              resolve(results && results[0] ? results[0].result : null);
-            }
-          );
-        });
+            );
+          });
 
-        if (!prepResults || !prepResults.found) {
-          sendResponse({ ok: false, reason: 'trigger_not_found' });
-          return;
-        }
-
-        await sleepMs(220);
-
-        const freshCoords = await new Promise((resolve) => {
-          chrome.scripting.executeScript(
-            {
-              target: { tabId },
-              world: 'MAIN',
-              func: () => {
-                const candidates = Array.from(
-                  document.querySelectorAll('[data-pagelet="GroupInlineComposer"] div[role="button"], [data-pagelet="GroupInlineComposer"] span, div[role="button"], span')
-                );
-                const scored = [];
-                for (const el of candidates) {
-                  const rect = el.getBoundingClientRect();
-                  if (rect.width < 55 || rect.height < 14 || rect.height > 78) continue;
-                  if (el.closest('div[role="dialog"]') || el.closest('div[role="article"]') || el.closest('[aria-busy="true"]')) continue;
-                  const t = (el.innerText || el.getAttribute('aria-label') || '').trim().toLowerCase();
-                  if (!t || t.includes('anônim') || t.includes('anonym') || t.includes('enquete') || t.includes('poll') || t.includes('sentimento') || t.includes('feeling')) continue;
-                  const isMatch =
-                    t === 'escreva algo...' ||
-                    t === 'write something...' ||
-                    t.includes('escreva algo') ||
-                    t.includes('no que você está pensando') ||
-                    t.includes('write something') ||
-                    t.includes("what's on your mind") ||
-                    t.includes('criar publicação pública') ||
-                    t.includes('create a public post');
-                  if (!isMatch) continue;
-                  const exact = t === 'escreva algo...' || t === 'write something...' ? 0 : 1;
-                  scored.push({ el, score: exact * 100000 + rect.width * rect.height });
-                }
-                scored.sort((a, b) => a.score - b.score);
-                const hit = scored[0] ? scored[0].el : null;
-                if (!hit) return null;
-                const r = hit.getBoundingClientRect();
-                return {
-                  cx: Math.round(r.left + Math.min(r.width * 0.45, 140)),
-                  cy: Math.round(r.top + r.height / 2)
-                };
-              }
-            },
-            (results) => {
-              void chrome.runtime.lastError;
-              resolve(results && results[0] ? results[0].result : null);
-            }
-          );
-        });
-
-        const cx = (freshCoords && freshCoords.cx) || prepResults.cx;
-        const cy = (freshCoords && freshCoords.cy) || prepResults.cy;
-
+        // Attach debugger FIRST so Chrome's top debugging infobar shift happens BEFORE measuring (cx, cy)!
         const dbg = await withTabDebugger(tabId, async (sendCmd) => {
-          await dispatchRealTrustedClick(sendCmd, cx, cy, 240);
-          return { clicked: true, trusted: true };
+          await sleepMs(380);
+          const pos = await measureComposerCoords();
+          if (!pos || !pos.found) return { clicked: false, reason: 'trigger_not_found' };
+          if (pos.alreadyOpen) return { clicked: true, alreadyOpen: true };
+          await sleepMs(120);
+          const freshPos = await measureComposerCoords();
+          const cx = (freshPos && freshPos.found && freshPos.cx) || pos.cx;
+          const cy = (freshPos && freshPos.found && freshPos.cy) || pos.cy;
+          if (typeof cx !== 'number' || typeof cy !== 'number') return { clicked: false };
+          await dispatchRealTrustedClick(sendCmd, cx, cy, 200);
+          return { clicked: true, trusted: true, cx, cy };
         });
 
         if (dbg.usedDebugger && dbg.value && dbg.value.clicked) {
-          sendResponse({ ok: true, result: { found: true, mode: 'debugger_trusted', cx, cy } });
+          sendResponse({ ok: true, result: { found: true, mode: 'debugger_trusted', cx: dbg.value.cx, cy: dbg.value.cy } });
           return;
         }
 
-        // Fallback if debugger wasn't available
-        await new Promise((resolve) => {
+        // Fallback if debugger wasn't available or couldn't hit safely
+        const fallbackOk = await new Promise((resolve) => {
           chrome.scripting.executeScript(
             {
               target: { tabId },
               world: 'MAIN',
               func: () => {
+                const FORBIDDEN = ['anônim', 'anonim', 'anonym', 'enquete', 'poll', 'sentimento', 'feeling', 'foto', 'photo', 'vídeo', 'video', 'ao vivo', 'live', 'comentar', 'comment', 'responder', 'reply'];
+                const hasForbidden = (s) => FORBIDDEN.some((w) => s.includes(w));
                 const candidates = Array.from(
-                  document.querySelectorAll('[data-pagelet="GroupInlineComposer"] div[role="button"], [data-pagelet="GroupInlineComposer"] span, div[role="button"], span')
+                  document.querySelectorAll('[data-pagelet="GroupInlineComposer"] div[role="button"], [data-pagelet="GroupInlineComposer"] span, [role="main"] div[role="button"], [role="main"] span, div[role="button"], span')
                 );
                 const scored = [];
                 for (const el of candidates) {
                   const rect = el.getBoundingClientRect();
                   if (rect.width < 55 || rect.height < 14 || rect.height > 78) continue;
-                  if (el.closest('div[role="dialog"]') || el.closest('div[role="article"]') || el.closest('[aria-busy="true"]')) continue;
+                  if (el.closest('div[role="dialog"]') || el.closest('div[role="article"]') || el.closest('[role="complementary"]') || el.closest('[aria-busy="true"]')) continue;
                   const t = (el.innerText || el.getAttribute('aria-label') || '').trim().toLowerCase();
-                  if (!t || t.includes('anônim') || t.includes('anonym') || t.includes('enquete') || t.includes('poll') || t.includes('sentimento') || t.includes('feeling')) continue;
+                  if (!t || t.length > 90 || hasForbidden(t)) continue;
+                  const isExact = t === 'escreva algo...' || t === 'write something...';
                   const isMatch =
-                    t === 'escreva algo...' ||
-                    t === 'write something...' ||
+                    isExact ||
                     t.includes('escreva algo') ||
                     t.includes('no que você está pensando') ||
                     t.includes('write something') ||
@@ -880,25 +913,29 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     t.includes('criar publicação pública') ||
                     t.includes('create a public post');
                   if (!isMatch) continue;
-                  const exact = t === 'escreva algo...' || t === 'write something...' ? 0 : 1;
-                  scored.push({ el, score: exact * 100000 + rect.width * rect.height });
+                  scored.push({ el, score: (isExact ? 0 : 100000) + rect.width * rect.height });
                 }
                 scored.sort((a, b) => a.score - b.score);
                 const hit = scored[0] ? scored[0].el : null;
-                const trigger = hit ? (hit.closest('div[role="button"]') || hit) : null;
-                if (trigger) {
-                  trigger.focus();
-                  hit.click();
+                const ancestorBtn = hit ? hit.closest('div[role="button"]') : null;
+                const trigger = ancestorBtn && ancestorBtn.getBoundingClientRect().height <= 85 ? ancestorBtn : hit;
+                if (trigger && hit) {
+                  hit.scrollIntoView({ behavior: 'instant', block: 'center' });
+                  try { trigger.focus(); } catch (e) {}
+                  try { hit.click(); } catch (e) {}
+                  if (trigger !== hit) { try { trigger.click(); } catch (e) {} }
+                  return true;
                 }
+                return false;
               }
             },
-            () => {
+            (results) => {
               void chrome.runtime.lastError;
-              resolve();
+              resolve(Boolean(results && results[0] && results[0].result));
             }
           );
         });
-        sendResponse({ ok: true, result: { found: true, mode: 'main_fallback' } });
+        sendResponse({ ok: fallbackOk, result: { found: fallbackOk, mode: 'main_fallback' } });
       } catch (err) {
         sendResponse({ ok: false, error: String(err) });
       }
@@ -915,69 +952,71 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
     (async () => {
       try {
-        const boxInfo = await new Promise((resolve) => {
-          chrome.scripting.executeScript(
-            {
-              target: { tabId },
-              world: 'MAIN',
-              func: () => {
-                const dialogs = Array.from(document.querySelectorAll('div[role="dialog"]')).filter((d) => {
-                  const r = d.getBoundingClientRect();
-                  return r.width > 200 && r.height > 150;
-                });
-                const dlg = dialogs.find((d) => {
-                  const txt = (d.innerText || '').toLowerCase();
-                  const aria = (d.getAttribute('aria-label') || '').toLowerCase();
-                  return (
-                    txt.includes('criar post') ||
-                    txt.includes('create post') ||
-                    txt.includes('criar publicação') ||
-                    txt.includes('create a public post') ||
-                    aria.includes('criar post') ||
-                    aria.includes('create post')
+        const measureBox = () =>
+          new Promise((resolve) => {
+            chrome.scripting.executeScript(
+              {
+                target: { tabId },
+                world: 'MAIN',
+                func: () => {
+                  const dialogs = Array.from(document.querySelectorAll('div[role="dialog"]')).filter((d) => {
+                    const r = d.getBoundingClientRect();
+                    return r.width > 200 && r.height > 150;
+                  });
+                  const dlg = dialogs.find((d) => {
+                    if (d.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]')) return true;
+                    const txt = (d.innerText || '').toLowerCase();
+                    const aria = (d.getAttribute('aria-label') || '').toLowerCase();
+                    return (
+                      txt.includes('criar post') ||
+                      txt.includes('create post') ||
+                      txt.includes('criar publicação') ||
+                      txt.includes('create a public post') ||
+                      txt.includes('publicação anônima') ||
+                      txt.includes('anonymous post') ||
+                      aria.includes('criar post') ||
+                      aria.includes('create post')
+                    );
+                  }) || dialogs[dialogs.length - 1];
+                  if (!dlg) return { ok: false };
+                  const boxes = Array.from(
+                    dlg.querySelectorAll(
+                      'div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"], div[contenteditable="true"][aria-placeholder], div[contenteditable="true"][aria-label]'
+                    )
                   );
-                }) || dialogs[dialogs.length - 1];
-                if (!dlg) return { ok: false };
-                const boxes = Array.from(
-                  dlg.querySelectorAll(
-                    'div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"], div[contenteditable="true"][aria-label]'
-                  )
-                );
-                const tb = boxes.find((el) => {
-                  const rect = el.getBoundingClientRect();
-                  if (rect.width < 40 || rect.height < 20) return false;
-                  const lbl = ((el.getAttribute('aria-label') || el.getAttribute('placeholder') || '') + '').toLowerCase();
-                  return !lbl.includes('coment') && !lbl.includes('comment') && !lbl.includes('responder') && !lbl.includes('reply');
-                });
-                if (!tb) return { ok: false };
-                const existing = (tb.innerText || tb.textContent || '').trim();
-                tb.focus();
-                const r = tb.getBoundingClientRect();
-                return {
-                  ok: true,
-                  alreadyHasText: existing.length >= 10,
-                  cx: Math.round(r.left + Math.min(r.width * 0.4, 120)),
-                  cy: Math.round(r.top + Math.min(r.height * 0.4, 30))
-                };
+                  const tb = boxes.find((el) => {
+                    const rect = el.getBoundingClientRect();
+                    if (rect.width < 40 || rect.height < 20) return false;
+                    const lbl = ((el.getAttribute('aria-label') || el.getAttribute('aria-placeholder') || el.getAttribute('placeholder') || '') + '').toLowerCase();
+                    return !lbl.includes('coment') && !lbl.includes('comment') && !lbl.includes('responder') && !lbl.includes('reply') && !lbl.includes('pesquis') && !lbl.includes('search');
+                  });
+                  if (!tb) return { ok: false };
+                  const existing = (tb.innerText || tb.textContent || '').trim();
+                  tb.focus();
+                  const r = tb.getBoundingClientRect();
+                  return {
+                    ok: true,
+                    alreadyHasText: existing.length >= 10,
+                    textLen: existing.length,
+                    cx: Math.round(r.left + Math.min(r.width * 0.4, 120)),
+                    cy: Math.round(r.top + Math.min(r.height * 0.4, 30))
+                  };
+                }
+              },
+              (results) => {
+                void chrome.runtime.lastError;
+                resolve(results && results[0] ? results[0].result : null);
               }
-            },
-            (results) => {
-              void chrome.runtime.lastError;
-              resolve(results && results[0] ? results[0].result : null);
-            }
-          );
-        });
+            );
+          });
 
-        if (!boxInfo || !boxInfo.ok) {
-          sendResponse({ ok: false, reason: 'no_textbox' });
-          return;
-        }
-        if (boxInfo.alreadyHasText) {
-          sendResponse({ ok: true, result: { ok: true, skipped: 'already_filled' } });
-          return;
-        }
-
+        // Attach debugger FIRST, wait for infobar shift, THEN measure textbox coordinates!
         const dbg = await withTabDebugger(tabId, async (sendCmd) => {
+          await sleepMs(320);
+          const boxInfo = await measureBox();
+          if (!boxInfo || !boxInfo.ok) return { inserted: false, reason: 'no_textbox' };
+          if (boxInfo.alreadyHasText) return { inserted: true, skipped: 'already_filled' };
+
           await dispatchRealTrustedClick(sendCmd, boxInfo.cx, boxInfo.cy, 80);
           await sleepMs(120);
 
@@ -1035,6 +1074,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               }
             }
           }
+          await sleepMs(180);
+          const verifyBox = await measureBox();
+          const finalLen = verifyBox && typeof verifyBox.textLen === 'number' ? verifyBox.textLen : 0;
+          if (finalLen < Math.min(5, textToInsert.trim().length)) {
+            return { inserted: false, reason: 'text_did_not_stick' };
+          }
           return { inserted: true };
         });
 
@@ -1042,7 +1087,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           sendResponse({ ok: true, result: { ok: true, mode: 'debugger_insertText_autolink' } });
           return;
         }
-        sendResponse({ ok: false, reason: 'debugger_insert_failed' });
+        sendResponse({ ok: false, reason: (dbg.value && dbg.value.reason) || 'debugger_insert_failed' });
       } catch (err) {
         sendResponse({ ok: false, error: String(err) });
       }
@@ -1113,8 +1158,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               return r.width > 200 && r.height > 150;
             });
             const dlg = dialogs.find((d) => {
+              if (d.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]')) return true;
               const txt = (d.innerText || '').toLowerCase();
-              return txt.includes('criar post') || txt.includes('create post') || txt.includes('criar publicação');
+              return txt.includes('criar post') || txt.includes('create post') || txt.includes('criar publicação') || txt.includes('publicação anônima') || txt.includes('anonymous post');
             }) || dialogs[dialogs.length - 1];
             if (!dlg) return { attached: false, reason: 'no_dialog' };
 
@@ -1123,18 +1169,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               return inputs.find((inp) => (inp.accept || '').includes('image')) || inputs[0] || null;
             };
 
-            let fileInput = findImgFileInput();
-            if (!fileInput) {
-              const photoBtns = Array.from(dlg.querySelectorAll('div[role="button"], button')).filter((el) => {
-                const lbl = ((el.getAttribute('aria-label') || el.innerText || '') + '').toLowerCase();
-                return lbl.includes('foto') || lbl.includes('photo') || lbl.includes('imagem') || lbl.includes('image');
-              });
-              if (photoBtns[0]) {
-                try { photoBtns[0].click(); } catch (e) {}
-                fileInput = findImgFileInput();
-              }
-            }
-
+            const fileInput = findImgFileInput();
             if (fileInput) {
               fileInput.files = dt.files;
               fileInput.dispatchEvent(new Event('change', { bubbles: true }));
@@ -1142,6 +1177,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               return { attached: true, method: 'file_input' };
             }
 
+            // Paste directly into Lexical textbox without clicking photo icon (avoids OS file dialog popup blocking tab!)
             const tb = dlg.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]');
             if (tb) {
               tb.focus();
@@ -1171,61 +1207,64 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
     (async () => {
       try {
-        const btnInfo = await new Promise((resolve) => {
-          chrome.scripting.executeScript(
-            {
-              target: { tabId },
-              world: 'MAIN',
-              func: () => {
-                const dialogs = Array.from(document.querySelectorAll('div[role="dialog"]')).filter((d) => {
-                  const r = d.getBoundingClientRect();
-                  return r.width > 200 && r.height > 150;
-                });
-                const dlg = dialogs.find((d) => {
-                  const txt = (d.innerText || '').toLowerCase();
-                  const aria = (d.getAttribute('aria-label') || '').toLowerCase();
-                  return (
-                    txt.includes('criar post') ||
-                    txt.includes('create post') ||
-                    txt.includes('criar publicação') ||
-                    txt.includes('create a public post') ||
-                    aria.includes('criar post') ||
-                    aria.includes('create post')
-                  );
-                }) || dialogs[dialogs.length - 1];
-                if (!dlg) return { ok: false };
-                const candidates = Array.from(dlg.querySelectorAll('div[role="button"], button'));
-                const pubBtn = candidates.find((el) => {
-                  const rect = el.getBoundingClientRect();
-                  if (rect.width === 0 || rect.height === 0) return false;
-                  const txt = ((el.innerText || el.getAttribute('aria-label') || '') + '').trim().toLowerCase();
-                  if (txt !== 'postar' && txt !== 'publicar' && txt !== 'post') return false;
-                  const disabled = el.getAttribute('aria-disabled') === 'true' || el.disabled || el.getAttribute('tabindex') === '-1';
-                  return !disabled;
-                });
-                if (!pubBtn) return { ok: false };
-                pubBtn.scrollIntoView({ behavior: 'instant', block: 'nearest' });
-                const r = pubBtn.getBoundingClientRect();
-                return {
-                  ok: true,
-                  cx: Math.round(r.left + r.width / 2),
-                  cy: Math.round(r.top + r.height / 2)
-                };
+        const measureBtn = () =>
+          new Promise((resolve) => {
+            chrome.scripting.executeScript(
+              {
+                target: { tabId },
+                world: 'MAIN',
+                func: () => {
+                  const dialogs = Array.from(document.querySelectorAll('div[role="dialog"]')).filter((d) => {
+                    const r = d.getBoundingClientRect();
+                    return r.width > 200 && r.height > 150;
+                  });
+                  const dlg = dialogs.find((d) => {
+                    if (d.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]')) return true;
+                    const txt = (d.innerText || '').toLowerCase();
+                    const aria = (d.getAttribute('aria-label') || '').toLowerCase();
+                    return (
+                      txt.includes('criar post') ||
+                      txt.includes('create post') ||
+                      txt.includes('criar publicação') ||
+                      txt.includes('create a public post') ||
+                      txt.includes('publicação anônima') ||
+                      txt.includes('anonymous post') ||
+                      aria.includes('criar post') ||
+                      aria.includes('create post')
+                    );
+                  }) || dialogs[dialogs.length - 1];
+                  if (!dlg) return { ok: false };
+                  const candidates = Array.from(dlg.querySelectorAll('div[role="button"], button'));
+                  const pubBtn = candidates.find((el) => {
+                    const rect = el.getBoundingClientRect();
+                    if (rect.width === 0 || rect.height === 0) return false;
+                    const txt = ((el.innerText || el.getAttribute('aria-label') || '') + '').trim().toLowerCase();
+                    if (txt !== 'postar' && txt !== 'publicar' && txt !== 'post' && txt !== 'enviar' && txt !== 'submit') return false;
+                    const disabled = el.getAttribute('aria-disabled') === 'true' || el.disabled || el.getAttribute('tabindex') === '-1';
+                    return !disabled;
+                  });
+                  if (!pubBtn) return { ok: false };
+                  pubBtn.scrollIntoView({ behavior: 'instant', block: 'nearest' });
+                  const r = pubBtn.getBoundingClientRect();
+                  return {
+                    ok: true,
+                    cx: Math.round(r.left + r.width / 2),
+                    cy: Math.round(r.top + r.height / 2)
+                  };
+                }
+              },
+              (results) => {
+                void chrome.runtime.lastError;
+                resolve(results && results[0] ? results[0].result : null);
               }
-            },
-            (results) => {
-              void chrome.runtime.lastError;
-              resolve(results && results[0] ? results[0].result : null);
-            }
-          );
-        });
+            );
+          });
 
-        if (!btnInfo || !btnInfo.ok) {
-          sendResponse({ ok: false, reason: 'no_enabled_btn' });
-          return;
-        }
-
+        // Attach debugger FIRST so infobar shift completes BEFORE reading Publish button coordinates!
         const dbg = await withTabDebugger(tabId, async (sendCmd) => {
+          await sleepMs(300);
+          const btnInfo = await measureBtn();
+          if (!btnInfo || !btnInfo.ok) return { clicked: false, reason: 'no_enabled_btn' };
           await dispatchRealTrustedClick(sendCmd, btnInfo.cx, btnInfo.cy, 90);
           return { clicked: true };
         });
@@ -1234,7 +1273,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           sendResponse({ ok: true, result: { clicked: true, mode: 'debugger_trusted' } });
           return;
         }
-        sendResponse({ ok: false, reason: 'debugger_click_failed' });
+        sendResponse({ ok: false, reason: (dbg.value && dbg.value.reason) || 'debugger_click_failed' });
       } catch (err) {
         sendResponse({ ok: false, error: String(err) });
       }

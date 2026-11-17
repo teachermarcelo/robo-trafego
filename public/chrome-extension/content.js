@@ -1,4 +1,4 @@
-// AutoViral AI Chrome Extension - Content Script V1.4.2
+// AutoViral AI Chrome Extension - Content Script V1.4.3
 // Runs on Facebook, YouTube, Instagram, Pinterest and AutoViral AI Web Platform
 
 (function () {
@@ -758,45 +758,52 @@
     }
 
     function insertTextIntoFacebookComposer(textbox, text) {
-      if (!textbox) return;
-      textbox.focus();
-      try {
-        const sel = window.getSelection();
-        if (sel) {
-          const range = document.createRange();
-          range.selectNodeContents(textbox);
-          range.collapse(false);
-          sel.removeAllRanges();
-          sel.addRange(range);
-        }
-      } catch (e) {}
+      if (!textbox || !text) return;
 
-      try {
-        const dt = new DataTransfer();
-        dt.setData('text/plain', text);
-        const pasteEvt = new ClipboardEvent('paste', {
-          clipboardData: dt,
-          bubbles: true,
-          cancelable: true
+      const localFallbackInsert = () => {
+        const target = findCreatePostTextbox(findCreatePostDialog()) || textbox;
+        if (!target) return;
+        target.focus();
+        try {
+          const sel = window.getSelection();
+          if (sel) {
+            const range = document.createRange();
+            range.selectNodeContents(target);
+            range.collapse(false);
+            sel.removeAllRanges();
+            sel.addRange(range);
+          }
+        } catch (e) {}
+        try {
+          const dt = new DataTransfer();
+          dt.setData('text/plain', text);
+          target.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+        } catch (e) {}
+        setTimeout(() => {
+          const fresh = findCreatePostTextbox(findCreatePostDialog()) || target;
+          const current = (fresh.innerText || fresh.textContent || '').trim();
+          if (!current || current.length < Math.min(5, text.trim().length)) {
+            fresh.focus();
+            try {
+              document.execCommand('insertText', false, text);
+            } catch (e) {}
+            try {
+              fresh.dispatchEvent(new InputEvent('input', { bubbles: true, data: text, inputType: 'insertText' }));
+            } catch (e) {}
+          }
+        }, 280);
+      };
+
+      if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
+        chrome.runtime.sendMessage({ action: 'AUTOVIRAL_MAIN_INSERT_TEXT', text }, (res) => {
+          if (chrome.runtime.lastError || !res || !res.ok || !res.result || !res.result.ok) {
+            localFallbackInsert();
+          }
         });
-        textbox.dispatchEvent(pasteEvt);
-      } catch (e) {}
+        return;
+      }
 
-      setTimeout(() => {
-        const current = (textbox.innerText || '').trim();
-        if (!current || current.length < Math.min(8, text.trim().length)) {
-          textbox.focus();
-          try {
-            textbox.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, data: text, inputType: 'insertText' }));
-          } catch (e) {}
-          try {
-            document.execCommand('insertText', false, text);
-          } catch (e) {}
-          try {
-            textbox.dispatchEvent(new InputEvent('input', { bubbles: true, data: text, inputType: 'insertText' }));
-          } catch (e) {}
-        }
-      }, 280);
+      localFallbackInsert();
     }
 
     function findCreatePostDialog() {
@@ -945,12 +952,14 @@
       let finished = false;
       let ticks = 0;
       let userClickedPublish = !!didAutoClickPublish;
+      let sawDialogOpen = !!didAutoClickPublish || !!findCreatePostDialog();
       let dialogClosedStreak = 0;
 
       const attachPublishClickListener = () => {
         if (userClickedPublish) return;
         const dlg = findCreatePostDialog();
         if (!dlg) return;
+        sawDialogOpen = true;
         const candidates = Array.from(dlg.querySelectorAll('div[role="button"], button'));
         candidates.forEach((btn) => {
           const bt = ((btn.innerText || btn.getAttribute('aria-label') || '') + '').trim().toLowerCase();
@@ -1026,13 +1035,14 @@
         }
 
         const activeDialog = findCreatePostDialog();
-        if (!activeDialog) {
-          dialogClosedStreak++;
-        } else {
+        if (activeDialog) {
+          sawDialogOpen = true;
           dialogClosedStreak = 0;
+        } else if (sawDialogOpen || userClickedPublish) {
+          dialogClosedStreak++;
         }
 
-        if (dialogClosedStreak >= 2) {
+        if (dialogClosedStreak >= 3) {
           if (userClickedPublish) {
             finished = true;
             clearInterval(checkInterval);
@@ -1053,7 +1063,7 @@
               msgEl.textContent = '✅ Publicação enviada e confirmada como POSTAGEM FEITA! Já pode fechar esta aba.';
             }
             return;
-          } else if (ticks >= 4) {
+          } else if (sawDialogOpen && ticks >= 4) {
             finished = true;
             clearInterval(checkInterval);
             if (msgEl) {
@@ -1177,7 +1187,7 @@
             msgEl.style.color = '#38bdf8';
           }
 
-          // Give Facebook Relay an extra 1.1s after trigger appears so it doesn't open a grey loading skeleton
+          // Give Facebook Relay an extra 1.1s after trigger appears, then open cleanly via MAIN world simple click first
           setTimeout(() => {
             const reloadKey = `av_skel_reload_${currentSlug}`;
             const targetTag = String(pending.logId || '1');
@@ -1185,10 +1195,10 @@
             try {
               prevReloadTag = sessionStorage.getItem(reloadKey) || '';
             } catch (e) {}
-            const initialMode = prevReloadTag === targetTag ? 'simple' : 'full';
+            const initialMode = prevReloadTag === targetTag ? 'full' : 'simple';
             openComposerWithPreload(trigger, initialMode);
             if (msgEl) {
-              msgEl.textContent = '⏳ Aguardando janela "Criar post" terminar de carregar... NÃO feche esta aba!';
+              msgEl.textContent = '⏳ Etapa 1/4: Abrindo janela "Criar post"... NÃO feche esta aba!';
               msgEl.style.color = '#38bdf8';
             }
 
@@ -1206,6 +1216,10 @@
                   sessionStorage.removeItem(`av_skip_auto_modal_${currentSlug}`);
                 } catch (e) {}
                 clearInterval(waitTextbox);
+                if (msgEl) {
+                  msgEl.textContent = '✍️ Etapa 2/4: Caixa carregada! Inserindo texto da postagem...';
+                  msgEl.style.color = '#38bdf8';
+                }
                 setTimeout(() => {
                   textbox.click();
                   textbox.focus();
@@ -1221,7 +1235,7 @@
                   }
 
                   if (msgEl) {
-                    msgEl.textContent = '✅ Texto inserido em "Criar post"! Verificando conteúdo antes de publicar...';
+                    msgEl.textContent = '⏳ Etapa 3/4: Verificando texto e aguardando botão Postar liberar...';
                     msgEl.style.color = '#34d399';
                   }
 
@@ -1230,7 +1244,6 @@
                       startSubmissionMonitor(pending, currentSlug, msgEl, false, cancelAutoBtn);
                       return;
                     }
-                    const activeDlg = findCreatePostDialog() || textbox.closest('div[role="dialog"]');
                     let pubTries = 0;
                     const waitPubBtn = setInterval(() => {
                       pubTries++;
@@ -1238,17 +1251,19 @@
                         clearInterval(waitPubBtn);
                         return;
                       }
-                      const currentContent = (textbox.innerText || '').trim();
+                      const activeDlg = findCreatePostDialog() || textbox.closest('div[role="dialog"]');
+                      const freshTb = findCreatePostTextbox(activeDlg) || textbox;
+                      const currentContent = (freshTb.innerText || freshTb.textContent || '').trim();
                       if (currentContent.length < 5) {
-                        if (pubTries <= 3) {
-                          insertTextIntoFacebookComposer(textbox, pending.fullText);
-                          return;
+                        if (pubTries === 1 || pubTries === 3 || pubTries === 6) {
+                          insertTextIntoFacebookComposer(freshTb, pending.fullText);
                         }
+                        if (pubTries < 10) return;
                         clearInterval(waitPubBtn);
                         if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
                         copyTextReliably(pending.fullText);
                         if (msgEl) {
-                          msgEl.textContent = '📋 Texto copiado na memória! Cole (Ctrl+V) dentro da caixa acima e clique em Postar.';
+                          msgEl.textContent = '📋 Caixa não aceitou auto-colagem! Texto já copiado: aperte Ctrl+V acima e clique em Postar.';
                           msgEl.style.color = '#fbbf24';
                         }
                         startSubmissionMonitor(pending, currentSlug, msgEl, false, cancelAutoBtn);
@@ -1259,16 +1274,27 @@
                         clearInterval(waitPubBtn);
                         if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
                         if (msgEl) {
-                          msgEl.textContent = '🚀 Publicando no grupo... NÃO feche esta aba ainda!';
+                          msgEl.textContent = '🚀 Etapa 4/4: Clicando em Postar e confirmando no Facebook...';
                           msgEl.style.color = '#34d399';
                         }
-                        try {
-                          pubBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-                          pubBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
-                        } catch (e) {}
-                        pubBtn.click();
-                        startSubmissionMonitor(pending, currentSlug, msgEl, true, cancelAutoBtn);
-                      } else if (pubTries >= 16) {
+                        if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
+                          chrome.runtime.sendMessage({ action: 'AUTOVIRAL_MAIN_CLICK_PUBLISH' }, (pubRes) => {
+                            if (chrome.runtime.lastError || !pubRes || !pubRes.ok || !pubRes.result || !pubRes.result.clicked) {
+                              try {
+                                pubBtn.focus();
+                                pubBtn.click();
+                              } catch (e) {}
+                            }
+                            startSubmissionMonitor(pending, currentSlug, msgEl, true, cancelAutoBtn);
+                          });
+                        } else {
+                          try {
+                            pubBtn.focus();
+                            pubBtn.click();
+                          } catch (e) {}
+                          startSubmissionMonitor(pending, currentSlug, msgEl, true, cancelAutoBtn);
+                        }
+                      } else if (pubTries >= 24) {
                         clearInterval(waitPubBtn);
                         if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
                         if (msgEl) {
@@ -1279,20 +1305,20 @@
                       }
                     }, 480);
                   }, 2200);
-                }, 480);
-              } else if (boxTries === 16 && !retriedSkeleton) {
+                }, 550);
+              } else if (boxTries === 26 && !retriedSkeleton) {
                 retriedSkeleton = true;
                 if (msgEl) {
-                  msgEl.textContent = '🔄 Facebook travou ao abrir "Criar post". Fechando e tentando clique direto...';
+                  msgEl.textContent = '🔄 Facebook demorou em "Criar post". Fechando e tentando clique com pré-carregamento...';
                   msgEl.style.color = '#fbbf24';
                 }
                 closeStuckCreatePostDialog(dlg);
-                reopenPauseUntil = Date.now() + 2800;
+                reopenPauseUntil = Date.now() + 2600;
                 setTimeout(() => {
                   const retryTrigger = findComposerTrigger();
-                  if (retryTrigger) openComposerWithPreload(retryTrigger, 'simple');
-                }, 1700);
-              } else if (boxTries === 30) {
+                  if (retryTrigger) openComposerWithPreload(retryTrigger, 'full');
+                }, 1600);
+              } else if (boxTries === 44) {
                 if (prevReloadTag !== targetTag) {
                   clearInterval(waitTextbox);
                   try {
@@ -1304,7 +1330,7 @@
                   }
                   setTimeout(() => window.location.reload(), 900);
                 }
-              } else if (boxTries >= 44) {
+              } else if (boxTries >= 64) {
                 clearInterval(waitTextbox);
                 if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
                 copyTextReliably(pending.fullText);

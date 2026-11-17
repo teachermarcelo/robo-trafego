@@ -1,7 +1,7 @@
 // AutoViral AI Chrome Extension - Background Service Worker (Manifest V3)
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('[AutoViral AI] Extensão v1.4.2 instalada com sucesso!');
+  console.log('[AutoViral AI] Extensão v1.4.3 instalada com sucesso!');
   chrome.storage.local.get(['autoviral_interval', 'autoviral_mapped_groups'], (res) => {
     chrome.storage.local.set({
       autoviral_interval: res.autoviral_interval || 350,
@@ -377,6 +377,159 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       () => {
         void chrome.runtime.lastError;
         sendResponse({ ok: true });
+      }
+    );
+    return true;
+  }
+
+  if (request.action === 'AUTOVIRAL_MAIN_INSERT_TEXT') {
+    const tabId = sender && sender.tab && sender.tab.id;
+    const textToInsert = String(request.text || '');
+    if (!tabId || !textToInsert || !chrome.scripting || !chrome.scripting.executeScript) {
+      sendResponse({ ok: false });
+      return false;
+    }
+    chrome.scripting.executeScript(
+      {
+        target: { tabId },
+        world: 'MAIN',
+        args: [textToInsert],
+        func: (text) => {
+          try {
+            const dialogs = Array.from(document.querySelectorAll('div[role="dialog"]')).filter((d) => {
+              const r = d.getBoundingClientRect();
+              return r.width > 200 && r.height > 150;
+            });
+            const dlg = dialogs.find((d) => {
+              const txt = (d.innerText || '').toLowerCase();
+              const aria = (d.getAttribute('aria-label') || '').toLowerCase();
+              return (
+                txt.includes('criar post') ||
+                txt.includes('create post') ||
+                txt.includes('criar publicação') ||
+                txt.includes('create a public post') ||
+                aria.includes('criar post') ||
+                aria.includes('create post')
+              );
+            }) || dialogs[dialogs.length - 1];
+            if (!dlg) return { ok: false, reason: 'no_dialog' };
+
+            const boxes = Array.from(
+              dlg.querySelectorAll(
+                'div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"], div[contenteditable="true"][aria-label]'
+              )
+            );
+            const tb = boxes.find((el) => {
+              const rect = el.getBoundingClientRect();
+              if (rect.width < 40 || rect.height < 20) return false;
+              const lbl = ((el.getAttribute('aria-label') || el.getAttribute('placeholder') || '') + '').toLowerCase();
+              return !lbl.includes('coment') && !lbl.includes('comment') && !lbl.includes('responder') && !lbl.includes('reply');
+            });
+            if (!tb) return { ok: false, reason: 'no_textbox' };
+
+            tb.focus();
+            tb.click();
+            try {
+              const sel = window.getSelection();
+              if (sel) {
+                const range = document.createRange();
+                range.selectNodeContents(tb);
+                range.collapse(false);
+                sel.removeAllRanges();
+                sel.addRange(range);
+              }
+            } catch (e) {}
+
+            try {
+              const dt = new DataTransfer();
+              dt.setData('text/plain', text);
+              tb.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+            } catch (e) {}
+
+            setTimeout(() => {
+              const cur = (tb.innerText || tb.textContent || '').trim();
+              if (cur.length < Math.min(5, text.trim().length)) {
+                tb.focus();
+                try {
+                  document.execCommand('insertText', false, text);
+                } catch (e) {}
+                try {
+                  tb.dispatchEvent(new InputEvent('input', { bubbles: true, data: text, inputType: 'insertText' }));
+                } catch (e) {}
+              }
+            }, 250);
+
+            return { ok: true };
+          } catch (err) {
+            return { ok: false, error: String(err) };
+          }
+        }
+      },
+      (results) => {
+        void chrome.runtime.lastError;
+        sendResponse({ ok: true, result: results && results[0] ? results[0].result : null });
+      }
+    );
+    return true;
+  }
+
+  if (request.action === 'AUTOVIRAL_MAIN_CLICK_PUBLISH') {
+    const tabId = sender && sender.tab && sender.tab.id;
+    if (!tabId || !chrome.scripting || !chrome.scripting.executeScript) {
+      sendResponse({ ok: false });
+      return false;
+    }
+    chrome.scripting.executeScript(
+      {
+        target: { tabId },
+        world: 'MAIN',
+        func: () => {
+          try {
+            const dialogs = Array.from(document.querySelectorAll('div[role="dialog"]')).filter((d) => {
+              const r = d.getBoundingClientRect();
+              return r.width > 200 && r.height > 150;
+            });
+            const dlg = dialogs.find((d) => {
+              const txt = (d.innerText || '').toLowerCase();
+              const aria = (d.getAttribute('aria-label') || '').toLowerCase();
+              return (
+                txt.includes('criar post') ||
+                txt.includes('create post') ||
+                txt.includes('criar publicação') ||
+                txt.includes('create a public post') ||
+                aria.includes('criar post') ||
+                aria.includes('create post')
+              );
+            }) || dialogs[dialogs.length - 1];
+            if (!dlg) return { clicked: false, reason: 'no_dialog' };
+
+            const candidates = Array.from(dlg.querySelectorAll('div[role="button"], button'));
+            const pubBtn = candidates.find((el) => {
+              const rect = el.getBoundingClientRect();
+              if (rect.width === 0 || rect.height === 0) return false;
+              const txt = ((el.innerText || el.getAttribute('aria-label') || '') + '').trim().toLowerCase();
+              if (txt !== 'postar' && txt !== 'publicar' && txt !== 'post') return false;
+              const disabled = el.getAttribute('aria-disabled') === 'true' || el.disabled || el.getAttribute('tabindex') === '-1';
+              return !disabled;
+            });
+            if (!pubBtn) return { clicked: false, reason: 'no_enabled_btn' };
+
+            const r = pubBtn.getBoundingClientRect();
+            const cx = Math.round(r.left + r.width / 2);
+            const cy = Math.round(r.top + r.height / 2);
+            pubBtn.focus();
+            pubBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy }));
+            pubBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy }));
+            pubBtn.click();
+            return { clicked: true };
+          } catch (err) {
+            return { clicked: false, error: String(err) };
+          }
+        }
+      },
+      (results) => {
+        void chrome.runtime.lastError;
+        sendResponse({ ok: true, result: results && results[0] ? results[0].result : null });
       }
     );
     return true;

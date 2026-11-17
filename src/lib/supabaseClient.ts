@@ -1,9 +1,13 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { Campaign } from '../types';
+import { Campaign, CustomerLead, TrackingEvent } from '../types';
+
+export type CloudDbProvider = 'supabase' | 'firebase';
 
 let cachedClient: SupabaseClient | null = null;
 let lastUrl = '';
 let lastKey = '';
+
+const supabaseStoreHashes: Record<string, string> = {};
 
 export function getSupabaseClient(): SupabaseClient | null {
   if (typeof window === 'undefined') return null;
@@ -35,32 +39,53 @@ export function getSupabaseClient(): SupabaseClient | null {
 export function isSupabaseConnected(): boolean {
   return Boolean(
     typeof window !== 'undefined' &&
-    localStorage.getItem('autoviral_supabase_url') &&
-    localStorage.getItem('autoviral_supabase_key') &&
-    localStorage.getItem('autoviral_supabase_connected') === 'true'
+      localStorage.getItem('autoviral_supabase_url') &&
+      localStorage.getItem('autoviral_supabase_key') &&
+      localStorage.getItem('autoviral_supabase_connected') === 'true'
   );
 }
 
-// Convert Supabase DB record to Campaign
+export function getPrimaryCloudProvider(): CloudDbProvider {
+  if (typeof window === 'undefined') return 'firebase';
+  if (!isSupabaseConnected()) return 'firebase';
+  const pref = localStorage.getItem('autoviral_primary_db');
+  return pref === 'firebase' ? 'firebase' : 'supabase';
+}
+
+export function isPrimarySupabase(): boolean {
+  return getPrimaryCloudProvider() === 'supabase';
+}
+
+export function setPrimaryCloudProvider(provider: CloudDbProvider): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem('autoviral_primary_db', provider);
+    window.dispatchEvent(new CustomEvent('autoviral_db_provider_changed', { detail: { provider } }));
+  } catch {}
+}
+
+// Convert Supabase DB record to Campaign (preserving full extra_json payload)
 export function mapRecordToCampaign(record: any): Campaign {
+  const extra = record?.extra_json && typeof record.extra_json === 'object' ? record.extra_json : {};
   return {
+    ...extra,
     id: record.id,
-    title: record.title,
-    niche: record.niche || 'geral',
-    nicheLabel: record.niche_label || 'Geral',
-    targetAudience: record.target_audience || '',
-    painPointTargeted: record.pain_point || '',
-    checkoutUrl: record.checkout_url || undefined,
-    whatsappNumber: record.whatsapp_number || undefined,
-    price: Number(record.price) || 97,
-    status: record.status || 'active',
-    revenue: Number(record.revenue) || 0,
-    conversions: Number(record.conversions) || 0,
-    clicks: Number(record.clicks) || 0,
-    impressions: Number(record.impressions) || 0,
-    createdAt: record.created_at || new Date().toISOString(),
-    antiBanOrganicMode: true,
-    platforms: ['tiktok', 'pinterest', 'instagram', 'whatsapp'],
+    title: record.title || extra.title || 'Campanha',
+    niche: record.niche || extra.niche || 'geral',
+    nicheLabel: record.niche_label || extra.nicheLabel || 'Geral',
+    targetAudience: record.target_audience || extra.targetAudience || '',
+    painPointTargeted: record.pain_point || extra.painPointTargeted || '',
+    checkoutUrl: record.checkout_url ?? extra.checkoutUrl,
+    whatsappNumber: record.whatsapp_number ?? extra.whatsappNumber,
+    price: Number(record.price ?? extra.price) || 97,
+    status: (record.status || extra.status || 'active') as Campaign['status'],
+    revenue: Number(record.revenue ?? extra.revenue) || 0,
+    conversions: Number(record.conversions ?? extra.conversions) || 0,
+    clicks: Number(record.clicks ?? extra.clicks) || 0,
+    impressions: Number(record.impressions ?? extra.impressions) || 0,
+    createdAt: record.created_at || extra.createdAt || new Date().toISOString(),
+    antiBanOrganicMode: extra.antiBanOrganicMode ?? true,
+    platforms: Array.isArray(extra.platforms) ? extra.platforms : ['facebook_groups', 'instagram', 'pinterest', 'whatsapp'],
   };
 }
 
@@ -90,30 +115,39 @@ export async function fetchSupabaseCampaigns(): Promise<Campaign[] | null> {
   }
 }
 
-// Upsert a campaign to user's Supabase project
+// Upsert a campaign to user's Supabase project (retries without extra_json if older table lacks it)
 export async function saveCampaignToSupabase(camp: Campaign): Promise<boolean> {
   const client = getSupabaseClient();
   if (!client) return false;
 
+  const basePayload = {
+    id: camp.id,
+    title: camp.title,
+    niche: camp.niche,
+    niche_label: camp.nicheLabel,
+    target_audience: camp.targetAudience,
+    pain_point: camp.painPointTargeted,
+    checkout_url: camp.checkoutUrl || null,
+    whatsapp_number: camp.whatsappNumber || null,
+    price: camp.price,
+    status: camp.status,
+    revenue: camp.revenue,
+    conversions: camp.conversions,
+    clicks: camp.clicks,
+    impressions: camp.impressions,
+  };
+
   try {
     const { error } = await client.from('autoviral_campaigns').upsert({
-      id: camp.id,
-      title: camp.title,
-      niche: camp.niche,
-      niche_label: camp.nicheLabel,
-      target_audience: camp.targetAudience,
-      pain_point: camp.painPointTargeted,
-      checkout_url: camp.checkoutUrl,
-      whatsapp_number: camp.whatsappNumber,
-      price: camp.price,
-      status: camp.status,
-      revenue: camp.revenue,
-      conversions: camp.conversions,
-      clicks: camp.clicks,
-      impressions: camp.impressions,
+      ...basePayload,
+      extra_json: camp,
     });
 
     if (error) {
+      if (error.message?.includes('extra_json')) {
+        const retry = await client.from('autoviral_campaigns').upsert(basePayload);
+        return !retry.error;
+      }
       console.warn('Erro ao salvar campanha no Supabase:', error.message);
       return false;
     }
@@ -140,4 +174,266 @@ export async function deleteCampaignFromSupabase(id: string): Promise<boolean> {
     console.warn('Falha ao excluir campanha no Supabase:', err);
     return false;
   }
+}
+
+// Save JSON workspace slice into isolated table autoviral_workspace_store (merges partial objects cleanly)
+export async function saveWorkspaceJsonToSupabase(
+  storeKey: string,
+  payload: any,
+  options?: { mergeObject?: boolean; force?: boolean }
+): Promise<{ ok: boolean; missingTable?: boolean; error?: string }> {
+  const client = getSupabaseClient();
+  if (!client) return { ok: false, error: 'not-connected' };
+
+  try {
+    let finalData = payload;
+
+    if (options?.mergeObject && payload && typeof payload === 'object' && !Array.isArray(payload)) {
+      const existing = await fetchWorkspaceJsonFromSupabase(storeKey);
+      if (existing && typeof existing === 'object' && !Array.isArray(existing)) {
+        finalData = { ...existing, ...payload, updatedAt: new Date().toISOString() };
+      } else {
+        finalData = { ...payload, updatedAt: new Date().toISOString() };
+      }
+    }
+
+    const serialized = JSON.stringify(finalData);
+    if (!options?.force && supabaseStoreHashes[storeKey] === serialized) {
+      return { ok: true };
+    }
+
+    const { error } = await client.from('autoviral_workspace_store').upsert({
+      key: storeKey,
+      data: finalData,
+      updated_at: new Date().toISOString(),
+    });
+
+    if (error) {
+      const missingTable =
+        error.code === '42P01' ||
+        error.message?.includes('does not exist') ||
+        error.message?.includes('autoviral_workspace_store');
+      return { ok: false, missingTable, error: error.message };
+    }
+
+    supabaseStoreHashes[storeKey] = serialized;
+    return { ok: true };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+}
+
+export async function fetchWorkspaceJsonFromSupabase(storeKey: string): Promise<any | null> {
+  const client = getSupabaseClient();
+  if (!client) return null;
+  try {
+    const { data, error } = await client
+      .from('autoviral_workspace_store')
+      .select('data')
+      .eq('key', storeKey)
+      .maybeSingle();
+    if (error) return null;
+    if (data && data.data !== undefined) {
+      try {
+        supabaseStoreHashes[storeKey] = JSON.stringify(data.data);
+      } catch {}
+      return data.data;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveTrackingEventToSupabase(ev: TrackingEvent): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+  try {
+    const { error } = await client.from('autoviral_tracking_events').upsert({
+      id: ev.id,
+      campaign_id: ev.campaignId,
+      campaign_title: ev.campaignTitle,
+      niche: ev.niche,
+      type: ev.type,
+      geo_city: ev.geo?.city || null,
+      geo_state: ev.geo?.state || null,
+      source: ev.source || null,
+      device: ev.device || null,
+      age_bracket: ev.ageBracket || null,
+      lead_score: ev.leadScore || null,
+      amount: ev.amount || 0,
+      created_at: ev.timestamp || new Date().toISOString(),
+    });
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+export async function fetchTrackingEventsFromSupabase(): Promise<TrackingEvent[] | null> {
+  const client = getSupabaseClient();
+  if (!client) return null;
+  try {
+    const { data, error } = await client
+      .from('autoviral_tracking_events')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(300);
+    if (error || !Array.isArray(data)) return null;
+    return data.map((r: any) => ({
+      id: r.id,
+      campaignId: r.campaign_id,
+      campaignTitle: r.campaign_title || 'Campanha',
+      niche: r.niche || 'geral',
+      type: r.type,
+      timestamp: r.created_at || new Date().toISOString(),
+      geo: { city: r.geo_city || 'Brasil', state: r.geo_state || 'BR', country: 'Brasil' },
+      source: r.source || 'facebook_groups',
+      device: r.device || 'Mobile',
+      ageBracket: r.age_bracket,
+      leadScore: r.lead_score,
+      isSimulation: false,
+      amount: r.amount ? Number(r.amount) : undefined,
+    }));
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchAllAutoViralFromSupabase(): Promise<{
+  ok: boolean;
+  missingStoreTable?: boolean;
+  campaigns: Campaign[];
+  workspace: any | null;
+  globalWorkspace: any | null;
+  deletedIds: string[] | null;
+  customerLeads: CustomerLead[] | null;
+  trackingEvents: TrackingEvent[] | null;
+}> {
+  const client = getSupabaseClient();
+  if (!client) {
+    return {
+      ok: false,
+      campaigns: [],
+      workspace: null,
+      globalWorkspace: null,
+      deletedIds: null,
+      customerLeads: null,
+      trackingEvents: null,
+    };
+  }
+
+  const [campaignsRes, storeRes, eventsRes] = await Promise.all([
+    fetchSupabaseCampaigns(),
+    client.from('autoviral_workspace_store').select('key, data'),
+    fetchTrackingEventsFromSupabase(),
+  ]);
+
+  let missingStoreTable = false;
+  let workspace: any = null;
+  let globalWorkspace: any = null;
+  let deletedIds: string[] | null = null;
+  let customerLeads: CustomerLead[] | null = null;
+
+  if (storeRes.error) {
+    if (
+      storeRes.error.code === '42P01' ||
+      storeRes.error.message?.includes('does not exist') ||
+      storeRes.error.message?.includes('autoviral_workspace_store')
+    ) {
+      missingStoreTable = true;
+    }
+  } else if (Array.isArray(storeRes.data)) {
+    storeRes.data.forEach((row: any) => {
+      try {
+        supabaseStoreHashes[row.key] = JSON.stringify(row.data);
+      } catch {}
+      if (row.key === 'workspace_sync_v1') workspace = row.data;
+      if (row.key === 'global_workspace_sync_v1') globalWorkspace = row.data;
+      if (row.key === 'deleted_campaign_ids' && Array.isArray(row.data)) deletedIds = row.data;
+      if (row.key === 'customer_leads' && Array.isArray(row.data)) customerLeads = row.data;
+    });
+  }
+
+  return {
+    ok: !missingStoreTable,
+    missingStoreTable,
+    campaigns: campaignsRes || [],
+    workspace,
+    globalWorkspace,
+    deletedIds,
+    customerLeads,
+    trackingEvents: eventsRes,
+  };
+}
+
+export async function pushLocalSnapshotToSupabase(extraCampaigns?: Campaign[], extraLeads?: CustomerLead[]): Promise<{
+  ok: boolean;
+  missingStoreTable?: boolean;
+  campaignsSaved: number;
+  error?: string;
+}> {
+  const safeParse = (k: string) => {
+    try {
+      const raw = localStorage.getItem(k);
+      return raw ? JSON.parse(raw) : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
+  const campaignsToSave: Campaign[] = extraCampaigns || safeParse('autoviral_campaigns') || [];
+  let campaignsSaved = 0;
+  for (const camp of campaignsToSave) {
+    if (camp?.id) {
+      const ok = await saveCampaignToSupabase(camp);
+      if (ok) campaignsSaved++;
+    }
+  }
+
+  const workspacePayload = {
+    savedCopiesMap: safeParse('autoviral_saved_copies_v1'),
+    customCopyPresets: safeParse('autoviral_custom_copy_presets_v1'),
+    audiences: safeParse('autoviral_fb_audiences_v4') || safeParse('autoviral_fb_audiences_v3'),
+    youtubeVideos: safeParse('autoviral_yt_videos_v2'),
+    pinterestPins: safeParse('autoviral_pinterest_pins_v1'),
+    instaCampaigns: safeParse('autoviral_insta_campaigns_v1'),
+    storyQueue: safeParse('autoviral_insta_story_queue') || safeParse('autoviral_insta_story_queue_v2'),
+    mappedInstaTargets: safeParse('autoviral_insta_mapped_targets_v2'),
+    mappedGroups: safeParse('autoviral_fb_mapped_groups_v5_real') || safeParse('autoviral_fb_mapped_groups_v3'),
+    whatsappX1Flows: safeParse('autoviral_whatsapp_x1_flows_v1'),
+  };
+
+  const globalPayload = {
+    globalAudiences: safeParse('autoviral_global_audiences_v1'),
+    globalTrashAudiences: safeParse('autoviral_global_audiences_trash_v1'),
+    globalGroups: safeParse('autoviral_global_fb_groups_v1'),
+    globalOffers: safeParse('autoviral_global_offers_v1'),
+  };
+
+  const deletedIds = safeParse('autoviral_deleted_campaign_ids') || ['camp-1', 'camp-2', 'camp-3'];
+
+  const [wsRes, glRes, delRes, leadsRes] = await Promise.all([
+    saveWorkspaceJsonToSupabase('workspace_sync_v1', workspacePayload, { mergeObject: true, force: true }),
+    saveWorkspaceJsonToSupabase('global_workspace_sync_v1', globalPayload, { mergeObject: true, force: true }),
+    saveWorkspaceJsonToSupabase('deleted_campaign_ids', deletedIds, { force: true }),
+    extraLeads && extraLeads.length > 0
+      ? saveWorkspaceJsonToSupabase('customer_leads', extraLeads, { force: true })
+      : Promise.resolve({ ok: true }),
+  ]);
+
+  if (wsRes.missingTable || glRes.missingTable || delRes.missingTable || (leadsRes as any).missingTable) {
+    return {
+      ok: false,
+      missingStoreTable: true,
+      campaignsSaved,
+      error: 'Execute o Script SQL atualizado no SQL Editor do Supabase para criar a tabela autoviral_workspace_store.',
+    };
+  }
+
+  return {
+    ok: wsRes.ok && glRes.ok,
+    campaignsSaved,
+    error: wsRes.error || glRes.error,
+  };
 }

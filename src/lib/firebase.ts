@@ -17,6 +17,15 @@ import {
 import firebaseConfig from '../../firebase-applet-config.json';
 import { Campaign, TrackingEvent, CustomerLead } from '../types';
 import { INITIAL_CAMPAIGNS } from '../data/defaultCampaigns';
+import {
+  isPrimarySupabase,
+  isSupabaseConnected,
+  saveCampaignToSupabase,
+  deleteCampaignFromSupabase,
+  saveTrackingEventToSupabase,
+  saveWorkspaceJsonToSupabase,
+  fetchWorkspaceJsonFromSupabase,
+} from './supabaseClient';
 
 // Initialize Firebase App
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
@@ -224,6 +233,10 @@ export function subscribeFirebaseCampaigns(
  * Save or update campaign in Firestore (ensures both title and name are populated)
  */
 export async function saveCampaignToFirebase(campaign: Campaign): Promise<void> {
+  if (isPrimarySupabase()) {
+    await saveCampaignToSupabase(campaign).catch(() => {});
+    return;
+  }
   if (isFirestoreWritesPaused()) return;
   const path = `${CAMPAIGNS_COLLECTION}/${campaign.id}`;
   try {
@@ -246,6 +259,17 @@ export async function saveCampaignToFirebase(campaign: Campaign): Promise<void> 
  * Permanently delete campaign and record in blacklist
  */
 export async function deleteCampaignFromFirebase(campaignId: string): Promise<void> {
+  if (isPrimarySupabase()) {
+    await deleteCampaignFromSupabase(campaignId).catch(() => {});
+    try {
+      const existing = await fetchWorkspaceJsonFromSupabase('deleted_campaign_ids');
+      const list: string[] = Array.isArray(existing) ? existing : ['camp-1', 'camp-2', 'camp-3'];
+      if (!list.includes(campaignId)) {
+        await saveWorkspaceJsonToSupabase('deleted_campaign_ids', [...list, campaignId], { force: true });
+      }
+    } catch {}
+    return;
+  }
   if (isFirestoreWritesPaused()) return;
   const path = `${CAMPAIGNS_COLLECTION}/${campaignId}`;
   try {
@@ -295,6 +319,10 @@ export function subscribeDeletedCampaignIds(onUpdate: (ids: string[]) => void): 
  * Record a tracking event to Firestore (for cross-browser analytics)
  */
 export async function saveTrackingEventToFirebase(event: TrackingEvent): Promise<void> {
+  if (isPrimarySupabase()) {
+    await saveTrackingEventToSupabase(event).catch(() => {});
+    return;
+  }
   if (isFirestoreWritesPaused()) return;
   const path = `${TRACKING_COLLECTION}/${event.id}`;
   try {
@@ -334,8 +362,12 @@ export async function saveLandingPageSettingsToFirebase(
   settings: Record<string, any>,
   campaignId?: string
 ): Promise<void> {
-  if (isFirestoreWritesPaused()) return;
   const docKey = campaignId ? `landing_page_${campaignId}` : 'landing_page_tarefinhas';
+  if (isSupabaseConnected()) {
+    await saveWorkspaceJsonToSupabase(docKey, stripUndefinedDeep(settings), { mergeObject: true, force: true }).catch(() => {});
+    if (isPrimarySupabase()) return;
+  }
+  if (isFirestoreWritesPaused()) return;
   const path = `${SETTINGS_COLLECTION}/${docKey}`;
   try {
     const clean = stripUndefinedDeep({
@@ -544,8 +576,17 @@ export function subscribeInstagramOriginAccount(onUpdate: (account: InstagramOri
 const CUSTOMERS_COLLECTION = 'autoviral_customers';
 
 export async function saveCustomerLeadToFirebase(customer: CustomerLead): Promise<void> {
-  if (isFirestoreWritesPaused()) return;
   const cleanId = (customer.id || `lead-${Date.now()}`).replace(/\//g, '_');
+  if (isSupabaseConnected()) {
+    try {
+      const existing = await fetchWorkspaceJsonFromSupabase('customer_leads');
+      const arr: CustomerLead[] = Array.isArray(existing) ? existing : [];
+      const next = [customer, ...arr.filter((c) => c.id !== cleanId && c.id !== customer.id)];
+      await saveWorkspaceJsonToSupabase('customer_leads', next, { force: true });
+    } catch {}
+    if (isPrimarySupabase()) return;
+  }
+  if (isFirestoreWritesPaused()) return;
   const path = `${CUSTOMERS_COLLECTION}/${cleanId}`;
   try {
     await setDoc(
@@ -563,8 +604,16 @@ export async function saveCustomerLeadToFirebase(customer: CustomerLead): Promis
 }
 
 export async function deleteCustomerLeadFromFirebase(customerId: string): Promise<void> {
-  if (isFirestoreWritesPaused()) return;
   const cleanId = customerId.replace(/\//g, '_');
+  if (isSupabaseConnected()) {
+    try {
+      const existing = await fetchWorkspaceJsonFromSupabase('customer_leads');
+      const arr: CustomerLead[] = Array.isArray(existing) ? existing : [];
+      await saveWorkspaceJsonToSupabase('customer_leads', arr.filter((c) => c.id !== cleanId && c.id !== customerId), { force: true });
+    } catch {}
+    if (isPrimarySupabase()) return;
+  }
+  if (isFirestoreWritesPaused()) return;
   const path = `${CUSTOMERS_COLLECTION}/${cleanId}`;
   try {
     await deleteDoc(doc(db, CUSTOMERS_COLLECTION, cleanId));
@@ -666,6 +715,15 @@ export async function saveWorkspaceSyncToFirebase(
   partial: Partial<WorkspaceSyncData>,
   options?: { force?: boolean }
 ): Promise<{ ok: boolean; skipped?: boolean; quotaExceeded?: boolean; error?: string }> {
+  if (isSupabaseConnected()) {
+    const supaRes = await saveWorkspaceJsonToSupabase('workspace_sync_v1', stripUndefinedDeep(partial), {
+      mergeObject: true,
+      force: options?.force,
+    });
+    if (isPrimarySupabase()) {
+      return { ok: supaRes.ok, error: supaRes.error };
+    }
+  }
   if (isFirestoreWritesPaused() && !options?.force) {
     return { ok: false, quotaExceeded: true, error: 'quota-paused' };
   }
@@ -812,6 +870,15 @@ export async function saveGlobalWorkspaceSyncToFirebase(
   partial: Partial<GlobalWorkspaceSyncData>,
   options?: { force?: boolean }
 ): Promise<{ ok: boolean; skipped?: boolean; quotaExceeded?: boolean; error?: string }> {
+  if (isSupabaseConnected()) {
+    const supaRes = await saveWorkspaceJsonToSupabase('global_workspace_sync_v1', stripUndefinedDeep(partial), {
+      mergeObject: true,
+      force: options?.force,
+    });
+    if (isPrimarySupabase()) {
+      return { ok: supaRes.ok, error: supaRes.error };
+    }
+  }
   if (isFirestoreWritesPaused() && !options?.force) {
     return { ok: false, quotaExceeded: true, error: 'quota-paused' };
   }

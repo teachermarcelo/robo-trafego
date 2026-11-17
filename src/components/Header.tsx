@@ -34,6 +34,7 @@ interface HeaderProps {
   onResetAllMetrics?: () => void;
   onOpenPWAInstall?: () => void;
   firebaseSyncStatus?: 'connecting' | 'synced' | 'error';
+  cloudProvider?: 'supabase' | 'firebase';
   cloudCampaignsCount?: number;
   isSyncingCloud?: boolean;
   onForceCloudSync?: () => void;
@@ -53,6 +54,7 @@ export const Header: React.FC<HeaderProps> = ({
   onResetAllMetrics,
   onOpenPWAInstall,
   firebaseSyncStatus = 'synced',
+  cloudProvider = 'firebase',
   cloudCampaignsCount,
   isSyncingCloud = false,
   onForceCloudSync,
@@ -147,11 +149,19 @@ export const Header: React.FC<HeaderProps> = ({
 
           <button
             onClick={onOpenSupabase}
-            className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs transition border bg-slate-800 text-cyan-400 border-cyan-800/60 hover:bg-cyan-950/50"
-            title="Conectar Banco Supabase"
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs transition border cursor-pointer ${
+              cloudProvider === 'supabase'
+                ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/70 font-bold hover:bg-emerald-900/70'
+                : 'bg-slate-800 text-cyan-400 border-cyan-800/60 hover:bg-cyan-950/50'
+            }`}
+            title="Configurar / Trocar Banco de Dados para Supabase (fluentimmersion)"
           >
-            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
-            <span>Supabase</span>
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                cloudProvider === 'supabase' ? 'bg-emerald-400 animate-pulse' : 'bg-cyan-400'
+              }`}
+            />
+            <span>{cloudProvider === 'supabase' ? 'Supabase (Ativo)' : 'Supabase'}</span>
           </button>
 
           {onOpenVercel && (
@@ -182,26 +192,34 @@ export const Header: React.FC<HeaderProps> = ({
             onClick={() => onForceCloudSync?.()}
             disabled={isSyncingCloud}
             className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs border shadow-sm transition cursor-pointer ${
-              firebaseSyncStatus === 'error'
-                ? 'bg-rose-950/70 text-rose-300 border-rose-700/60 hover:bg-rose-900/60'
-                : firebaseSyncStatus === 'connecting' || isSyncingCloud
+              isSyncingCloud || (cloudProvider === 'firebase' && firebaseSyncStatus === 'connecting')
                 ? 'bg-amber-950/70 text-amber-300 border-amber-700/60 hover:bg-amber-900/60'
+                : firebaseSyncStatus === 'error'
+                ? 'bg-rose-950/70 text-rose-300 border-rose-700/60 hover:bg-rose-900/60'
                 : 'bg-emerald-950/70 text-emerald-300 border-emerald-700/60 hover:bg-emerald-900/60'
             }`}
-            title="Clique para forçar sincronização PC ↔ Celular na Nuvem Firebase Firestore agora"
+            title={
+              cloudProvider === 'supabase'
+                ? 'Clique para sincronizar PC ↔ Celular no seu Supabase agora'
+                : 'Clique para forçar sincronização PC ↔ Celular na Nuvem agora'
+            }
           >
             <span
               className={`w-2 h-2 rounded-full ${
-                firebaseSyncStatus === 'error'
-                  ? 'bg-rose-400'
-                  : firebaseSyncStatus === 'connecting' || isSyncingCloud
+                isSyncingCloud || (cloudProvider === 'firebase' && firebaseSyncStatus === 'connecting')
                   ? 'bg-amber-400 animate-ping'
+                  : firebaseSyncStatus === 'error'
+                  ? 'bg-rose-400'
                   : 'bg-emerald-400 animate-pulse'
               }`}
             />
             <span className="font-semibold tracking-wide">
               {isSyncingCloud
                 ? 'Sincronizando Nuvem...'
+                : cloudProvider === 'supabase'
+                ? firebaseSyncStatus === 'error'
+                  ? 'Reconectar Supabase'
+                  : `Nuvem Supabase: Sincronizado${typeof cloudCampaignsCount === 'number' ? ` (${cloudCampaignsCount})` : ''}`
                 : firebaseSyncStatus === 'error'
                 ? 'Reconectar Nuvem Firebase'
                 : firebaseSyncStatus === 'connecting'

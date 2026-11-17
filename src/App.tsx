@@ -38,6 +38,10 @@ import {
   saveCampaignToSupabase,
   deleteCampaignFromSupabase,
   isSupabaseConnected,
+  getPrimaryCloudProvider,
+  fetchAllAutoViralFromSupabase,
+  pushLocalSnapshotToSupabase,
+  CloudDbProvider,
 } from './lib/supabaseClient';
 import {
   saveCampaignToFirebase,
@@ -146,7 +150,11 @@ export default function App() {
   const [isVercelModalOpen, setIsVercelModalOpen] = useState(false);
   const [isPWAInstallModalOpen, setIsPWAInstallModalOpen] = useState(false);
   const [bridgeModalCampaign, setBridgeModalCampaign] = useState<Campaign | null>(null);
-  const [firebaseSyncStatus, setFirebaseSyncStatus] = useState<'connecting' | 'synced' | 'error'>('connecting');
+  const [cloudProvider, setCloudProvider] = useState<CloudDbProvider>(() => getPrimaryCloudProvider());
+  const cloudProviderRef = React.useRef<CloudDbProvider>(cloudProvider);
+  const [firebaseSyncStatus, setFirebaseSyncStatus] = useState<'connecting' | 'synced' | 'error'>(() =>
+    getPrimaryCloudProvider() === 'supabase' ? 'synced' : 'connecting'
+  );
   const [firebaseQuotaExceeded, setFirebaseQuotaExceeded] = useState<boolean>(false);
   const [cloudCampaignsCount, setCloudCampaignsCount] = useState<number>(0);
   const [isSyncingCloud, setIsSyncingCloud] = useState<boolean>(false);
@@ -209,8 +217,220 @@ export default function App() {
     }
   }, [campaigns]);
 
-  // 1. Subscribe to Firebase deleted campaign IDs (ensures dummy campaigns stay deleted on all devices)
+  const mergeWorkspaceIntoLocalStorage = React.useCallback((cloud: WorkspaceSyncData) => {
+    if (!cloud || typeof cloud !== 'object') return;
+    const safeRead = (k: string) => {
+      try {
+        const r = localStorage.getItem(k);
+        return r ? JSON.parse(r) : null;
+      } catch {
+        return null;
+      }
+    };
+    const safeWrite = (k: string, val: any) => {
+      try {
+        localStorage.setItem(k, JSON.stringify(val));
+      } catch {}
+    };
+
+    if (cloud.savedCopiesMap && typeof cloud.savedCopiesMap === 'object') {
+      const prev = safeRead('autoviral_saved_copies_v1') || {};
+      const next = { ...prev };
+      Object.entries(cloud.savedCopiesMap).forEach(([id, entry]: [string, any]) => {
+        if (!entry) return;
+        if (!next[id] || (entry.savedAt && (!next[id].savedAt || entry.savedAt > next[id].savedAt))) {
+          next[id] = entry;
+        }
+      });
+      safeWrite('autoviral_saved_copies_v1', next);
+    }
+
+    const mergeArrayByKey = (keys: string[], incoming: any[] | undefined, idKey: string) => {
+      if (!Array.isArray(incoming) || incoming.length === 0) return;
+      const existing: any[] = safeRead(keys[0]) || [];
+      const seen = new Set(existing.map((item) => String(item?.[idKey] || '').toLowerCase()).filter(Boolean));
+      const fresh = incoming.filter((item) => {
+        const k = String(item?.[idKey] || '').toLowerCase();
+        if (!k || seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+      if (fresh.length > 0) {
+        const combined = [...fresh, ...existing];
+        keys.forEach((k) => safeWrite(k, combined));
+      }
+    };
+
+    mergeArrayByKey(['autoviral_fb_audiences_v4', 'autoviral_fb_audiences_v3'], cloud.audiences, 'id');
+    mergeArrayByKey(['autoviral_fb_mapped_groups_v5_real', 'autoviral_fb_mapped_groups_v3'], cloud.mappedGroups, 'url');
+    mergeArrayByKey(['autoviral_yt_videos_v2'], cloud.youtubeVideos, 'url');
+    mergeArrayByKey(['autoviral_pinterest_pins_v1'], cloud.pinterestPins, 'id');
+    mergeArrayByKey(['autoviral_insta_campaigns_v1'], cloud.instaCampaigns, 'id');
+    mergeArrayByKey(['autoviral_insta_story_queue', 'autoviral_insta_story_queue_v2'], cloud.storyQueue, 'id');
+    mergeArrayByKey(['autoviral_insta_mapped_targets_v2'], cloud.mappedInstaTargets, 'handle');
+    mergeArrayByKey(['autoviral_custom_copy_presets_v1'], cloud.customCopyPresets, 'id');
+
+    if (cloud.whatsappX1Flows && typeof cloud.whatsappX1Flows === 'object') {
+      const prevFlows = safeRead('autoviral_whatsapp_x1_flows_v1') || {};
+      const nextFlows = { ...prevFlows };
+      Object.entries(cloud.whatsappX1Flows).forEach(([campId, flow]: [string, any]) => {
+        if (!flow) return;
+        if (!nextFlows[campId] || (flow.updatedAt && (!nextFlows[campId].updatedAt || flow.updatedAt > nextFlows[campId].updatedAt))) {
+          nextFlows[campId] = flow;
+        }
+      });
+      safeWrite('autoviral_whatsapp_x1_flows_v1', nextFlows);
+    }
+
+    window.dispatchEvent(new CustomEvent('autoviral_workspace_synced', { detail: cloud }));
+  }, []);
+
+  const mergeGlobalWorkspaceIntoLocalStorage = React.useCallback((cloud: GlobalWorkspaceSyncData) => {
+    if (!cloud || typeof cloud !== 'object') return;
+    const safeRead = (k: string) => {
+      try {
+        const r = localStorage.getItem(k);
+        return r ? JSON.parse(r) : null;
+      } catch {
+        return null;
+      }
+    };
+    const safeWrite = (k: string, val: any) => {
+      try {
+        localStorage.setItem(k, JSON.stringify(val));
+      } catch {}
+    };
+    const mergeArrayByKey = (key: string, incoming: any[] | undefined, idKey: string) => {
+      if (!Array.isArray(incoming) || incoming.length === 0) return;
+      const existing: any[] = safeRead(key) || [];
+      const seen = new Set(existing.map((item) => String(item?.[idKey] || '').toLowerCase()).filter(Boolean));
+      const fresh = incoming.filter((item) => {
+        const k = String(item?.[idKey] || '').toLowerCase();
+        if (!k || seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+      if (fresh.length > 0) {
+        safeWrite(key, [...fresh, ...existing]);
+      }
+    };
+
+    mergeArrayByKey('autoviral_global_audiences_v1', cloud.globalAudiences, 'id');
+    mergeArrayByKey('autoviral_global_audiences_trash_v1', cloud.globalTrashAudiences, 'id');
+    mergeArrayByKey('autoviral_global_fb_groups_v1', cloud.globalGroups, 'url');
+    mergeArrayByKey('autoviral_global_offers_v1', cloud.globalOffers, 'id');
+
+    window.dispatchEvent(new CustomEvent('autoviral_global_workspace_synced', { detail: cloud }));
+  }, []);
+
+  const syncWithSupabaseNow = React.useCallback(async () => {
+    if (!isSupabaseConnected()) return;
+    try {
+      const snap = await fetchAllAutoViralFromSupabase();
+
+      let delSet = new Set<string>(['camp-1', 'camp-2', 'camp-3']);
+      try {
+        const savedDel = localStorage.getItem('autoviral_deleted_campaign_ids');
+        if (savedDel) delSet = new Set(JSON.parse(savedDel));
+      } catch {}
+      if (Array.isArray(snap.deletedIds) && snap.deletedIds.length > 0) {
+        snap.deletedIds.forEach((id) => delSet.add(id));
+        setDeletedCampaignIds(new Set(delSet));
+        try {
+          localStorage.setItem('autoviral_deleted_campaign_ids', JSON.stringify(Array.from(delSet)));
+        } catch {}
+      }
+
+      const validCloud = (snap.campaigns || []).filter((c) => !delSet.has(c.id));
+      setCloudCampaignsCount(validCloud.length);
+      if (validCloud.length > 0) {
+        setCampaigns((prev) => {
+          const cloudMap = new Map(validCloud.map((c) => [c.id, c]));
+          const updatedPrev = prev
+            .filter((p) => !delSet.has(p.id))
+            .map((p) => {
+              const cl = cloudMap.get(p.id);
+              if (!cl) return p;
+              cloudMap.delete(p.id);
+              return cl;
+            });
+          const extraCloud = Array.from(cloudMap.values());
+          const merged = [...extraCloud, ...updatedPrev];
+          try {
+            localStorage.setItem('autoviral_campaigns', JSON.stringify(merged));
+          } catch {}
+          return merged;
+        });
+      }
+
+      if (snap.workspace) {
+        mergeWorkspaceIntoLocalStorage(snap.workspace);
+      }
+      if (snap.globalWorkspace) {
+        mergeGlobalWorkspaceIntoLocalStorage(snap.globalWorkspace);
+      }
+      if (Array.isArray(snap.customerLeads) && snap.customerLeads.length > 0) {
+        setCustomerLeads((prev) => {
+          const map = new Map<string, CustomerLead>();
+          snap.customerLeads!.forEach((l) => l?.id && map.set(l.id, l));
+          prev.forEach((l) => l?.id && !map.has(l.id) && map.set(l.id, l));
+          return Array.from(map.values());
+        });
+      }
+      if (Array.isArray(snap.trackingEvents) && snap.trackingEvents.length > 0) {
+        setTrackingEvents((prev) => {
+          const map = new Map<string, TrackingEvent>();
+          snap.trackingEvents!.forEach((e) => e?.id && map.set(e.id, e));
+          prev.forEach((e) => e?.id && !map.has(e.id) && map.set(e.id, e));
+          const merged = Array.from(map.values()).slice(0, 500);
+          try {
+            localStorage.setItem('autoviral_tracking_events', JSON.stringify(merged));
+          } catch {}
+          return merged;
+        });
+      }
+
+      setFirebaseQuotaExceeded(false);
+      setFirebaseSyncStatus('synced');
+    } catch (err) {
+      console.warn('Supabase sync notice:', err);
+      if (cloudProviderRef.current === 'supabase') {
+        setFirebaseSyncStatus('error');
+      }
+    }
+  }, [mergeWorkspaceIntoLocalStorage, mergeGlobalWorkspaceIntoLocalStorage]);
+
+  // 0. Listen to Cloud Provider switch (Supabase <-> Firebase) & poll Supabase when primary
   useEffect(() => {
+    cloudProviderRef.current = cloudProvider;
+    const onProviderChanged = (e: Event) => {
+      const next: CloudDbProvider = (e as CustomEvent)?.detail?.provider || getPrimaryCloudProvider();
+      cloudProviderRef.current = next;
+      setCloudProvider(next);
+      if (next === 'supabase') {
+        setFirebaseQuotaExceeded(false);
+        setFirebaseSyncStatus('synced');
+        syncWithSupabaseNow();
+      }
+    };
+    window.addEventListener('autoviral_db_provider_changed', onProviderChanged);
+
+    let supaPoll: ReturnType<typeof setInterval> | undefined;
+    if (cloudProvider === 'supabase') {
+      setFirebaseQuotaExceeded(false);
+      syncWithSupabaseNow();
+      supaPoll = setInterval(syncWithSupabaseNow, 30000);
+    }
+
+    return () => {
+      window.removeEventListener('autoviral_db_provider_changed', onProviderChanged);
+      if (supaPoll) clearInterval(supaPoll);
+    };
+  }, [cloudProvider, syncWithSupabaseNow]);
+
+  // 1. Subscribe to Firebase deleted campaign IDs (skipped when Supabase is primary)
+  useEffect(() => {
+    if (cloudProvider === 'supabase') return;
     const unsubDeleted = subscribeDeletedCampaignIds((ids) => {
       if (ids && ids.length > 0) {
         setDeletedCampaignIds(new Set(ids));
@@ -220,12 +440,14 @@ export default function App() {
       }
     });
     return () => unsubDeleted();
-  }, []);
+  }, [cloudProvider]);
 
-  // 2. Real-time Firebase Firestore campaigns listener (synchronizes all browsers & mobile devices)
+  // 2. Real-time Firebase Firestore campaigns listener (skipped when Supabase is primary)
   useEffect(() => {
+    if (cloudProvider === 'supabase') return;
     const unsubCampaigns = subscribeFirebaseCampaigns(
       (cloudCampaigns) => {
+        if (cloudProviderRef.current === 'supabase') return;
         setFirebaseSyncStatus('synced');
         setCloudCampaignsCount(cloudCampaigns?.length || 0);
         if (cloudCampaigns && cloudCampaigns.length > 0) {
@@ -259,12 +481,14 @@ export default function App() {
         }
       },
       (err) => {
+        if (cloudProviderRef.current === 'supabase') return;
         console.warn('Firebase campaigns sync notice:', err);
         setFirebaseSyncStatus('error');
       }
     );
 
     const onQuotaExceeded = () => {
+      if (cloudProviderRef.current === 'supabase') return;
       setFirebaseQuotaExceeded(true);
     };
     window.addEventListener('autoviral_firebase_quota_exceeded', onQuotaExceeded);
@@ -273,127 +497,22 @@ export default function App() {
       unsubCampaigns();
       window.removeEventListener('autoviral_firebase_quota_exceeded', onQuotaExceeded);
     };
-  }, [deletedCampaignIds]);
+  }, [deletedCampaignIds, cloudProvider]);
 
-  // 2b. Root-level Firebase Workspace Sync listener (guarantees mobile PWA receives groups/audiences/stories even on Dashboard)
+  // 2b. Root-level Firebase Workspace Sync listener (skipped when Supabase is primary)
   useEffect(() => {
-    const mergeWorkspaceIntoLocalStorage = (cloud: WorkspaceSyncData) => {
-      if (!cloud || typeof cloud !== 'object') return;
-      const safeRead = (k: string) => {
-        try {
-          const r = localStorage.getItem(k);
-          return r ? JSON.parse(r) : null;
-        } catch {
-          return null;
-        }
-      };
-      const safeWrite = (k: string, val: any) => {
-        try {
-          localStorage.setItem(k, JSON.stringify(val));
-        } catch {}
-      };
-
-      if (cloud.savedCopiesMap && typeof cloud.savedCopiesMap === 'object') {
-        const prev = safeRead('autoviral_saved_copies_v1') || {};
-        const next = { ...prev };
-        Object.entries(cloud.savedCopiesMap).forEach(([id, entry]: [string, any]) => {
-          if (!entry) return;
-          if (!next[id] || (entry.savedAt && (!next[id].savedAt || entry.savedAt > next[id].savedAt))) {
-            next[id] = entry;
-          }
-        });
-        safeWrite('autoviral_saved_copies_v1', next);
-      }
-
-      const mergeArrayByKey = (keys: string[], incoming: any[] | undefined, idKey: string) => {
-        if (!Array.isArray(incoming) || incoming.length === 0) return;
-        const existing: any[] = safeRead(keys[0]) || [];
-        const seen = new Set(existing.map((item) => String(item?.[idKey] || '').toLowerCase()).filter(Boolean));
-        const fresh = incoming.filter((item) => {
-          const k = String(item?.[idKey] || '').toLowerCase();
-          if (!k || seen.has(k)) return false;
-          seen.add(k);
-          return true;
-        });
-        if (fresh.length > 0) {
-          const combined = [...fresh, ...existing];
-          keys.forEach((k) => safeWrite(k, combined));
-        }
-      };
-
-      mergeArrayByKey(['autoviral_fb_audiences_v4', 'autoviral_fb_audiences_v3'], cloud.audiences, 'id');
-      mergeArrayByKey(['autoviral_fb_mapped_groups_v5_real', 'autoviral_fb_mapped_groups_v3'], cloud.mappedGroups, 'url');
-      mergeArrayByKey(['autoviral_yt_videos_v2'], cloud.youtubeVideos, 'url');
-      mergeArrayByKey(['autoviral_pinterest_pins_v1'], cloud.pinterestPins, 'id');
-      mergeArrayByKey(['autoviral_insta_campaigns_v1'], cloud.instaCampaigns, 'id');
-      mergeArrayByKey(['autoviral_insta_story_queue', 'autoviral_insta_story_queue_v2'], cloud.storyQueue, 'id');
-      mergeArrayByKey(['autoviral_insta_mapped_targets_v2'], cloud.mappedInstaTargets, 'handle');
-      mergeArrayByKey(['autoviral_custom_copy_presets_v1'], cloud.customCopyPresets, 'id');
-
-      if (cloud.whatsappX1Flows && typeof cloud.whatsappX1Flows === 'object') {
-        const prevFlows = safeRead('autoviral_whatsapp_x1_flows_v1') || {};
-        const nextFlows = { ...prevFlows };
-        Object.entries(cloud.whatsappX1Flows).forEach(([campId, flow]: [string, any]) => {
-          if (!flow) return;
-          if (!nextFlows[campId] || (flow.updatedAt && (!nextFlows[campId].updatedAt || flow.updatedAt > nextFlows[campId].updatedAt))) {
-            nextFlows[campId] = flow;
-          }
-        });
-        safeWrite('autoviral_whatsapp_x1_flows_v1', nextFlows);
-      }
-
-      window.dispatchEvent(new CustomEvent('autoviral_workspace_synced', { detail: cloud }));
-    };
-
+    if (cloudProvider === 'supabase') return;
     const unsubWs = subscribeWorkspaceSync(mergeWorkspaceIntoLocalStorage);
-
-    const mergeGlobalWorkspaceIntoLocalStorage = (cloud: GlobalWorkspaceSyncData) => {
-      if (!cloud || typeof cloud !== 'object') return;
-      const safeRead = (k: string) => {
-        try {
-          const r = localStorage.getItem(k);
-          return r ? JSON.parse(r) : null;
-        } catch {
-          return null;
-        }
-      };
-      const safeWrite = (k: string, val: any) => {
-        try {
-          localStorage.setItem(k, JSON.stringify(val));
-        } catch {}
-      };
-      const mergeArrayByKey = (key: string, incoming: any[] | undefined, idKey: string) => {
-        if (!Array.isArray(incoming) || incoming.length === 0) return;
-        const existing: any[] = safeRead(key) || [];
-        const seen = new Set(existing.map((item) => String(item?.[idKey] || '').toLowerCase()).filter(Boolean));
-        const fresh = incoming.filter((item) => {
-          const k = String(item?.[idKey] || '').toLowerCase();
-          if (!k || seen.has(k)) return false;
-          seen.add(k);
-          return true;
-        });
-        if (fresh.length > 0) {
-          safeWrite(key, [...fresh, ...existing]);
-        }
-      };
-
-      mergeArrayByKey('autoviral_global_audiences_v1', cloud.globalAudiences, 'id');
-      mergeArrayByKey('autoviral_global_audiences_trash_v1', cloud.globalTrashAudiences, 'id');
-      mergeArrayByKey('autoviral_global_fb_groups_v1', cloud.globalGroups, 'url');
-      mergeArrayByKey('autoviral_global_offers_v1', cloud.globalOffers, 'id');
-
-      window.dispatchEvent(new CustomEvent('autoviral_global_workspace_synced', { detail: cloud }));
-    };
-
     const unsubGlobalWs = subscribeGlobalWorkspaceSync(mergeGlobalWorkspaceIntoLocalStorage);
     return () => {
       unsubWs();
       unsubGlobalWs();
     };
-  }, []);
+  }, [cloudProvider, mergeWorkspaceIntoLocalStorage, mergeGlobalWorkspaceIntoLocalStorage]);
 
   // 2c. Discover archived/previous campaigns in Firebase settings so user can restore in 1 click if needed
   useEffect(() => {
+    if (cloudProvider === 'supabase') return;
     let active = true;
     const activeIds = campaigns.map((c) => c.id);
     fetchRecoverableArchivedCampaigns(activeIds)
@@ -404,18 +523,22 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [campaigns]);
+  }, [campaigns, cloudProvider]);
 
   // 3. Real-time Firebase Firestore tracking events listener + Server /api/tracking/events sync
   useEffect(() => {
-    const unsubTracking = subscribeTrackingEvents((cloudEvents) => {
-      if (cloudEvents && cloudEvents.length > 0) {
-        setTrackingEvents(cloudEvents);
-        try {
-          localStorage.setItem('autoviral_tracking_events', JSON.stringify(cloudEvents));
-        } catch {}
-      }
-    });
+    const unsubTracking =
+      cloudProvider === 'supabase'
+        ? () => {}
+        : subscribeTrackingEvents((cloudEvents) => {
+            if (cloudProviderRef.current === 'supabase') return;
+            if (cloudEvents && cloudEvents.length > 0) {
+              setTrackingEvents(cloudEvents);
+              try {
+                localStorage.setItem('autoviral_tracking_events', JSON.stringify(cloudEvents));
+              } catch {}
+            }
+          });
 
     const syncServerTrackingEvents = async () => {
       try {
@@ -445,18 +568,22 @@ export default function App() {
       unsubTracking();
       clearInterval(serverPoll);
     };
-  }, []);
+  }, [cloudProvider]);
 
   // 4. Real-time Firebase Firestore customer leads & WhatsApp buyers listener
   useEffect(() => {
-    const unsubCustomers = subscribeCustomerLeads(
-      (cloudCustomers) => {
-        if (cloudCustomers && cloudCustomers.length > 0) {
-          setCustomerLeads(cloudCustomers);
-        }
-      },
-      (err) => console.warn('Customer leads sync notice:', err)
-    );
+    const unsubCustomers =
+      cloudProvider === 'supabase'
+        ? () => {}
+        : subscribeCustomerLeads(
+            (cloudCustomers) => {
+              if (cloudProviderRef.current === 'supabase') return;
+              if (cloudCustomers && cloudCustomers.length > 0) {
+                setCustomerLeads(cloudCustomers);
+              }
+            },
+            (err) => console.warn('Customer leads sync notice:', err)
+          );
 
     // Initial load from backend API
     fetch('/api/customers')
@@ -474,7 +601,7 @@ export default function App() {
       .catch(() => {});
 
     return () => unsubCustomers();
-  }, []);
+  }, [cloudProvider]);
 
   // 5. Secondary fallback fetch from server backend and Supabase (non-destructive functional merge)
   useEffect(() => {
@@ -1251,8 +1378,26 @@ export default function App() {
   // Manual 2-way Cloud Sync (Desktop <-> Mobile)
   const handleForceCloudSync = async () => {
     setIsSyncingCloud(true);
-    resetFirebaseQuotaPause();
     setFirebaseQuotaExceeded(false);
+
+    if (getPrimaryCloudProvider() === 'supabase' && isSupabaseConnected()) {
+      try {
+        const pushRes = await pushLocalSnapshotToSupabase(campaigns, customerLeads);
+        await syncWithSupabaseNow();
+        if (!pushRes.ok && pushRes.missingStoreTable) {
+          setIsSupabaseModalOpen(true);
+        }
+        setFirebaseSyncStatus('synced');
+      } catch (err) {
+        console.warn('Manual Supabase sync error:', err);
+        setFirebaseSyncStatus('error');
+      } finally {
+        setIsSyncingCloud(false);
+      }
+      return;
+    }
+
+    resetFirebaseQuotaPause();
     try {
       const safeParse = (k: string) => {
         try {
@@ -1262,6 +1407,11 @@ export default function App() {
           return undefined;
         }
       };
+
+      // Also mirror snapshot to Supabase if connected
+      if (isSupabaseConnected()) {
+        pushLocalSnapshotToSupabase(campaigns, customerLeads).catch(console.warn);
+      }
 
       // 1. Push local workspace state to Firebase (deduplicated)
       const [wsRes, globalWsRes] = await Promise.all([
@@ -1528,6 +1678,7 @@ export default function App() {
         onResetAllMetrics={handleResetToRealMode}
         onOpenPWAInstall={() => setIsPWAInstallModalOpen(true)}
         firebaseSyncStatus={firebaseSyncStatus}
+        cloudProvider={cloudProvider}
         cloudCampaignsCount={cloudCampaignsCount || campaigns.length}
         isSyncingCloud={isSyncingCloud}
         onForceCloudSync={handleForceCloudSync}
@@ -1536,7 +1687,7 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6">
-        {firebaseQuotaExceeded && (
+        {firebaseQuotaExceeded && cloudProvider !== 'supabase' && (
           <div className="mb-5 rounded-2xl border border-amber-700/60 bg-amber-950/60 px-4 py-3 text-xs text-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="space-y-1">
               <p className="font-bold text-amber-300">
@@ -1830,6 +1981,7 @@ export default function App() {
         onClose={() => setIsSupabaseModalOpen(false)}
         campaigns={campaigns}
         trackingEvents={trackingEvents}
+        onSyncFromSupabase={syncWithSupabaseNow}
       />
 
       <VercelModal

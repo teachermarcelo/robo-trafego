@@ -138,6 +138,16 @@ export interface PushNotification {
   isReal?: boolean;
 }
 
+export type FacebookGroupMembershipStatus =
+  | 'mapped'
+  | 'join_requested'
+  | 'awaiting_admin'
+  | 'authorized'
+  | 'rejected'
+  | 'questions_pending'
+  | 'unavailable'
+  | 'rate_limited';
+
 export interface FacebookGroup {
   id: string;
   name: string;
@@ -156,6 +166,9 @@ export interface FacebookGroup {
   postsPerDay?: string;
   isVerifiedReal?: boolean;
   validationStatus?: 'verified' | 'pending' | 'needs_update';
+  membershipStatus?: FacebookGroupMembershipStatus;
+  membershipCheckedAt?: string;
+  membershipNote?: string;
 }
 
 export interface FacebookAudience {
@@ -163,6 +176,7 @@ export interface FacebookAudience {
   name: string;
   description: string;
   groupIds: string[];
+  groupUrls?: string[];
   groupsCount: number;
   estimatedMembers: number;
   niche: string;

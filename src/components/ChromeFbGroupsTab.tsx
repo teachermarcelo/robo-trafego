@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Share2,
   Download,
@@ -46,7 +46,11 @@ import {
   Sliders,
   Flame,
   Radio,
-  MessageCircle
+  MessageCircle,
+  Shuffle,
+  Square,
+  CheckSquare,
+  Send
 } from 'lucide-react';
 import JSZip from 'jszip';
 import { PWAInstallModal } from './PWAInstallModal';
@@ -58,6 +62,7 @@ import {
   Campaign,
   NicheType,
   FacebookGroup,
+  FacebookGroupMembershipStatus,
   FacebookAudience,
   FacebookPostLog,
   YouTubeTargetVideo,
@@ -83,6 +88,68 @@ import {
   loadManyChatOverrides,
   saveManyChatOverride,
 } from '../data/productBenefitsEngine';
+
+const BR_MEMBERSHIP_STATUS_META: Record<
+  FacebookGroupMembershipStatus,
+  { label: string; shortLabel: string; badgeClass: string; rowClass: string; bannerClass: string }
+> = {
+  authorized: {
+    label: '✅ ACEITO (Membro)',
+    shortLabel: '✅ Aceito',
+    badgeClass: 'bg-emerald-600 text-white border-emerald-400 shadow-sm shadow-emerald-950/60',
+    rowClass: 'border-l-4 border-l-emerald-500 bg-emerald-950/25 hover:bg-emerald-950/40',
+    bannerClass: 'bg-emerald-950/60 border-emerald-500/60 text-emerald-100',
+  },
+  awaiting_admin: {
+    label: '⏳ PENDENTE ADMIN',
+    shortLabel: '⏳ Pendente',
+    badgeClass: 'bg-amber-500 text-slate-950 font-bold border-amber-300 shadow-sm shadow-amber-950/50',
+    rowClass: 'border-l-4 border-l-amber-400 bg-amber-950/25 hover:bg-amber-950/40',
+    bannerClass: 'bg-amber-950/50 border-amber-500/60 text-amber-100',
+  },
+  join_requested: {
+    label: '📩 SOLICITANDO...',
+    shortLabel: '📩 Enviando',
+    badgeClass: 'bg-sky-600 text-white border-sky-400 shadow-sm',
+    rowClass: 'border-l-4 border-l-sky-400 bg-sky-950/25 hover:bg-sky-950/35',
+    bannerClass: 'bg-sky-950/50 border-sky-500/60 text-sky-100',
+  },
+  questions_pending: {
+    label: '📝 PERGUNTAS ADMIN',
+    shortLabel: '📝 Perguntas',
+    badgeClass: 'bg-violet-600 text-white border-violet-400 shadow-sm',
+    rowClass: 'border-l-4 border-l-violet-500 bg-violet-950/25 hover:bg-violet-950/40',
+    bannerClass: 'bg-violet-950/50 border-violet-500/60 text-violet-100',
+  },
+  rate_limited: {
+    label: '🛡️ BLOQUEADO FB',
+    shortLabel: '🛡️ Bloqueado FB',
+    badgeClass: 'bg-red-600 text-white font-bold border-red-400 shadow-sm shadow-red-950/60',
+    rowClass: 'border-l-4 border-l-red-500 bg-red-950/35 hover:bg-red-950/45',
+    bannerClass: 'bg-red-950/70 border-red-500 text-red-100',
+  },
+  rejected: {
+    label: '❌ RECUSADO / NÃO ENTROU',
+    shortLabel: '❌ Recusado',
+    badgeClass: 'bg-rose-600 text-white border-rose-400 shadow-sm',
+    rowClass: 'border-l-4 border-l-rose-500 bg-rose-950/25 hover:bg-rose-950/35',
+    bannerClass: 'bg-rose-950/60 border-rose-500/60 text-rose-100',
+  },
+  unavailable: {
+    label: '🚫 INDISPONÍVEL',
+    shortLabel: '🚫 Indisp.',
+    badgeClass: 'bg-slate-700 text-slate-100 border-slate-500',
+    rowClass: 'border-l-4 border-l-slate-500 bg-slate-900/70 hover:bg-slate-900',
+    bannerClass: 'bg-slate-900 border-slate-600 text-slate-200',
+  },
+  mapped: {
+    label: '🔵 NOVO (Não Solicitado)',
+    shortLabel: '🔵 Novo',
+    badgeClass: 'bg-blue-900/90 text-blue-100 border-blue-500/70',
+    rowClass: 'border-l-4 border-l-blue-500/80 bg-slate-950 hover:bg-slate-900/80',
+    bannerClass: 'bg-blue-950/50 border-blue-500/50 text-blue-100',
+  },
+};
 
 export interface CopyTemplateItem {
   id: string;
@@ -478,6 +545,48 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       localStorage.setItem('autoviral_fb_auto_join_post', String(autoJoinAndPostEnabled));
     } catch {}
   }, [autoJoinAndPostEnabled]);
+  const [silentBackgroundMode, setSilentBackgroundMode] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('autoviral_br_silent_mode');
+      return saved === null ? true : saved === 'true';
+    } catch {
+      return true;
+    }
+  });
+  const [dispatchQueueOnlyAuthorized, setDispatchQueueOnlyAuthorized] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('autoviral_br_only_authorized') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [mergeAudienceIds, setMergeAudienceIds] = useState<string[]>([]);
+  const [mergeNewName, setMergeNewName] = useState<string>('');
+  const [mergeNewDesc, setMergeNewDesc] = useState<string>('');
+  const [mergeReplaceOriginals, setMergeReplaceOriginals] = useState<boolean>(false);
+  const [brStageFilter, setBrStageFilter] = useState<
+    'all' | 'authorized' | 'awaiting' | 'blocked' | 'questions' | 'rejected' | 'mapped'
+  >('all');
+  const [brBatchJoinCountInput, setBrBatchJoinCountInput] = useState<number>(15);
+  const [brBatchJoinDelaySec, setBrBatchJoinDelaySec] = useState<number>(12);
+  const [isBrBatchJoinRunning, setIsBrBatchJoinRunning] = useState<boolean>(false);
+  const [brBatchJoinProgress, setBrBatchJoinProgress] = useState<{ current: number; total: number; currentGroupName: string } | null>(null);
+  const [brLastStage1Response, setBrLastStage1Response] = useState<{
+    groupName: string;
+    status: FacebookGroupMembershipStatus;
+    note: string;
+    checkedAt: string;
+  } | null>(null);
+  const brBatchJoinTimerRef = useRef<number | null>(null);
+  const [isBrVerifyingMemberships, setIsBrVerifyingMemberships] = useState<boolean>(false);
+  const [brVerifyProgress, setBrVerifyProgress] = useState<{
+    checked: number;
+    total: number;
+    authorizedCount: number;
+    awaitingCount: number;
+    rejectedCount: number;
+    otherCount: number;
+  } | null>(null);
   const [lastOpenedPostLog, setLastOpenedPostLog] = useState<{ logId: string; groupName: string; groupUrl: string } | null>(null);
   const [manyChatOverridesMap, setManyChatOverridesMap] = useState<Record<string, any>>(() => loadManyChatOverrides());
   const [manyChatSavedBanner, setManyChatSavedBanner] = useState<string | null>(null);
@@ -646,6 +755,37 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
     } catch {}
     return 'aud-renda-extra-73';
   });
+
+  const resolveBrazilAudienceGroups = (aud: FacebookAudience | undefined | null, groups: FacebookGroup[]): FacebookGroup[] => {
+    if (!aud) return [];
+    const idSet = new Set(Array.isArray(aud.groupIds) ? aud.groupIds : []);
+    const slugSet = new Set(
+      (Array.isArray(aud.groupUrls) ? aud.groupUrls : []).map((u) => normalizeFbGroupSlug(u)).filter(Boolean)
+    );
+    const seenSlugs = new Set<string>();
+    const result: FacebookGroup[] = [];
+    for (const g of groups) {
+      const slug = normalizeFbGroupSlug(g.url);
+      if (idSet.has(g.id) || (slug && slugSet.has(slug))) {
+        const dedupKey = slug || g.id;
+        if (!seenSlugs.has(dedupKey)) {
+          seenSlugs.add(dedupKey);
+          result.push(g);
+        }
+      }
+    }
+    return result;
+  };
+
+  const activeBrazilAudience = useMemo(
+    () => audiences.find((a) => a.id === selectedAudienceId) || audiences[0] || null,
+    [audiences, selectedAudienceId]
+  );
+
+  const activeBrazilAudienceGroups = useMemo(
+    () => resolveBrazilAudienceGroups(activeBrazilAudience, mappedGroups),
+    [activeBrazilAudience, mappedGroups]
+  );
 
   // Create Audience Modal
   const [isAudienceModalOpen, setIsAudienceModalOpen] = useState(false);
@@ -1922,9 +2062,110 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
           refreshInstaCount();
         } else if (ev.data && ev.data.action === 'AUTOVIRAL_FB_POST_RESULT') {
           applyRealPostResultFromExtension(ev.data);
+        } else if (ev.data && ev.data.action === 'AUTOVIRAL_GROUP_MEMBERSHIP_RESULT') {
+          applyBrazilMembershipUpdate(ev.data);
+        } else if (ev.data && ev.data.action === 'AUTOVIRAL_MEMBERSHIP_BATCH_PROGRESS') {
+          handleBrMembershipBatchProgress({ detail: ev.data });
         }
       };
     } catch (e) {}
+
+    const applyBrazilMembershipUpdate = (payload: any) => {
+      if (!payload || !payload.membershipStatus) return;
+      const { groupId, groupUrl, groupName, membershipStatus, note } = payload;
+      const cleanSlug = normalizeFbGroupSlug(groupUrl || '');
+      const checkedNow = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      const typedStatus = membershipStatus as FacebookGroupMembershipStatus;
+
+      let matchedAny = false;
+      let resolvedName = sanitizeFbGroupName(groupName || '');
+      setMappedGroups((prev) =>
+        prev.map((g) => {
+          const gSlug = normalizeFbGroupSlug(g.url || '');
+          const matched = (groupId && g.id === groupId) || (cleanSlug && gSlug === cleanSlug) || (groupUrl && g.url === groupUrl);
+          if (!matched) return g;
+          matchedAny = true;
+          if (!resolvedName) resolvedName = sanitizeFbGroupName(g.name);
+          return {
+            ...g,
+            membershipStatus: typedStatus,
+            membershipCheckedAt: checkedNow,
+            membershipNote: note || '',
+          };
+        })
+      );
+
+      if (matchedAny || groupId || groupUrl) {
+        setBrLastStage1Response({
+          groupName: resolvedName || cleanSlug || 'Grupo Facebook',
+          status: typedStatus,
+          note: note || BR_MEMBERSHIP_STATUS_META[typedStatus]?.label || '',
+          checkedAt: checkedNow,
+        });
+      }
+
+      if (typedStatus === 'rate_limited') {
+        if (brBatchJoinTimerRef.current) {
+          window.clearTimeout(brBatchJoinTimerRef.current);
+          brBatchJoinTimerRef.current = null;
+        }
+        setIsBrBatchJoinRunning(false);
+        setBrBatchJoinProgress(null);
+        setExtensionSyncBanner({
+          message: `🛡️ BLOQUEIO DETECTADO NO FACEBOOK (${resolvedName || 'Grupo'}): envio de solicitações no Brasil pausado automaticamente para proteger sua conta!`,
+          tone: 'warning',
+        });
+      }
+    };
+
+    const handleBrMembershipResultEv = (ev: any) => {
+      applyBrazilMembershipUpdate(ev?.detail);
+    };
+
+    const handleBrMembershipBatchProgress = (ev: any) => {
+      const d = ev?.detail;
+      if (!d) return;
+      if (d.groupId || d.groupUrl) {
+        applyBrazilMembershipUpdate(d);
+      }
+      setBrVerifyProgress({
+        checked: Number(d.checked) || 0,
+        total: Number(d.total) || 0,
+        authorizedCount: Number(d.authorizedCount) || 0,
+        awaitingCount: Number(d.awaitingCount) || 0,
+        rejectedCount: Number(d.rejectedCount) || 0,
+        otherCount: Number(d.otherCount) || 0,
+      });
+      if (d.done) {
+        setIsBrVerifyingMemberships(false);
+        if (d.rateLimited) {
+          setExtensionSyncBanner({
+            message: `🛡️ Verificação pausada por proteção anti-bloqueio do Facebook (${d.checked}/${d.total} verificados). Aguarde alguns minutos para continuar.`,
+            tone: 'warning',
+          });
+        } else {
+          setExtensionSyncBanner({
+            message: `✅ Conferência concluída (${d.checked}/${d.total}): ✅ ${d.authorizedCount || 0} Aceitos | ⏳ ${d.awaitingCount || 0} Pendentes | ❌ ${d.rejectedCount || 0} Recusados.`,
+            tone: 'success',
+          });
+        }
+      }
+    };
+
+    const handleBrMembershipBatchDone = (ev: any) => {
+      const d = ev?.detail;
+      setIsBrVerifyingMemberships(false);
+      if (d && d.ok && d.total > 0) {
+        setBrVerifyProgress({
+          checked: Number(d.checked) || 0,
+          total: Number(d.total) || 0,
+          authorizedCount: Number(d.authorizedCount) || 0,
+          awaitingCount: Number(d.awaitingCount) || 0,
+          rejectedCount: Number(d.rejectedCount) || 0,
+          otherCount: Number(d.otherCount) || 0,
+        });
+      }
+    };
 
     const applyRealPostResultFromExtension = (payload: any) => {
       if (!payload) return;
@@ -1932,6 +2173,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       const { logId, groupId, groupUrl, groupName, approvalStatus, note } = payload;
       const now = new Date();
       const formattedNow = `${now.toLocaleDateString('pt-BR')} ${now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
+      const checkedNow = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
       const normalizedStatus: FacebookPostLog['approvalStatus'] =
         approvalStatus === 'published' ||
         approvalStatus === 'awaiting_admin' ||
@@ -1980,31 +2222,52 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
         return [created, ...prev];
       });
 
-      if (normalizedStatus === 'unavailable') {
+      // Sync membershipStatus cleanly inside mappedGroups WITHOUT deleting any existing group
+      if (groupId || groupUrl) {
         const targetSlug = normalizeFbGroupSlug(groupUrl || '');
-        const isTargetGroup = (g: FacebookGroup) =>
-          (groupId && g.id === groupId) ||
-          (targetSlug && normalizeFbGroupSlug(g.url) === targetSlug);
+        const derivedStatus: FacebookGroupMembershipStatus | null =
+          normalizedStatus === 'published' || normalizedStatus === 'awaiting_admin'
+            ? 'authorized'
+            : normalizedStatus === 'join_requested'
+            ? 'awaiting_admin'
+            : normalizedStatus === 'not_member'
+            ? 'rejected'
+            : normalizedStatus === 'rate_limited'
+            ? 'rate_limited'
+            : normalizedStatus === 'unavailable'
+            ? 'unavailable'
+            : null;
+        if (derivedStatus) {
+          setMappedGroups((prev) =>
+            prev.map((g) => {
+              const gSlug = normalizeFbGroupSlug(g.url || '');
+              const matched = (groupId && g.id === groupId) || (targetSlug && gSlug === targetSlug) || (groupUrl && g.url === groupUrl);
+              return matched
+                ? {
+                    ...g,
+                    membershipStatus: derivedStatus,
+                    membershipCheckedAt: checkedNow,
+                    membershipNote: note || BR_MEMBERSHIP_STATUS_META[derivedStatus]?.label || '',
+                  }
+                : g;
+            })
+          );
+        }
+      }
 
-        setSelectedGroupIds(prev => prev.filter(id => {
-          if (groupId && id === groupId) return false;
-          const grpObj = mappedGroups.find(m => m.id === id);
-          return grpObj ? !isTargetGroup(grpObj) : true;
-        }));
-        setMappedGroups(prev => {
-          const filtered = prev.filter(g => !isTargetGroup(g));
-          try {
-            localStorage.setItem('autoviral_fb_mapped_groups_v5_real', JSON.stringify(filtered));
-          } catch {}
-          return filtered;
-        });
+      if (normalizedStatus === 'unavailable') {
         setExtensionSyncBanner({
-          message: `🚫 Grupo "${groupName || 'Facebook'}" está indisponível ou foi excluído ("Este conteúdo não está disponível no momento"). Removido automaticamente da fila para o robô seguir apenas nos grupos ativos!`,
+          message: `🚫 Grupo "${groupName || 'Facebook'}" marcou conteúdo indisponível ("Este conteúdo não está disponível no momento"). Marcado como Indisponível e preservado na sua lista!`,
           tone: 'warning'
         });
       } else if (normalizedStatus === 'rate_limited') {
         globalBotRunner.stop();
         setIsBotRunning(false);
+        if (brBatchJoinTimerRef.current) {
+          window.clearTimeout(brBatchJoinTimerRef.current);
+          brBatchJoinTimerRef.current = null;
+        }
+        setIsBrBatchJoinRunning(false);
         setDefensePlatform('Facebook');
         setDefenseTriggerReason('Facebook exibiu: "Você não pode usar este recurso no momento" (Limite temporário de frequência)');
         setIsDefenseModalOpen(true);
@@ -2019,7 +2282,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
         });
       } else if (normalizedStatus === 'not_member') {
         setExtensionSyncBanner({
-          message: `⚠️ Grupo "${groupName || 'Facebook'}" ainda precisa de entrada. Clique em "🔄 Entrar / Postar Agora" para a extensão v1.4.0 solicitar entrada e postar automaticamente.`,
+          message: `⚠️ Grupo "${groupName || 'Facebook'}" ainda precisa de entrada. Use a Etapa 1 (Pedir Entrada) ou clique em "🔄 Entrar / Postar Agora".`,
           tone: 'warning'
         });
       } else if (normalizedStatus === 'composer_stuck') {
@@ -2048,6 +2311,9 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
     window.addEventListener('autoviral_extension_youtube_videos_received', handleExtensionYtVideos);
     window.addEventListener('autoviral_extension_instagram_accounts_received', refreshInstaCount);
     window.addEventListener('autoviral_fb_post_result', handleExtensionPostResult);
+    window.addEventListener('autoviral_group_membership_result', handleBrMembershipResultEv);
+    window.addEventListener('autoviral_membership_batch_progress', handleBrMembershipBatchProgress);
+    window.addEventListener('autoviral_membership_batch_done', handleBrMembershipBatchDone);
 
     const handleExtensionReset = () => {
       setMappedGroups([]);
@@ -2069,10 +2335,16 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       if (bc) {
         try { bc.close(); } catch (err) {}
       }
+      if (brBatchJoinTimerRef.current) {
+        window.clearTimeout(brBatchJoinTimerRef.current);
+      }
       window.removeEventListener('autoviral_extension_groups_received', handleExtensionGroups);
       window.removeEventListener('autoviral_extension_youtube_videos_received', handleExtensionYtVideos);
       window.removeEventListener('autoviral_extension_instagram_accounts_received', refreshInstaCount);
       window.removeEventListener('autoviral_fb_post_result', handleExtensionPostResult);
+      window.removeEventListener('autoviral_group_membership_result', handleBrMembershipResultEv);
+      window.removeEventListener('autoviral_membership_batch_progress', handleBrMembershipBatchProgress);
+      window.removeEventListener('autoviral_membership_batch_done', handleBrMembershipBatchDone);
       window.removeEventListener('autoviral_extension_groups_reset', handleExtensionReset);
     };
   }, []);
@@ -2089,12 +2361,17 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       return;
     }
 
-    const targetGroups = mappedGroups.filter(g => selectedGroupIds.includes(g.id));
+    let targetGroups = mappedGroups.filter(g => selectedGroupIds.includes(g.id));
+    if (dispatchQueueOnlyAuthorized) {
+      targetGroups = targetGroups.filter(g => g.membershipStatus === 'authorized');
+    }
     if (targetGroups.length === 0) {
       globalBotRunner.stop();
       setIsBotRunning(false);
       setExtensionSyncBanner({
-        message: '⚠️ Selecione pelo menos 1 grupo na aba "Grupos Mapeados" antes de iniciar.',
+        message: dispatchQueueOnlyAuthorized
+          ? '⚠️ Nenhum grupo marcado como "✅ Aceito (Membro)" na fila atual. Confirme entradas em "Públicos Salvos" ou volte a fila para "Todos do Público".'
+          : '⚠️ Selecione pelo menos 1 grupo na aba "Grupos Mapeados" antes de iniciar.',
         tone: 'warning'
       });
       return;
@@ -2152,7 +2429,8 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
           groupUrl: currentGroup.url,
           groupName: currentGroup.name,
           fullText,
-          autoJoinAndPost: autoJoinAndPostEnabled
+          autoJoinAndPost: autoJoinAndPostEnabled,
+          silentMode: silentBackgroundMode
         },
         '*'
       );
@@ -2160,7 +2438,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
 
     setExtensionSyncBanner({
       message: autoJoinAndPostEnabled
-        ? `🤖 Grupo "${currentGroup.name}" aberto! A Extensão v1.4.0 vai solicitar entrada (se precisar) e postar automaticamente.`
+        ? `🤖 Grupo "${currentGroup.name}" aberto${silentBackgroundMode ? ' silenciosamente em 2º plano' : ''}! A Extensão v1.5.4 vai solicitar entrada (se precisar) e postar automaticamente.`
         : `📋 Texto copiado! Grupo "${currentGroup.name}" aberto para postagem manual assistida.`,
       tone: 'success'
     });
@@ -2197,16 +2475,311 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
           groupUrl: log.groupUrl,
           groupName: log.groupName,
           fullText,
-          autoJoinAndPost: true
+          autoJoinAndPost: true,
+          silentMode: silentBackgroundMode
         },
         '*'
       );
     } catch {}
 
     setExtensionSyncBanner({
-      message: `🔄 Reabrindo "${log.groupName}" para verificar aprovação e finalizar a postagem automaticamente!`,
+      message: `🔄 Reabrindo "${log.groupName}"${silentBackgroundMode ? ' em 2º plano' : ''} para verificar aprovação e finalizar a postagem automaticamente!`,
       tone: 'success'
     });
+  };
+
+  // Merge, Split & Funnel Stage 1+2 handlers (100% additive, preserving all existing audiences & groups)
+  const toggleSelectBrazilAudienceForMerge = (audId: string) => {
+    setMergeAudienceIds((prev) => {
+      const next = prev.includes(audId) ? prev.filter((id) => id !== audId) : [...prev, audId];
+      if (next.length >= 2) {
+        const names = next
+          .map((id) => audiences.find((a) => a.id === id)?.name)
+          .filter(Boolean)
+          .slice(0, 3);
+        setMergeNewName((curr) => (curr.trim() ? curr : `${names.join(' + ')} (Unificado)`));
+      } else if (next.length < 2) {
+        setMergeNewName('');
+      }
+      return next;
+    });
+  };
+
+  const handleMergeBrazilAudiences = () => {
+    const selected = audiences.filter((a) => mergeAudienceIds.includes(a.id));
+    if (selected.length < 2) {
+      setExtensionSyncBanner({ message: 'Marque pelo menos 2 públicos salvos para fundir.', tone: 'warning' });
+      return;
+    }
+
+    const dedupMap = new Map<string, FacebookGroup>();
+    selected.forEach((aud) => {
+      resolveBrazilAudienceGroups(aud, mappedGroups).forEach((g) => {
+        const key = normalizeFbGroupSlug(g.url) || g.id;
+        if (key && !dedupMap.has(key)) {
+          dedupMap.set(key, g);
+        }
+      });
+    });
+
+    const unifiedGroups = Array.from(dedupMap.values());
+    if (unifiedGroups.length === 0) {
+      setExtensionSyncBanner({ message: 'Os públicos selecionados não possuem grupos correspondentes para fundir.', tone: 'warning' });
+      return;
+    }
+
+    const totalMembers = unifiedGroups.reduce((acc, g) => acc + (g.membersCount || 0), 0);
+    const primary = selected[0];
+    const finalName = mergeNewName.trim() || `${selected.map((s) => s.name).slice(0, 2).join(' + ')} (${unifiedGroups.length})`;
+    const newId = `aud-merged-${Date.now()}`;
+    const newAud: FacebookAudience = {
+      id: newId,
+      name: finalName,
+      description:
+        mergeNewDesc.trim() ||
+        `União de ${selected.length} públicos (${unifiedGroups.length} grupos únicos preservados).`,
+      groupIds: unifiedGroups.map((g) => g.id),
+      groupUrls: unifiedGroups.map((g) => g.url),
+      groupsCount: unifiedGroups.length,
+      estimatedMembers: totalMembers,
+      niche: primary.niche || 'Brasil Unificado',
+      targetProductId: primary.targetProductId || selectedProductId,
+      createdAt: new Date().toLocaleDateString('pt-BR'),
+      lastUsedAt: 'Agora mesmo',
+      campaignUsageCount: 1,
+      groupNamesPreview: unifiedGroups.slice(0, 5).map((g) => g.name),
+    };
+
+    const openCnt = unifiedGroups.filter((g) => g.membershipStatus === 'authorized').length;
+    const closedCnt = unifiedGroups.filter(
+      (g) => g.membershipStatus !== 'authorized' && g.membershipStatus !== 'unavailable'
+    ).length;
+
+    setAudiences((prev) => {
+      const remaining = mergeReplaceOriginals ? prev.filter((a) => !mergeAudienceIds.includes(a.id)) : prev;
+      return [newAud, ...remaining];
+    });
+    setSelectedAudienceId(newId);
+    setSelectedGroupIds(unifiedGroups.map((g) => g.id));
+    setMergeAudienceIds([]);
+    setMergeNewName('');
+    setMergeNewDesc('');
+    setExtensionSyncBanner({
+      message: `🔀 Público "${finalName}" criado com ${unifiedGroups.length} grupos únicos preservados (✅ ${openCnt} abertos · 🔒 ${closedCnt} fechados)!`,
+      tone: 'success',
+    });
+  };
+
+  const handleSplitBrazilAudienceByStatus = (aud: FacebookAudience, mode: 'open_only' | 'closed_only') => {
+    const matched = resolveBrazilAudienceGroups(aud, mappedGroups);
+    const filtered =
+      mode === 'open_only'
+        ? matched.filter((g) => g.membershipStatus === 'authorized')
+        : matched.filter((g) => g.membershipStatus !== 'authorized' && g.membershipStatus !== 'unavailable');
+
+    if (filtered.length === 0) {
+      setExtensionSyncBanner({
+        message:
+          mode === 'open_only'
+            ? `O público "${aud.name}" ainda não tem grupos ✅ Aceitos/Abertos para separar.`
+            : `O público "${aud.name}" não tem grupos 🔒 Fechados/Pendentes restantes.`,
+        tone: 'warning',
+      });
+      return;
+    }
+
+    const baseName = aud.name.replace(/\s*·\s*(✅ Abertos|🔒 Fechados).*$/i, '').trim();
+    const newName =
+      mode === 'open_only'
+        ? `${baseName} · ✅ Abertos (${filtered.length})`
+        : `${baseName} · 🔒 Fechados (${filtered.length})`;
+    const totalMembers = filtered.reduce((acc, g) => acc + (g.membersCount || 0), 0);
+    const newId = `aud-split-${Date.now()}`;
+    const splitAud: FacebookAudience = {
+      id: newId,
+      name: newName,
+      description:
+        mode === 'open_only'
+          ? `Grupos já aceitos/abertos extraídos de "${aud.name}" (${filtered.length} grupos).`
+          : `Grupos ainda fechados/pendentes extraídos de "${aud.name}" para pedir entrada (${filtered.length} grupos).`,
+      groupIds: filtered.map((g) => g.id),
+      groupUrls: filtered.map((g) => g.url),
+      groupsCount: filtered.length,
+      estimatedMembers: totalMembers,
+      niche: aud.niche,
+      targetProductId: aud.targetProductId || selectedProductId,
+      createdAt: new Date().toLocaleDateString('pt-BR'),
+      lastUsedAt: 'Agora mesmo',
+      campaignUsageCount: 1,
+      groupNamesPreview: filtered.slice(0, 5).map((g) => g.name),
+    };
+
+    setAudiences((prev) => [splitAud, ...prev]);
+    setSelectedAudienceId(newId);
+    setSelectedGroupIds(filtered.map((g) => g.id));
+    setExtensionSyncBanner({
+      message: `✂️ Novo público "${newName}" separado com ${filtered.length} grupos (público original 100% preservado)!`,
+      tone: 'success',
+    });
+  };
+
+  const handleStopBrazilBatchJoin = () => {
+    if (brBatchJoinTimerRef.current) {
+      window.clearTimeout(brBatchJoinTimerRef.current);
+      brBatchJoinTimerRef.current = null;
+    }
+    setIsBrBatchJoinRunning(false);
+    setExtensionSyncBanner({
+      message: '⏸️ Etapa 1 (Solicitar Entrada em Lote no Brasil) pausada.',
+      tone: 'warning',
+    });
+  };
+
+  const handleStartBrazilBatchJoin = (limitOverride?: number) => {
+    const candidates = activeBrazilAudienceGroups.filter(
+      (g) =>
+        !g.membershipStatus ||
+        g.membershipStatus === 'mapped' ||
+        g.membershipStatus === 'rejected' ||
+        g.membershipStatus === 'rate_limited'
+    );
+    if (candidates.length === 0) {
+      setExtensionSyncBanner({
+        message: 'Todos os grupos disponíveis deste público já tiveram entrada solicitada, têm perguntas ou estão aceitos!',
+        tone: 'success',
+      });
+      return;
+    }
+    const maxCount = Math.max(1, Math.min(limitOverride ?? brBatchJoinCountInput, candidates.length));
+    const slice = candidates.slice(0, maxCount);
+
+    if (brBatchJoinTimerRef.current) {
+      window.clearTimeout(brBatchJoinTimerRef.current);
+      brBatchJoinTimerRef.current = null;
+    }
+
+    setIsBrBatchJoinRunning(true);
+    setBrLastStage1Response(null);
+    let idx = 0;
+
+    const runStep = () => {
+      if (idx >= slice.length) {
+        setIsBrBatchJoinRunning(false);
+        setBrBatchJoinProgress(null);
+        setExtensionSyncBanner({
+          message: `✅ Etapa 1 concluída! ${slice.length} grupos verificados. Veja os status coloridos ou clique em "Confirmar Pendentes Agora".`,
+          tone: 'success',
+        });
+        return;
+      }
+
+      const grp = slice[idx];
+      const cleanName = sanitizeFbGroupName(grp.name);
+      setBrBatchJoinProgress({ current: idx + 1, total: slice.length, currentGroupName: cleanName });
+
+      setMappedGroups((prev) =>
+        prev.map((item) =>
+          item.id === grp.id
+            ? {
+                ...item,
+                membershipStatus: 'join_requested',
+                membershipCheckedAt: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+                membershipNote: '📩 Abrindo grupo — aguardando resposta real do Facebook...',
+              }
+            : item
+        )
+      );
+
+      try {
+        window.postMessage(
+          {
+            type: 'AUTOVIRAL_OPEN_GROUP_FOR_POST',
+            logId: `br-join-${Date.now()}-${idx}`,
+            groupId: grp.id,
+            groupUrl: grp.url,
+            groupName: cleanName,
+            fullText: '',
+            imageDataUrl: '',
+            autoJoinAndPost: true,
+            joinOnly: true,
+            silentMode: silentBackgroundMode,
+          },
+          '*'
+        );
+      } catch {}
+
+      idx++;
+      if (idx < slice.length) {
+        brBatchJoinTimerRef.current = window.setTimeout(runStep, Math.max(8, brBatchJoinDelaySec) * 1000);
+      } else {
+        brBatchJoinTimerRef.current = window.setTimeout(() => {
+          setIsBrBatchJoinRunning(false);
+          setBrBatchJoinProgress(null);
+          setExtensionSyncBanner({
+            message: `✅ Etapa 1 concluída! ${slice.length} grupos processados. Clique em "Confirmar Pendentes Agora" para separar os aceitos.`,
+            tone: 'success',
+          });
+        }, 5000);
+      }
+    };
+
+    runStep();
+  };
+
+  const handleStartBrazilVerifyMemberships = (onlyPending = true) => {
+    const targets = onlyPending
+      ? activeBrazilAudienceGroups.filter((g) => g.membershipStatus !== 'authorized' && g.membershipStatus !== 'unavailable')
+      : activeBrazilAudienceGroups;
+
+    if (targets.length === 0) {
+      setExtensionSyncBanner({
+        message: 'Todos os grupos deste público já estão marcados como "✅ Aceitos"!',
+        tone: 'success',
+      });
+      return;
+    }
+
+    setIsBrVerifyingMemberships(true);
+    setBrVerifyProgress({
+      checked: 0,
+      total: targets.length,
+      authorizedCount: 0,
+      awaitingCount: 0,
+      rejectedCount: 0,
+      otherCount: 0,
+    });
+
+    try {
+      window.postMessage(
+        {
+          type: 'AUTOVIRAL_VERIFY_MEMBERSHIPS_BATCH',
+          batchId: `br-batch-${Date.now()}`,
+          groups: targets.map((g) => ({ id: g.id, url: g.url, name: sanitizeFbGroupName(g.name) })),
+        },
+        '*'
+      );
+      setExtensionSyncBanner({
+        message: `🔄 Etapa 2 iniciada: verificando em segundo plano se ${targets.length} grupos já estão aceitos no Facebook...`,
+        tone: 'success',
+      });
+    } catch {
+      setIsBrVerifyingMemberships(false);
+    }
+
+    window.setTimeout(() => {
+      setIsBrVerifyingMemberships((still) => still && false);
+    }, targets.length * 2200 + 8000);
+  };
+
+  const handleManualSetBrazilGroupMembership = (groupId: string, nextStatus: FacebookGroupMembershipStatus) => {
+    const checkedNow = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    setMappedGroups((prev) =>
+      prev.map((g) =>
+        g.id === groupId
+          ? { ...g, membershipStatus: nextStatus, membershipCheckedAt: checkedNow, membershipNote: 'Definido manualmente' }
+          : g
+      )
+    );
   };
 
   // Toggle Bot Execution with Background Persistence
@@ -3715,45 +4288,156 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
         </div>
       )}
 
-      {/* SUBTAB 2: SAVED AUDIENCES DISPLAY & REUSE LIBRARY */}
+      {/* SUBTAB 2: SAVED AUDIENCES DISPLAY, MERGE/SPLIT & STAGED ENTRY FUNNEL */}
       {activeSubTab === 'audiences' && (
         <div className="space-y-6">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
             <div>
               <h2 className="text-lg font-bold text-white flex items-center gap-2">
                 <Users className="w-5 h-5 text-indigo-400" />
-                Biblioteca de Públicos Salvos (Visualização &amp; Reutilização)
+                Biblioteca de Públicos Salvos (Visualização, Fusão &amp; Entrada)
               </h2>
               <p className="text-xs text-slate-400">
-                Visualize os públicos criados a partir dos grupos mapeados. Reutilize qualquer público salvo com 1 clique no Robô Divulgador!
+                Visualize abertos vs fechados, marque 2+ públicos para <strong className="text-cyan-300">fundir &amp; recriar</strong> ou solicite entrada em lote no Funil abaixo sem perder nenhum grupo!
               </p>
             </div>
 
-            <button
-              onClick={() => setIsAudienceModalOpen(true)}
-              className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs sm:text-sm flex items-center gap-2 transition cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              + Criar Novo Público com Grupos Selecionados
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              {mergeAudienceIds.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMergeAudienceIds([]);
+                    setMergeNewName('');
+                  }}
+                  className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl cursor-pointer"
+                >
+                  Limpar Seleção ({mergeAudienceIds.length})
+                </button>
+              )}
+              <button
+                onClick={() => setIsAudienceModalOpen(true)}
+                className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs sm:text-sm flex items-center gap-2 transition cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                + Criar Novo Público com Grupos Selecionados
+              </button>
+            </div>
           </div>
+
+          {/* Merge & Recreate Panel when 2+ saved audiences are checked */}
+          {mergeAudienceIds.length >= 2 && (() => {
+            const selectedList = audiences.filter((a) => mergeAudienceIds.includes(a.id));
+            const dedupMap = new Map<string, FacebookGroup>();
+            selectedList.forEach((a) => {
+              resolveBrazilAudienceGroups(a, mappedGroups).forEach((g) => {
+                const k = normalizeFbGroupSlug(g.url) || g.id;
+                if (k && !dedupMap.has(k)) dedupMap.set(k, g);
+              });
+            });
+            const dedupArr = Array.from(dedupMap.values());
+            const mergedOpen = dedupArr.filter((g) => g.membershipStatus === 'authorized').length;
+            const mergedClosed = dedupArr.filter(
+              (g) => g.membershipStatus !== 'authorized' && g.membershipStatus !== 'unavailable'
+            ).length;
+
+            return (
+              <div className="bg-cyan-950/35 border border-cyan-500/60 rounded-2xl p-4 space-y-3 shadow-lg">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <span className="font-bold text-cyan-200 flex items-center gap-2 text-sm">
+                    <Shuffle className="w-4 h-4 text-cyan-300" />
+                    <span>Fundir {selectedList.length} Públicos → Recriar &amp; Renomear</span>
+                  </span>
+                  <span className="text-xs font-semibold text-slate-200 tabular-nums">
+                    {dedupArr.length} grupos únicos · <span className="text-emerald-300">✅ {mergedOpen} Abertos</span> ·{' '}
+                    <span className="text-amber-300">🔒 {mergedClosed} Fechados</span>
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <input
+                    type="text"
+                    value={mergeNewName}
+                    onChange={(e) => setMergeNewName(e.target.value)}
+                    placeholder="Novo nome do público fundido..."
+                    className="w-full bg-slate-950 border border-cyan-600/60 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-400"
+                  />
+                  <input
+                    type="text"
+                    value={mergeNewDesc}
+                    onChange={(e) => setMergeNewDesc(e.target.value)}
+                    placeholder="Descrição opcional..."
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-400"
+                  />
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <label className="inline-flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={mergeReplaceOriginals}
+                      onChange={(e) => setMergeReplaceOriginals(e.target.checked)}
+                      className="rounded border-slate-600 bg-slate-900 text-cyan-500"
+                    />
+                    <span>Apagar públicos originais após recriar (os grupos continuam 100% salvos!)</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleMergeBrazilAudiences}
+                    className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    <span>Fundir &amp; Criar Público Unificado</span>
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Saved Audiences Display Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {audiences.map(aud => {
               const isSelected = selectedAudienceId === aud.id;
+              const isCheckedMerge = mergeAudienceIds.includes(aud.id);
+              const matchedGroups = resolveBrazilAudienceGroups(aud, mappedGroups);
+              const displayCount = matchedGroups.length || aud.groupsCount;
+              const openCount = matchedGroups.filter((g) => g.membershipStatus === 'authorized').length;
+              const awaitingCount = matchedGroups.filter(
+                (g) => g.membershipStatus === 'awaiting_admin' || g.membershipStatus === 'join_requested'
+              ).length;
+              const blockedCount = matchedGroups.filter((g) => g.membershipStatus === 'rate_limited').length;
+              const closedCount = matchedGroups.filter(
+                (g) => g.membershipStatus !== 'authorized' && g.membershipStatus !== 'unavailable'
+              ).length;
+
               return (
                 <div
                   key={aud.id}
                   className={`bg-slate-900 border rounded-2xl p-5 space-y-4 transition flex flex-col justify-between ${
-                    isSelected ? 'border-indigo-500 shadow-xl shadow-indigo-950/40 bg-slate-900/90' : 'border-slate-800'
+                    isCheckedMerge
+                      ? 'border-cyan-400 shadow-xl shadow-cyan-950/40 bg-cyan-950/15'
+                      : isSelected
+                      ? 'border-indigo-500 shadow-xl shadow-indigo-950/40 bg-slate-900/90'
+                      : 'border-slate-800'
                   }`}
                 >
                   <div className="space-y-3">
                     <div className="flex items-start justify-between gap-2">
-                      <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-indigo-950 text-indigo-300 border border-indigo-800">
-                        {aud.niche}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => toggleSelectBrazilAudienceForMerge(aud.id)}
+                          className="text-slate-400 hover:text-cyan-300 cursor-pointer"
+                          title="Marcar para fundir com outro público"
+                        >
+                          {isCheckedMerge ? (
+                            <CheckSquare className="w-4 h-4 text-cyan-400" />
+                          ) : (
+                            <Square className="w-4 h-4" />
+                          )}
+                        </button>
+                        <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-indigo-950 text-indigo-300 border border-indigo-800">
+                          {aud.niche}
+                        </span>
+                      </div>
                       <span className="text-[11px] text-slate-400">
                         Usado {aud.campaignUsageCount || 1}x
                       </span>
@@ -3772,13 +4456,49 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                     <div className="bg-slate-950 p-3 rounded-xl border border-slate-800/80 flex items-center justify-between text-xs">
                       <div>
                         <span className="text-slate-400 block text-[10px] uppercase">Grupos</span>
-                        <strong className="text-white text-sm">{aud.groupsCount} grupos</strong>
+                        <strong className="text-white text-sm">{displayCount} grupos</strong>
                       </div>
                       <div className="text-right">
                         <span className="text-slate-400 block text-[10px] uppercase">Membros Totais</span>
                         <strong className="text-emerald-400 text-sm">{aud.estimatedMembers.toLocaleString('pt-BR')}</strong>
                       </div>
                     </div>
+
+                    {/* Open vs Closed Status Breakdown */}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="px-2 py-0.5 rounded bg-emerald-950/70 border border-emerald-600/50 text-emerald-300 text-[10px] font-bold tabular-nums">
+                        ✅ {openCount} Abertos
+                      </span>
+                      <span className="px-2 py-0.5 rounded bg-amber-950/70 border border-amber-600/50 text-amber-300 text-[10px] font-bold tabular-nums">
+                        🔒 {closedCount} Fechados
+                      </span>
+                      {awaitingCount > 0 && (
+                        <span className="text-[10px] text-amber-300/80 tabular-nums">⏳ {awaitingCount} pend.</span>
+                      )}
+                      {blockedCount > 0 && (
+                        <span className="text-[10px] text-red-300 tabular-nums">🛡️ {blockedCount} bloq.</span>
+                      )}
+                    </div>
+
+                    {/* One-click Split Open vs Closed */}
+                    {openCount > 0 && closedCount > 0 && (
+                      <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                        <button
+                          type="button"
+                          onClick={() => handleSplitBrazilAudienceByStatus(aud, 'open_only')}
+                          className="px-2 py-1 bg-emerald-950/70 hover:bg-emerald-900 border border-emerald-600/50 text-emerald-200 text-[10px] font-semibold rounded-lg cursor-pointer"
+                        >
+                          ✅ Extrair {openCount} Abertos
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSplitBrazilAudienceByStatus(aud, 'closed_only')}
+                          className="px-2 py-1 bg-amber-950/70 hover:bg-amber-900 border border-amber-600/50 text-amber-200 text-[10px] font-semibold rounded-lg cursor-pointer"
+                        >
+                          🔒 Extrair {closedCount} Fechados
+                        </button>
+                      </div>
+                    )}
 
                     {/* Groups Preview Chips */}
                     {aud.groupNamesPreview && aud.groupNamesPreview.length > 0 && (
@@ -3795,7 +4515,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                     )}
                   </div>
 
-                  {/* Actions (User requested: "depois de enviar a plataforma opção de salvar nomear os grupos pra reutilizar, exluir editar") */}
+                  {/* Actions */}
                   <div className="pt-3 border-t border-slate-800/80 flex items-center gap-2">
                     <button
                       onClick={() => handleReuseAudience(aud)}
@@ -3825,6 +4545,464 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
               );
             })}
           </div>
+
+          {/* STAGED ENTRY FUNNEL + REAL FACEBOOK STATUS DASHBOARD FOR ACTIVE BRAZIL AUDIENCE */}
+          {activeBrazilAudience && (
+            <div className="bg-slate-900 border border-cyan-500/40 rounded-2xl p-5 space-y-4 shadow-lg shadow-slate-950/60">
+              {(() => {
+                const brAuthorized = activeBrazilAudienceGroups.filter((g) => g.membershipStatus === 'authorized');
+                const brAwaiting = activeBrazilAudienceGroups.filter(
+                  (g) => g.membershipStatus === 'awaiting_admin' || g.membershipStatus === 'join_requested'
+                );
+                const brBlocked = activeBrazilAudienceGroups.filter((g) => g.membershipStatus === 'rate_limited');
+                const brQuestions = activeBrazilAudienceGroups.filter((g) => g.membershipStatus === 'questions_pending');
+                const brRejected = activeBrazilAudienceGroups.filter(
+                  (g) => g.membershipStatus === 'rejected' || g.membershipStatus === 'unavailable'
+                );
+                const brMapped = activeBrazilAudienceGroups.filter((g) => !g.membershipStatus || g.membershipStatus === 'mapped');
+
+                const filteredBrStageGroups = activeBrazilAudienceGroups.filter((g) => {
+                  const st = g.membershipStatus || 'mapped';
+                  if (brStageFilter === 'all') return true;
+                  if (brStageFilter === 'authorized') return st === 'authorized';
+                  if (brStageFilter === 'awaiting') return st === 'awaiting_admin' || st === 'join_requested';
+                  if (brStageFilter === 'blocked') return st === 'rate_limited';
+                  if (brStageFilter === 'questions') return st === 'questions_pending';
+                  if (brStageFilter === 'rejected') return st === 'rejected' || st === 'unavailable';
+                  return st === 'mapped';
+                });
+
+                const brStage1AvailableCount =
+                  brMapped.length + brRejected.filter((g) => g.membershipStatus === 'rejected').length + brBlocked.length;
+
+                return (
+                  <>
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+                      <div>
+                        <div className="flex items-center gap-2 text-sm text-cyan-300 font-bold">
+                          <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                          <span>Funil por Etapas &amp; Resposta Real do Facebook (Brasil)</span>
+                        </div>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          Escolha o público abaixo, solicite entrada em lote (sem postar ainda) e acompanhe a resposta real do Facebook em 2º plano.
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2.5">
+                        <div className="flex items-center gap-2 bg-slate-950 border border-cyan-500/50 rounded-xl px-2.5 py-1.5">
+                          <span className="text-[11px] font-bold uppercase tracking-wide text-cyan-300 whitespace-nowrap">
+                            Público Alvo:
+                          </span>
+                          <select
+                            value={activeBrazilAudience.id}
+                            onChange={(e) => {
+                              const nextAud = audiences.find((a) => a.id === e.target.value);
+                              if (brBatchJoinTimerRef.current) {
+                                window.clearTimeout(brBatchJoinTimerRef.current);
+                                brBatchJoinTimerRef.current = null;
+                              }
+                              setIsBrBatchJoinRunning(false);
+                              setBrBatchJoinProgress(null);
+                              setBrLastStage1Response(null);
+                              if (nextAud) {
+                                setSelectedAudienceId(nextAud.id);
+                                setSelectedGroupIds(nextAud.groupIds);
+                              }
+                              setBrStageFilter('all');
+                            }}
+                            className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs font-bold text-white focus:border-cyan-400 focus:outline-none cursor-pointer max-w-[260px]"
+                          >
+                            {audiences.map((aud) => {
+                              const cnt = resolveBrazilAudienceGroups(aud, mappedGroups).length || aud.groupsCount;
+                              return (
+                                <option key={aud.id} value={aud.id}>
+                                  {aud.name} ({cnt} grupos)
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (brAuthorized.length > 0) setDispatchQueueOnlyAuthorized(true);
+                            setSelectedGroupIds(activeBrazilAudience.groupIds);
+                            setActiveSubTab('campaign');
+                          }}
+                          className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Send className="w-3.5 h-3.5" />
+                          <span>Ir p/ Disparo ({brAuthorized.length} Aceitos)</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* 6-Tile Colorful Visual Summary Grid */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => setBrStageFilter(brStageFilter === 'authorized' ? 'all' : 'authorized')}
+                        className={`text-left rounded-xl p-3 border transition-all cursor-pointer ${
+                          brStageFilter === 'authorized'
+                            ? 'bg-emerald-600/30 border-emerald-400 ring-2 ring-emerald-400/50'
+                            : 'bg-emerald-950/35 border-emerald-600/40 hover:border-emerald-400/80'
+                        }`}
+                      >
+                        <div className="text-[11px] font-bold text-emerald-300 uppercase tracking-wide">✅ Aceitos</div>
+                        <div className="text-2xl font-extrabold text-emerald-200 tabular-nums mt-0.5">{brAuthorized.length}</div>
+                        <div className="text-[10px] text-emerald-300/80">Prontos p/ postar</div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setBrStageFilter(brStageFilter === 'awaiting' ? 'all' : 'awaiting')}
+                        className={`text-left rounded-xl p-3 border transition-all cursor-pointer ${
+                          brStageFilter === 'awaiting'
+                            ? 'bg-amber-500/25 border-amber-400 ring-2 ring-amber-400/50'
+                            : 'bg-amber-950/35 border-amber-600/40 hover:border-amber-400/80'
+                        }`}
+                      >
+                        <div className="text-[11px] font-bold text-amber-300 uppercase tracking-wide">⏳ Pendentes</div>
+                        <div className="text-2xl font-extrabold text-amber-200 tabular-nums mt-0.5">{brAwaiting.length}</div>
+                        <div className="text-[10px] text-amber-300/80">Aguardando admin</div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setBrStageFilter(brStageFilter === 'blocked' ? 'all' : 'blocked')}
+                        className={`text-left rounded-xl p-3 border transition-all cursor-pointer ${
+                          brStageFilter === 'blocked'
+                            ? 'bg-red-600/35 border-red-400 ring-2 ring-red-400/50'
+                            : 'bg-red-950/40 border-red-600/50 hover:border-red-400/80'
+                        }`}
+                      >
+                        <div className="text-[11px] font-bold text-red-300 uppercase tracking-wide">🛡️ Bloqueado FB</div>
+                        <div className="text-2xl font-extrabold text-red-200 tabular-nums mt-0.5">{brBlocked.length}</div>
+                        <div className="text-[10px] text-red-300/80">Limite temporário</div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setBrStageFilter(brStageFilter === 'questions' ? 'all' : 'questions')}
+                        className={`text-left rounded-xl p-3 border transition-all cursor-pointer ${
+                          brStageFilter === 'questions'
+                            ? 'bg-violet-600/30 border-violet-400 ring-2 ring-violet-400/50'
+                            : 'bg-violet-950/35 border-violet-600/40 hover:border-violet-400/80'
+                        }`}
+                      >
+                        <div className="text-[11px] font-bold text-violet-300 uppercase tracking-wide">📝 Perguntas</div>
+                        <div className="text-2xl font-extrabold text-violet-200 tabular-nums mt-0.5">{brQuestions.length}</div>
+                        <div className="text-[10px] text-violet-300/80">Exigem questionário</div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setBrStageFilter(brStageFilter === 'rejected' ? 'all' : 'rejected')}
+                        className={`text-left rounded-xl p-3 border transition-all cursor-pointer ${
+                          brStageFilter === 'rejected'
+                            ? 'bg-rose-600/30 border-rose-400 ring-2 ring-rose-400/50'
+                            : 'bg-rose-950/35 border-rose-600/40 hover:border-rose-400/80'
+                        }`}
+                      >
+                        <div className="text-[11px] font-bold text-rose-300 uppercase tracking-wide">❌ Recusados</div>
+                        <div className="text-2xl font-extrabold text-rose-200 tabular-nums mt-0.5">{brRejected.length}</div>
+                        <div className="text-[10px] text-rose-300/80">Não entrou / indisp.</div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setBrStageFilter(brStageFilter === 'mapped' ? 'all' : 'mapped')}
+                        className={`text-left rounded-xl p-3 border transition-all cursor-pointer ${
+                          brStageFilter === 'mapped'
+                            ? 'bg-blue-600/30 border-blue-400 ring-2 ring-blue-400/50'
+                            : 'bg-blue-950/35 border-blue-600/40 hover:border-blue-400/80'
+                        }`}
+                      >
+                        <div className="text-[11px] font-bold text-blue-300 uppercase tracking-wide">🔵 Novos</div>
+                        <div className="text-2xl font-extrabold text-blue-200 tabular-nums mt-0.5">{brMapped.length}</div>
+                        <div className="text-[10px] text-blue-300/80">Aguardando Etapa 1</div>
+                      </button>
+                    </div>
+
+                    {/* Stage 1 & Stage 2 Controls */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      <div className="bg-slate-950 border border-cyan-700/40 rounded-xl p-3.5 space-y-2.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-bold text-white">
+                            Etapa 1 · Solicitar Entrada em "{activeBrazilAudience.name}" ({brStage1AvailableCount} disponíveis)
+                          </span>
+                          <span className="text-[11px] text-cyan-300 font-medium">Sem postar ainda</span>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <label className="inline-flex items-center gap-1.5 text-xs text-slate-300">
+                            <span>Qtd:</span>
+                            <input
+                              type="number"
+                              min={1}
+                              max={200}
+                              value={brBatchJoinCountInput}
+                              onChange={(e) => setBrBatchJoinCountInput(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                              className="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs font-bold text-white tabular-nums"
+                            />
+                          </label>
+                          {[5, 10, 20, 30, 50].map((n) => (
+                            <button
+                              key={n}
+                              type="button"
+                              onClick={() => setBrBatchJoinCountInput(n)}
+                              className={`px-2 py-1 text-[11px] rounded border cursor-pointer ${
+                                brBatchJoinCountInput === n
+                                  ? 'bg-cyan-600/30 border-cyan-400 text-cyan-200 font-bold'
+                                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                              }`}
+                            >
+                              {n}
+                            </button>
+                          ))}
+                          <label className="inline-flex items-center gap-1 text-[11px] text-slate-400 ml-auto">
+                            <span>Intervalo:</span>
+                            <select
+                              value={brBatchJoinDelaySec}
+                              onChange={(e) => setBrBatchJoinDelaySec(Number(e.target.value))}
+                              className="bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-white"
+                            >
+                              <option value={10}>10s</option>
+                              <option value={12}>12s</option>
+                              <option value={15}>15s</option>
+                              <option value={20}>20s</option>
+                            </select>
+                          </label>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2 pt-1">
+                          {isBrBatchJoinRunning ? (
+                            <button
+                              type="button"
+                              onClick={handleStopBrazilBatchJoin}
+                              className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold rounded-lg inline-flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <Pause className="w-3.5 h-3.5" />
+                              <span>Pausar Solicitações</span>
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleStartBrazilBatchJoin()}
+                              className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold rounded-lg inline-flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <Play className="w-3.5 h-3.5" />
+                              <span>Solicitar Entrada em {brBatchJoinCountInput} Grupos</span>
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const next = !silentBackgroundMode;
+                              setSilentBackgroundMode(next);
+                              try {
+                                localStorage.setItem('autoviral_br_silent_mode', String(next));
+                              } catch {}
+                            }}
+                            className={`px-2.5 py-1.5 text-[11px] font-semibold rounded-lg border cursor-pointer transition-colors ${
+                              silentBackgroundMode
+                                ? 'bg-indigo-600/30 border-indigo-400 text-indigo-100'
+                                : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            {silentBackgroundMode ? '🤫 Silencioso (2º Plano): ON' : '🪟 Foco Normal: OFF'}
+                          </button>
+                          {brBatchJoinProgress && (
+                            <span className="text-[11px] text-cyan-300 font-mono tabular-nums truncate max-w-[260px]">
+                              ⏳ {brBatchJoinProgress.current}/{brBatchJoinProgress.total} · {brBatchJoinProgress.currentGroupName}
+                            </span>
+                          )}
+                        </div>
+
+                        {brLastStage1Response && (
+                          <div
+                            className={`rounded-lg border px-3 py-2 text-xs flex flex-wrap items-center justify-between gap-2 ${
+                              (BR_MEMBERSHIP_STATUS_META[brLastStage1Response.status] || BR_MEMBERSHIP_STATUS_META.mapped).bannerClass
+                            }`}
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="font-bold truncate">
+                                Última resposta real do Facebook: {brLastStage1Response.groupName}
+                              </div>
+                              <div className="text-[11px] opacity-90 truncate">
+                                {brLastStage1Response.note} · às {brLastStage1Response.checkedAt}
+                              </div>
+                            </div>
+                            <span
+                              className={`px-2 py-0.5 text-[11px] font-bold rounded border shrink-0 ${
+                                (BR_MEMBERSHIP_STATUS_META[brLastStage1Response.status] || BR_MEMBERSHIP_STATUS_META.mapped).badgeClass
+                              }`}
+                            >
+                              {(BR_MEMBERSHIP_STATUS_META[brLastStage1Response.status] || BR_MEMBERSHIP_STATUS_META.mapped).label}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="bg-slate-950 border border-emerald-700/40 rounded-xl p-3.5 space-y-2.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-bold text-white">
+                            Etapa 2 · Confirmar Resposta Real do Facebook
+                          </span>
+                          <span className="text-[11px] text-emerald-400 font-medium">Verifica sem abrir abas</span>
+                        </div>
+                        <p className="text-[11px] text-slate-400">
+                          Consulta cada grupo via Extensão v1.5.4: <strong>✅ Aceito</strong>, <strong>⏳ Pendente Admin</strong>, <strong>🛡️ Bloqueado FB</strong>, <strong>📝 Perguntas</strong> ou <strong>❌ Recusado</strong>.
+                        </p>
+                        <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                          <button
+                            type="button"
+                            onClick={() => handleStartBrazilVerifyMemberships(true)}
+                            disabled={isBrVerifyingMemberships}
+                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold rounded-lg inline-flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <RefreshCw className={`w-3.5 h-3.5 ${isBrVerifyingMemberships ? 'animate-spin' : ''}`} />
+                            <span>{isBrVerifyingMemberships ? 'Verificando...' : 'Confirmar Pendentes Agora'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleStartBrazilVerifyMemberships(false)}
+                            disabled={isBrVerifyingMemberships}
+                            className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 text-xs rounded-lg cursor-pointer"
+                          >
+                            Reverificar Todos ({activeBrazilAudienceGroups.length})
+                          </button>
+                        </div>
+                        {brVerifyProgress && brVerifyProgress.total > 0 && (
+                          <div className="text-[11px] text-slate-200 font-mono tabular-nums pt-1 flex flex-wrap gap-2">
+                            <span>Checados: {brVerifyProgress.checked}/{brVerifyProgress.total}</span>
+                            <span className="text-emerald-300">✅ {brVerifyProgress.authorizedCount}</span>
+                            <span className="text-amber-300">⏳ {brVerifyProgress.awaitingCount}</span>
+                            <span className="text-rose-300">❌ {brVerifyProgress.rejectedCount}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Colorful Filter Pills */}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {[
+                        { id: 'all' as const, label: `Todos (${activeBrazilAudienceGroups.length})`, activeClass: 'bg-cyan-600 text-white border-cyan-400' },
+                        { id: 'authorized' as const, label: `✅ Aceitos (${brAuthorized.length})`, activeClass: 'bg-emerald-600 text-white border-emerald-400' },
+                        { id: 'awaiting' as const, label: `⏳ Pendentes (${brAwaiting.length})`, activeClass: 'bg-amber-500 text-slate-950 border-amber-300 font-bold' },
+                        { id: 'blocked' as const, label: `🛡️ Bloqueados FB (${brBlocked.length})`, activeClass: 'bg-red-600 text-white border-red-400' },
+                        { id: 'questions' as const, label: `📝 Perguntas (${brQuestions.length})`, activeClass: 'bg-violet-600 text-white border-violet-400' },
+                        { id: 'rejected' as const, label: `❌ Recusados (${brRejected.length})`, activeClass: 'bg-rose-600 text-white border-rose-400' },
+                        { id: 'mapped' as const, label: `🔵 Novos (${brMapped.length})`, activeClass: 'bg-blue-600 text-white border-blue-400' },
+                      ].map((tab) => (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          onClick={() => setBrStageFilter(tab.id)}
+                          className={`px-3 py-1.5 text-xs font-semibold rounded-lg border cursor-pointer tabular-nums transition-colors ${
+                            brStageFilter === tab.id
+                              ? tab.activeClass
+                              : 'bg-slate-950 border-slate-800 text-slate-300 hover:text-white hover:border-slate-600'
+                          }`}
+                        >
+                          {tab.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* High-Contrast Color-Coded Group List */}
+                    <div className="max-h-80 overflow-y-auto divide-y divide-slate-800/80 border border-slate-700/80 rounded-xl bg-slate-950">
+                      {filteredBrStageGroups.length === 0 ? (
+                        <div className="p-5 text-xs text-slate-400 text-center">
+                          Nenhum grupo com este status no público <strong>{activeBrazilAudience.name}</strong>.
+                        </div>
+                      ) : (
+                        filteredBrStageGroups.slice(0, 150).map((g, idx) => {
+                          const st = g.membershipStatus || 'mapped';
+                          const meta = BR_MEMBERSHIP_STATUS_META[st] || BR_MEMBERSHIP_STATUS_META.mapped;
+                          return (
+                            <div
+                              key={g.id}
+                              className={`px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs transition-colors ${meta.rowClass}`}
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-semibold text-white truncate">
+                                    {idx + 1}. {sanitizeFbGroupName(g.name)}
+                                  </span>
+                                  <a
+                                    href={g.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-[11px] text-cyan-300 hover:text-cyan-200 underline shrink-0"
+                                  >
+                                    Abrir ↗
+                                  </a>
+                                </div>
+                                <div className="text-[11px] text-slate-300 flex flex-wrap items-center gap-2 mt-0.5">
+                                  <span className="text-slate-400">{(g.membersCount || 0).toLocaleString('pt-BR')} membros</span>
+                                  {g.membershipCheckedAt && (
+                                    <span className="text-slate-400">· Confirmado às {g.membershipCheckedAt}</span>
+                                  )}
+                                  {g.membershipNote && (
+                                    <span className="font-medium text-slate-200 truncate max-w-[340px]">
+                                      · {g.membershipNote}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                                <span className={`px-2.5 py-1 text-[11px] font-bold rounded-md border ${meta.badgeClass}`}>
+                                  {meta.label}
+                                </span>
+                                {st !== 'authorized' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleManualSetBrazilGroupMembership(g.id, 'authorized')}
+                                    className="px-2 py-1 bg-emerald-950/70 hover:bg-emerald-900 border border-emerald-600/60 text-emerald-200 text-[11px] font-medium rounded cursor-pointer"
+                                  >
+                                    Aceito
+                                  </button>
+                                )}
+                                {st !== 'awaiting_admin' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleManualSetBrazilGroupMembership(g.id, 'awaiting_admin')}
+                                    className="px-2 py-1 bg-amber-950/70 hover:bg-amber-900 border border-amber-600/60 text-amber-200 text-[11px] font-medium rounded cursor-pointer"
+                                  >
+                                    Pendente
+                                  </button>
+                                )}
+                                {st !== 'rate_limited' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleManualSetBrazilGroupMembership(g.id, 'rate_limited')}
+                                    className="px-2 py-1 bg-red-950/70 hover:bg-red-900 border border-red-600/60 text-red-200 text-[11px] font-medium rounded cursor-pointer"
+                                  >
+                                    Bloqueado
+                                  </button>
+                                )}
+                                {st !== 'rejected' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleManualSetBrazilGroupMembership(g.id, 'rejected')}
+                                    className="px-2 py-1 bg-rose-950/70 hover:bg-rose-900 border border-rose-600/60 text-rose-200 text-[11px] font-medium rounded cursor-pointer"
+                                  >
+                                    Recusado
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          )}
         </div>
       )}
 
@@ -5058,25 +6236,87 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
               <div className="bg-slate-950 border border-emerald-800/50 rounded-xl p-3.5 space-y-2.5 text-xs">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <span className="font-bold text-white flex items-center gap-1.5">
-                    🤖 Fluxo Automático: Solicitar Entrada + Postagem (Extensão v1.4.0)
+                    🤖 Fluxo Automático: Solicitar Entrada + Postagem (Extensão v1.5.4)
                   </span>
-                  <label className="inline-flex items-center gap-2 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={autoJoinAndPostEnabled}
-                      onChange={(e) => setAutoJoinAndPostEnabled(e.target.checked)}
-                      className="w-4 h-4 accent-emerald-500 rounded cursor-pointer"
-                    />
-                    <span className={`text-[11px] font-bold ${autoJoinAndPostEnabled ? 'text-emerald-400' : 'text-slate-400'}`}>
-                      {autoJoinAndPostEnabled ? 'Ativo (Entra & Posta)' : 'Apenas Assistido'}
-                    </span>
-                  </label>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={silentBackgroundMode}
+                        onChange={(e) => {
+                          const next = e.target.checked;
+                          setSilentBackgroundMode(next);
+                          try {
+                            localStorage.setItem('autoviral_br_silent_mode', String(next));
+                          } catch {}
+                        }}
+                        className="w-4 h-4 accent-indigo-500 rounded cursor-pointer"
+                      />
+                      <span className={`text-[11px] font-bold ${silentBackgroundMode ? 'text-indigo-300' : 'text-slate-400'}`}>
+                        🤫 Silencioso (2º Plano)
+                      </span>
+                    </label>
+                    <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={autoJoinAndPostEnabled}
+                        onChange={(e) => setAutoJoinAndPostEnabled(e.target.checked)}
+                        className="w-4 h-4 accent-emerald-500 rounded cursor-pointer"
+                      />
+                      <span className={`text-[11px] font-bold ${autoJoinAndPostEnabled ? 'text-emerald-400' : 'text-slate-400'}`}>
+                        {autoJoinAndPostEnabled ? 'Ativo (Entra & Posta)' : 'Apenas Assistido'}
+                      </span>
+                    </label>
+                  </div>
                 </div>
                 <p className="text-[11px] text-slate-300 leading-relaxed">
-                  <strong>1.</strong> Se ainda aparecer <strong>"Participar do grupo"</strong>, a Extensão v1.4.0 clica automaticamente para solicitar sua entrada (e pausa imediatamente se o Facebook mostrar limite de frequência).
+                  <strong>1.</strong> Se ainda aparecer <strong>"Participar do grupo"</strong>, a Extensão clica automaticamente para solicitar entrada (e pausa se houver bloqueio).
                   <br />
-                  <strong>2.</strong> Em grupos públicos (entrada imediata), ela aguarda 4.5s anti-spam, abre <em>"Escreva algo..."</em>, cola a copy e publica. Em grupos moderados, registra <strong className="text-purple-300">Entrada Solicitada</strong> e guarda o post para você clicar em <strong>🔄 Entrar / Postar Agora</strong> quando aprovar!
+                  <strong>2.</strong> Em grupos públicos, aguarda anti-spam, posta e fecha a aba em 2º plano. Você também pode filtrar abaixo para disparar só nos já aceitos!
                 </p>
+
+                {/* Queue Source + Jump to Entry Funnel */}
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-800/80">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[11px] text-slate-400 font-semibold">Fila:</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDispatchQueueOnlyAuthorized(false);
+                        try { localStorage.setItem('autoviral_br_only_authorized', 'false'); } catch {}
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border cursor-pointer ${
+                        !dispatchQueueOnlyAuthorized
+                          ? 'bg-cyan-600/25 border-cyan-400 text-cyan-200'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Todos Selecionados ({selectedGroupIds.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDispatchQueueOnlyAuthorized(true);
+                        try { localStorage.setItem('autoviral_br_only_authorized', 'true'); } catch {}
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border cursor-pointer ${
+                        dispatchQueueOnlyAuthorized
+                          ? 'bg-emerald-600/30 border-emerald-400 text-emerald-200'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      ✅ Somente Aceitos ({mappedGroups.filter((g) => selectedGroupIds.includes(g.id) && g.membershipStatus === 'authorized').length})
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setActiveSubTab('audiences')}
+                    className="px-2.5 py-1 bg-indigo-600/25 hover:bg-indigo-600/40 border border-indigo-500/50 text-indigo-200 text-[11px] font-bold rounded-lg cursor-pointer"
+                  >
+                    🛡️ Pedir Entrada em Lote &amp; Fundir Públicos →
+                  </button>
+                </div>
 
                 {lastOpenedPostLog && (
                   <div className="mt-2 pt-2.5 border-t border-slate-800 flex flex-col gap-2 bg-slate-900/90 p-3 rounded-lg">

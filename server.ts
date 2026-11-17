@@ -6,7 +6,15 @@ import path from 'path';
 import fs from 'fs';
 import JSZip from 'jszip';
 
-dotenv.config();
+dotenv.config({ quiet: true });
+
+process.on('unhandledRejection', (reason) => {
+  console.warn('[Server] Unhandled Rejection prevented crash:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[Server] Uncaught Exception prevented crash:', err);
+});
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
@@ -2788,11 +2796,22 @@ async function startServer() {
     }
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const httpServer = app.listen(PORT, '0.0.0.0', () => {
     console.log(`AutoViral AI Server running on http://0.0.0.0:${PORT}`);
   });
+
+  httpServer.on('error', (err: any) => {
+    console.error('HTTP server error:', err?.message || err);
+  });
+
+  const shutdown = () => {
+    httpServer.close(() => process.exit(0));
+  };
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
 }
 
 startServer().catch((err) => {
   console.error('Failed to start server:', err);
+  process.exit(1);
 });

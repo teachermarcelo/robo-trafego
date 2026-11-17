@@ -18,6 +18,8 @@ import {
   setPrimaryCloudProvider,
   pushLocalSnapshotToSupabase,
   fetchAllAutoViralFromSupabase,
+  getEffectiveSupabaseCredentials,
+  isSupabaseConnected,
 } from '../lib/supabaseClient';
 
 interface SupabaseModalProps {
@@ -35,15 +37,15 @@ export const SupabaseModal: React.FC<SupabaseModalProps> = ({
   onSyncFromSupabase,
 }) => {
   const [supabaseUrl, setSupabaseUrl] = useState(() => {
-    return localStorage.getItem('autoviral_supabase_url') || '';
+    return getEffectiveSupabaseCredentials().url;
   });
   const [supabaseKey, setSupabaseKey] = useState(() => {
-    return localStorage.getItem('autoviral_supabase_key') || '';
+    return getEffectiveSupabaseCredentials().key;
   });
   const [isTesting, setIsTesting] = useState(false);
   const [isPulling, setIsPulling] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'success' | 'error'>(() => {
-    return localStorage.getItem('autoviral_supabase_connected') === 'true' ? 'success' : 'idle';
+    return isSupabaseConnected() ? 'success' : 'idle';
   });
   const [primaryDb, setPrimaryDb] = useState<'supabase' | 'firebase'>(() => getPrimaryCloudProvider());
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -280,7 +282,7 @@ WITH CHECK (true);
   const handleDisconnect = () => {
     localStorage.removeItem('autoviral_supabase_url');
     localStorage.removeItem('autoviral_supabase_key');
-    localStorage.removeItem('autoviral_supabase_connected');
+    localStorage.setItem('autoviral_supabase_connected', 'false');
     setPrimaryCloudProvider('firebase');
     setPrimaryDb('firebase');
     setSupabaseUrl('');
@@ -507,6 +509,19 @@ WITH CHECK (true);
               </button>
             </div>
           </form>
+
+          {/* Tip for robo-trafego.vercel.app & multi-device auto-connect */}
+          <div className="p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-1.5 text-[11px] text-slate-400">
+            <p className="font-bold text-cyan-300">
+              💡 Quer que o site no Vercel (<code className="text-emerald-300">robo-trafego.vercel.app</code>) e o celular já abram conectados no Supabase automaticamente?
+            </p>
+            <p className="leading-relaxed">
+              1. Exporte este código atualizado para o GitHub (para atualizar o build no Vercel). 2. No painel do Vercel &gt;{' '}
+              <strong>Settings &gt; Environment Variables</strong>, adicione{' '}
+              <code className="text-slate-200">VITE_SUPABASE_URL</code> e{' '}
+              <code className="text-slate-200">VITE_SUPABASE_ANON_KEY</code> com os mesmos valores acima e faça Redeploy. Assim qualquer aparelho entra direto no Supabase!
+            </p>
+          </div>
         </div>
       </div>
     </div>

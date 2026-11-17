@@ -34,7 +34,7 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 
-// Connection test on boot (per Skill specification)
+// Connection test on boot (per Skill specification - skipped when Supabase is primary DB)
 async function testConnection() {
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
@@ -44,7 +44,9 @@ async function testConnection() {
     }
   }
 }
-testConnection();
+if (!isPrimarySupabase()) {
+  testConnection();
+}
 
 // Standardized Error Handler (per Skill specification)
 export enum OperationType {
@@ -393,6 +395,16 @@ export function subscribeLandingPageSettings(
   campaignId?: string
 ): () => void {
   const docKey = campaignId ? `landing_page_${campaignId}` : 'landing_page_tarefinhas';
+  if (isSupabaseConnected()) {
+    fetchWorkspaceJsonFromSupabase(docKey)
+      .then((data) => {
+        if (data) onUpdate(data);
+      })
+      .catch(() => {});
+    if (isPrimarySupabase()) {
+      return () => {};
+    }
+  }
   const docRef = doc(db, SETTINGS_COLLECTION, docKey);
   return onSnapshot(
     docRef,
@@ -815,29 +827,32 @@ export async function pullFullCloudSnapshotFromFirebase(): Promise<{
   deletedIds: string[];
 }> {
   const [campSnap, wsSnap, metaSnap] = await Promise.all([
-    getDocs(collection(db, CAMPAIGNS_COLLECTION)),
-    getDocFromServer(doc(db, SETTINGS_COLLECTION, 'workspace_sync_v1')).catch(() =>
-      getDoc(doc(db, SETTINGS_COLLECTION, 'workspace_sync_v1'))
-    ),
-    getDocFromServer(doc(db, SETTINGS_COLLECTION, 'meta_config')).catch(() =>
-      getDoc(doc(db, SETTINGS_COLLECTION, 'meta_config'))
-    ),
+    getDocs(collection(db, CAMPAIGNS_COLLECTION)).catch(() => null),
+    getDocFromServer(doc(db, SETTINGS_COLLECTION, 'workspace_sync_v1'))
+      .catch(() => getDoc(doc(db, SETTINGS_COLLECTION, 'workspace_sync_v1')))
+      .catch(() => null),
+    getDocFromServer(doc(db, SETTINGS_COLLECTION, 'meta_config'))
+      .catch(() => getDoc(doc(db, SETTINGS_COLLECTION, 'meta_config')))
+      .catch(() => null),
   ]);
 
   const campaigns: Campaign[] = [];
-  campSnap.forEach((d) => {
-    const data = d.data() as any;
-    campaigns.push({
-      ...data,
-      id: d.id,
-      title: data.title || data.name || 'Campanha',
+  if (campSnap) {
+    campSnap.forEach((d) => {
+      const data = d.data() as any;
+      campaigns.push({
+        ...data,
+        id: d.id,
+        title: data.title || data.name || 'Campanha',
+      });
     });
-  });
+  }
 
-  const workspace = wsSnap.exists() ? (wsSnap.data() as WorkspaceSyncData) : null;
-  const deletedIds: string[] = metaSnap.exists() && Array.isArray(metaSnap.data()?.deletedCampaignIds)
-    ? metaSnap.data()!.deletedCampaignIds
-    : ['camp-1', 'camp-2', 'camp-3'];
+  const workspace = wsSnap && wsSnap.exists() ? (wsSnap.data() as WorkspaceSyncData) : null;
+  const deletedIds: string[] =
+    metaSnap && metaSnap.exists() && Array.isArray(metaSnap.data()?.deletedCampaignIds)
+      ? metaSnap.data()!.deletedCampaignIds
+      : ['camp-1', 'camp-2', 'camp-3'];
 
   return { campaigns, workspace, deletedIds };
 }

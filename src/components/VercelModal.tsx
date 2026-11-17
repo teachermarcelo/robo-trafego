@@ -154,27 +154,31 @@ export const VercelModal: React.FC<VercelModalProps> = ({ isOpen, onClose }) => 
             </div>
           </div>
 
-          {/* White Screen Alert & Direct Solution */}
+          {/* White Screen & Supabase Update Alert */}
           <div className="bg-amber-950/40 border border-amber-600/50 rounded-2xl p-4 space-y-3">
             <div className="flex items-center gap-2 text-amber-400 font-bold text-xs uppercase tracking-wider">
               <Zap className="w-4 h-4 text-amber-400" />
-              <span>Por que o seu link do Vercel apareceu em branco e como resolver:</span>
+              <span>Como atualizar seu domínio robo-trafego.vercel.app com Supabase:</span>
             </div>
             <p className="text-xs text-slate-300 leading-relaxed">
-              No seu painel do Vercel, o deploy foi feito a partir do commit inicial <code className="text-amber-300 font-mono">a401303 feat: initialize AutoViral AI project</code> (enviado antes de finalizarmos o código, o WhatsApp <strong className="text-emerald-400">(41) 99877-8348</strong>, a campanha de Milhas e o arquivo <code className="text-amber-300 font-mono">vercel.json</code>).
+              Quando fazemos melhorias aqui no AI Studio, o seu domínio <code className="text-emerald-300 font-mono">robo-trafego.vercel.app</code> só recebe a versão nova depois de atualizar o GitHub e o Vercel concluir o redeploy.
             </p>
             <div className="space-y-2 bg-slate-950/70 p-3 rounded-xl border border-amber-900/40 text-xs">
               <div className="flex items-start gap-2">
                 <span className="text-emerald-400 font-bold">✓ Passo 1:</span>
-                <span>Suba ou sincronize o código atualizado no seu repositório GitHub (menu superior <strong>GitHub &gt; Export</strong>).</span>
+                <span>Envie o código atualizado para o seu GitHub (menu superior <strong>GitHub &gt; Export / Push</strong>).</span>
               </div>
               <div className="flex items-start gap-2">
                 <span className="text-emerald-400 font-bold">✓ Passo 2:</span>
-                <span>O Vercel vai detectar automaticamente o novo commit e compilar a versão 100% funcional em 30 segundos!</span>
+                <span>
+                  (Opcional, recomendado) No Vercel &gt; <strong>Settings &gt; Environment Variables</strong>, adicione{' '}
+                  <code className="text-cyan-300 font-mono">VITE_SUPABASE_URL</code> e{' '}
+                  <code className="text-cyan-300 font-mono">VITE_SUPABASE_ANON_KEY</code> do seu projeto <strong>fluentimmersion</strong> para nunca depender do Firebase.
+                </span>
               </div>
               <div className="flex items-start gap-2">
                 <span className="text-emerald-400 font-bold">✓ Passo 3:</span>
-                <span>No Vercel, em <strong>Settings &gt; General</strong>, confirme que o <strong>Framework Preset</strong> está como <code className="text-emerald-300 font-mono">Vite</code> e o Output Directory é <code className="text-emerald-300 font-mono">dist</code>.</span>
+                <span>No Vercel, em <strong>Settings &gt; General</strong>, confirme que o <strong>Framework Preset</strong> está como <code className="text-emerald-300 font-mono">Vite</code> e Output Directory <code className="text-emerald-300 font-mono">dist</code>.</span>
               </div>
             </div>
           </div>

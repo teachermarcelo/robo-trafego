@@ -9,10 +9,31 @@ let lastKey = '';
 
 const supabaseStoreHashes: Record<string, string> = {};
 
+export function getEffectiveSupabaseCredentials(): {
+  url: string;
+  key: string;
+  source: 'local' | 'env' | 'none';
+} {
+  const localUrl = typeof window !== 'undefined' ? localStorage.getItem('autoviral_supabase_url') || '' : '';
+  const localKey = typeof window !== 'undefined' ? localStorage.getItem('autoviral_supabase_key') || '' : '';
+  if (localUrl && localKey) {
+    return { url: localUrl, key: localKey, source: 'local' };
+  }
+  const envUrl = ((import.meta as any).env?.VITE_SUPABASE_URL as string | undefined) || '';
+  const envKey = ((import.meta as any).env?.VITE_SUPABASE_ANON_KEY as string | undefined) || '';
+  if (envUrl && envKey) {
+    return { url: envUrl.trim(), key: envKey.trim(), source: 'env' };
+  }
+  return { url: '', key: '', source: 'none' };
+}
+
 export function getSupabaseClient(): SupabaseClient | null {
   if (typeof window === 'undefined') return null;
-  const url = localStorage.getItem('autoviral_supabase_url') || '';
-  const key = localStorage.getItem('autoviral_supabase_key') || '';
+  if (localStorage.getItem('autoviral_supabase_connected') === 'false') {
+    cachedClient = null;
+    return null;
+  }
+  const { url, key } = getEffectiveSupabaseCredentials();
 
   if (!url || !key) {
     cachedClient = null;
@@ -37,12 +58,12 @@ export function getSupabaseClient(): SupabaseClient | null {
 }
 
 export function isSupabaseConnected(): boolean {
-  return Boolean(
-    typeof window !== 'undefined' &&
-      localStorage.getItem('autoviral_supabase_url') &&
-      localStorage.getItem('autoviral_supabase_key') &&
-      localStorage.getItem('autoviral_supabase_connected') === 'true'
-  );
+  if (typeof window === 'undefined') return false;
+  if (localStorage.getItem('autoviral_supabase_connected') === 'false') return false;
+  const { url, key, source } = getEffectiveSupabaseCredentials();
+  if (!url || !key) return false;
+  if (source === 'env') return true;
+  return localStorage.getItem('autoviral_supabase_connected') === 'true';
 }
 
 export function getPrimaryCloudProvider(): CloudDbProvider {
@@ -189,11 +210,15 @@ export async function saveWorkspaceJsonToSupabase(
     let finalData = payload;
 
     if (options?.mergeObject && payload && typeof payload === 'object' && !Array.isArray(payload)) {
+      const cleanIncoming: Record<string, any> = {};
+      Object.entries(payload).forEach(([k, v]) => {
+        if (v !== undefined) cleanIncoming[k] = v;
+      });
       const existing = await fetchWorkspaceJsonFromSupabase(storeKey);
       if (existing && typeof existing === 'object' && !Array.isArray(existing)) {
-        finalData = { ...existing, ...payload, updatedAt: new Date().toISOString() };
+        finalData = { ...existing, ...cleanIncoming, updatedAt: new Date().toISOString() };
       } else {
-        finalData = { ...payload, updatedAt: new Date().toISOString() };
+        finalData = { ...cleanIncoming, updatedAt: new Date().toISOString() };
       }
     }
 
@@ -391,7 +416,23 @@ export async function pushLocalSnapshotToSupabase(extraCampaigns?: Campaign[], e
     }
   }
 
-  const workspacePayload = {
+  const pickNonEmpty = (val: any) => {
+    if (val === undefined || val === null) return undefined;
+    if (Array.isArray(val)) return val.length > 0 ? val : undefined;
+    if (typeof val === 'object') return Object.keys(val).length > 0 ? val : undefined;
+    return val;
+  };
+
+  const buildDefinedPayload = (entries: Record<string, any>) => {
+    const out: Record<string, any> = {};
+    Object.entries(entries).forEach(([k, v]) => {
+      const cleaned = pickNonEmpty(v);
+      if (cleaned !== undefined) out[k] = cleaned;
+    });
+    return out;
+  };
+
+  const workspacePayload = buildDefinedPayload({
     savedCopiesMap: safeParse('autoviral_saved_copies_v1'),
     customCopyPresets: safeParse('autoviral_custom_copy_presets_v1'),
     audiences: safeParse('autoviral_fb_audiences_v4') || safeParse('autoviral_fb_audiences_v3'),
@@ -402,24 +443,28 @@ export async function pushLocalSnapshotToSupabase(extraCampaigns?: Campaign[], e
     mappedInstaTargets: safeParse('autoviral_insta_mapped_targets_v2'),
     mappedGroups: safeParse('autoviral_fb_mapped_groups_v5_real') || safeParse('autoviral_fb_mapped_groups_v3'),
     whatsappX1Flows: safeParse('autoviral_whatsapp_x1_flows_v1'),
-  };
+  });
 
-  const globalPayload = {
+  const globalPayload = buildDefinedPayload({
     globalAudiences: safeParse('autoviral_global_audiences_v1'),
     globalTrashAudiences: safeParse('autoviral_global_audiences_trash_v1'),
     globalGroups: safeParse('autoviral_global_fb_groups_v1'),
     globalOffers: safeParse('autoviral_global_offers_v1'),
-  };
+  });
 
   const deletedIds = safeParse('autoviral_deleted_campaign_ids') || ['camp-1', 'camp-2', 'camp-3'];
 
   const [wsRes, glRes, delRes, leadsRes] = await Promise.all([
-    saveWorkspaceJsonToSupabase('workspace_sync_v1', workspacePayload, { mergeObject: true, force: true }),
-    saveWorkspaceJsonToSupabase('global_workspace_sync_v1', globalPayload, { mergeObject: true, force: true }),
+    Object.keys(workspacePayload).length > 0
+      ? saveWorkspaceJsonToSupabase('workspace_sync_v1', workspacePayload, { mergeObject: true, force: true })
+      : Promise.resolve({ ok: true } as { ok: boolean; missingTable?: boolean; error?: string }),
+    Object.keys(globalPayload).length > 0
+      ? saveWorkspaceJsonToSupabase('global_workspace_sync_v1', globalPayload, { mergeObject: true, force: true })
+      : Promise.resolve({ ok: true } as { ok: boolean; missingTable?: boolean; error?: string }),
     saveWorkspaceJsonToSupabase('deleted_campaign_ids', deletedIds, { force: true }),
     extraLeads && extraLeads.length > 0
       ? saveWorkspaceJsonToSupabase('customer_leads', extraLeads, { force: true })
-      : Promise.resolve({ ok: true }),
+      : Promise.resolve({ ok: true } as { ok: boolean; missingTable?: boolean; error?: string }),
   ]);
 
   if (wsRes.missingTable || glRes.missingTable || delRes.missingTable || (leadsRes as any).missingTable) {

@@ -3190,7 +3190,8 @@
             fullText: ev.data.fullText || '',
             imageDataUrl: ev.data.imageDataUrl || '',
             autoJoinAndPost: ev.data.autoJoinAndPost !== false,
-            joinOnly: Boolean(ev.data.joinOnly)
+            joinOnly: Boolean(ev.data.joinOnly),
+            silentMode: Boolean(ev.data.silentMode)
           }, () => { void chrome.runtime.lastError; });
         }
       } else if (ev.data.type === 'AUTOVIRAL_VERIFY_MEMBERSHIPS_BATCH') {

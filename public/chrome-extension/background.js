@@ -31,6 +31,7 @@ function ensureApprovalWatchdogAlarm() {
 ensureApprovalWatchdogAlarm();
 
 const sleepMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const silentTabIds = new Set();
 
 async function withTabDebugger(tabId, fn) {
   if (!chrome.debugger || typeof tabId !== 'number') {
@@ -355,6 +356,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     const groupUrl = request.groupUrl || '';
     const slugMatch = groupUrl.match(/\/groups\/([^\/?#]+)/i);
     const groupSlug = slugMatch ? slugMatch[1].toLowerCase() : '';
+    const silentMode = Boolean(request.silentMode);
     const pendingPost = {
       logId: request.logId || '',
       groupId: request.groupId || '',
@@ -365,12 +367,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       imageDataUrl: request.imageDataUrl || '',
       autoJoinAndPost: request.autoJoinAndPost !== false,
       joinOnly: Boolean(request.joinOnly),
+      silentMode: silentMode,
       createdAt: new Date().toISOString()
     };
 
-    chrome.storage.local.get(['autoviral_pending_fb_posts_map'], (res) => {
+    chrome.storage.local.get(['autoviral_pending_fb_posts_map', 'autoviral_silent_tabs'], (res) => {
       const postsMap = (res && res.autoviral_pending_fb_posts_map && typeof res.autoviral_pending_fb_posts_map === 'object')
         ? res.autoviral_pending_fb_posts_map
+        : {};
+      const silentTabsMap = (res && res.autoviral_silent_tabs && typeof res.autoviral_silent_tabs === 'object')
+        ? { ...res.autoviral_silent_tabs }
         : {};
       if (groupSlug) {
         postsMap[groupSlug] = pendingPost;
@@ -378,13 +384,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       chrome.storage.local.set(
         {
           autoviral_pending_fb_post: pendingPost,
-          autoviral_pending_fb_posts_map: postsMap
+          autoviral_pending_fb_posts_map: postsMap,
+          autoviral_silent_mode: silentMode
         },
         () => {
           if (pendingPost.groupUrl) {
-            chrome.tabs.create({ url: pendingPost.groupUrl, active: true }, (tab) => {
+            const createOpts = {
+              url: pendingPost.groupUrl,
+              active: !silentMode
+            };
+            if (silentMode && sender && sender.tab && typeof sender.tab.windowId === 'number') {
+              createOpts.windowId = sender.tab.windowId;
+            }
+            chrome.tabs.create(createOpts, (tab) => {
               void chrome.runtime.lastError;
-              sendResponse({ success: true, tabId: tab ? tab.id : null });
+              if (tab && typeof tab.id === 'number' && silentMode) {
+                silentTabIds.add(tab.id);
+                silentTabsMap[String(tab.id)] = true;
+                chrome.storage.local.set({ autoviral_silent_tabs: silentTabsMap });
+              }
+              sendResponse({ success: true, tabId: tab ? tab.id : null, silentMode });
             });
           } else {
             sendResponse({ success: false });
@@ -779,14 +798,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
     (async () => {
       try {
-        try {
-          await new Promise((resolve) => {
-            chrome.tabs.update(tabId, { active: true }, () => {
-              void chrome.runtime.lastError;
-              resolve();
-            });
+        const isSilentTab = await new Promise((resolve) => {
+          if (silentTabIds.has(tabId)) {
+            resolve(true);
+            return;
+          }
+          chrome.storage.local.get(['autoviral_silent_tabs'], (r) => {
+            const m = r && r.autoviral_silent_tabs;
+            resolve(Boolean(m && m[String(tabId)]));
           });
-        } catch (e) {}
+        });
+        if (!isSilentTab) {
+          try {
+            await new Promise((resolve) => {
+              chrome.tabs.update(tabId, { active: true }, () => {
+                void chrome.runtime.lastError;
+                resolve();
+              });
+            });
+          } catch (e) {}
+        }
 
         const measureComposerCoords = () =>
           new Promise((resolve) => {
@@ -1356,7 +1387,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.action === 'AUTOVIRAL_CLOSE_CURRENT_TAB') {
     if (sender && sender.tab && typeof sender.tab.id === 'number') {
-      chrome.tabs.remove(sender.tab.id, () => {
+      const closingId = sender.tab.id;
+      silentTabIds.delete(closingId);
+      chrome.storage.local.get(['autoviral_silent_tabs'], (r) => {
+        const m = r && r.autoviral_silent_tabs && typeof r.autoviral_silent_tabs === 'object'
+          ? { ...r.autoviral_silent_tabs }
+          : null;
+        if (m && m[String(closingId)]) {
+          delete m[String(closingId)];
+          chrome.storage.local.set({ autoviral_silent_tabs: m });
+        }
+      });
+      chrome.tabs.remove(closingId, () => {
         void chrome.runtime.lastError;
         sendResponse({ closed: true });
       });
@@ -1431,8 +1473,19 @@ async function triggerApprovedGroupPostBySlug(slug, alreadyInTab, existingTabId)
   });
 
   if (!alreadyInTab && pendingPost.groupUrl) {
-    chrome.tabs.create({ url: pendingPost.groupUrl, active: true }, () => {
-      void chrome.runtime.lastError;
+    chrome.storage.local.get(['autoviral_silent_mode', 'autoviral_silent_tabs'], (r) => {
+      const useSilent = pendingPost.silentMode !== undefined ? Boolean(pendingPost.silentMode) : Boolean(r && r.autoviral_silent_mode);
+      const silentTabsMap = (r && r.autoviral_silent_tabs && typeof r.autoviral_silent_tabs === 'object')
+        ? { ...r.autoviral_silent_tabs }
+        : {};
+      chrome.tabs.create({ url: pendingPost.groupUrl, active: !useSilent }, (tab) => {
+        void chrome.runtime.lastError;
+        if (tab && typeof tab.id === 'number' && useSilent) {
+          silentTabIds.add(tab.id);
+          silentTabsMap[String(tab.id)] = true;
+          chrome.storage.local.set({ autoviral_silent_tabs: silentTabsMap });
+        }
+      });
     });
   } else if (alreadyInTab && typeof existingTabId === 'number') {
     sendMessageToTabAllFrames(existingTabId, { action: 'AUTOVIRAL_RUN_PENDING_NOW', groupSlug: cleanSlug });

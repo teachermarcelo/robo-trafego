@@ -1194,6 +1194,17 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
   const [logStatusFilter, setLogStatusFilter] = useState<'all' | 'published' | 'awaiting_admin' | 'join_requested' | 'not_member' | 'error'>('all');
   const [renamingAudienceId, setRenamingAudienceId] = useState<string | null>(null);
   const [renameAudienceInput, setRenameAudienceInput] = useState<string>('');
+  const [mergeAudienceIds, setMergeAudienceIds] = useState<string[]>([]);
+  const [mergeNewName, setMergeNewName] = useState<string>('');
+  const [mergeReplaceOriginals, setMergeReplaceOriginals] = useState<boolean>(false);
+  const [silentBackgroundMode, setSilentBackgroundMode] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('autoviral_global_silent_mode');
+      return saved === null ? true : saved === 'true';
+    } catch {
+      return true;
+    }
+  });
   const [chamativaStyle, setChamativaStyle] = useState<ChamativaStyle>('alerta');
   const [showFeedPreview, setShowFeedPreview] = useState<boolean>(true);
   const [isEditingInPreview, setIsEditingInPreview] = useState<boolean>(false);
@@ -2442,6 +2453,138 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
     });
   };
 
+  const toggleSelectAudienceForMerge = (audId: string) => {
+    setMergeAudienceIds((prev) => {
+      const next = prev.includes(audId) ? prev.filter((id) => id !== audId) : [...prev, audId];
+      if (next.length >= 2) {
+        const names = next
+          .map((id) => globalAudiences.find((a) => a.id === id)?.name)
+          .filter(Boolean)
+          .slice(0, 3);
+        setMergeNewName((curr) => (curr.trim() ? curr : `${names.join(' + ')} (Unificado)`));
+      } else if (next.length < 2) {
+        setMergeNewName('');
+      }
+      return next;
+    });
+  };
+
+  const handleMergeAudiences = () => {
+    const selected = globalAudiences.filter((a) => mergeAudienceIds.includes(a.id));
+    if (selected.length < 2) {
+      setBanner({ message: 'Marque pelo menos 2 públicos salvos para fundir.', tone: 'warning' });
+      return;
+    }
+
+    const dedupGroupsMap = new Map<string, GlobalGroupItem>();
+    selected.forEach((aud) => {
+      getGroupsForAudience(aud, globalGroups).forEach((g) => {
+        const key = normalizeGroupUrlKey(g.url) || g.id;
+        if (key && !dedupGroupsMap.has(key)) {
+          dedupGroupsMap.set(key, g);
+        }
+      });
+    });
+
+    const unifiedGroups = Array.from(dedupGroupsMap.values());
+    if (unifiedGroups.length === 0) {
+      setBanner({ message: 'Os públicos selecionados não possuem grupos para fundir.', tone: 'warning' });
+      return;
+    }
+
+    const primary = selected[0];
+    const finalName = mergeNewName.trim() || `${selected.map((s) => s.name).slice(0, 2).join(' + ')} (${unifiedGroups.length})`;
+    const newId = `gaud-merged-${Date.now()}`;
+    const newAud: GlobalAudience = {
+      id: newId,
+      name: finalName,
+      countryName: primary.countryName || 'Global',
+      languageName: primary.languageName || 'English',
+      groupIds: unifiedGroups.map((g) => g.id),
+      groupUrls: unifiedGroups.map((g) => g.url),
+      groupSnapshots: unifiedGroups.map((g) => ({
+        id: g.id,
+        name: sanitizeGlobalGroupName(g.name),
+        url: g.url,
+        membersCount: g.membersCount || 0,
+        countryName: g.countryName || primary.countryName,
+        languageName: g.languageName || primary.languageName,
+        niche: finalName,
+      })),
+      createdAt: new Date().toISOString(),
+    };
+
+    const openCnt = unifiedGroups.filter((g) => g.membershipStatus === 'authorized').length;
+    const closedCnt = unifiedGroups.filter(
+      (g) => g.membershipStatus !== 'authorized' && g.membershipStatus !== 'unavailable'
+    ).length;
+
+    setGlobalAudiences((prev) => {
+      const remaining = mergeReplaceOriginals ? prev.filter((a) => !mergeAudienceIds.includes(a.id)) : prev;
+      return [newAud, ...remaining];
+    });
+    setSelectedAudienceId(newId);
+    setMergeAudienceIds([]);
+    setMergeNewName('');
+    setCurrentPostIndex(0);
+    setBanner({
+      message: `🔀 Público "${finalName}" criado com ${unifiedGroups.length} grupos únicos (✅ ${openCnt} abertos · 🔒 ${closedCnt} fechados/pendentes)!`,
+      tone: 'success',
+    });
+  };
+
+  const handleSplitAudienceByStatus = (aud: GlobalAudience, mode: 'open_only' | 'closed_only') => {
+    const matched = getGroupsForAudience(aud, globalGroups);
+    const filtered =
+      mode === 'open_only'
+        ? matched.filter((g) => g.membershipStatus === 'authorized')
+        : matched.filter((g) => g.membershipStatus !== 'authorized' && g.membershipStatus !== 'unavailable');
+
+    if (filtered.length === 0) {
+      setBanner({
+        message:
+          mode === 'open_only'
+            ? `O público "${aud.name}" ainda não tem grupos ✅ Aceitos/Abertos para separar.`
+            : `O público "${aud.name}" não tem grupos 🔒 Fechados/Pendentes restantes!`,
+        tone: 'info',
+      });
+      return;
+    }
+
+    const baseName = aud.name.replace(/\s*·\s*(✅ Abertos|🔒 Fechados).*$/i, '').trim();
+    const newName =
+      mode === 'open_only'
+        ? `${baseName} · ✅ Abertos (${filtered.length})`
+        : `${baseName} · 🔒 Fechados (${filtered.length})`;
+    const newId = `gaud-split-${Date.now()}`;
+    const splitAud: GlobalAudience = {
+      id: newId,
+      name: newName,
+      countryName: aud.countryName,
+      languageName: aud.languageName,
+      groupIds: filtered.map((g) => g.id),
+      groupUrls: filtered.map((g) => g.url),
+      groupSnapshots: filtered.map((g) => ({
+        id: g.id,
+        name: sanitizeGlobalGroupName(g.name),
+        url: g.url,
+        membersCount: g.membersCount || 0,
+        countryName: g.countryName || aud.countryName,
+        languageName: g.languageName || aud.languageName,
+        niche: newName,
+      })),
+      createdAt: new Date().toISOString(),
+    };
+
+    setGlobalAudiences((prev) => [splitAud, ...prev]);
+    setSelectedAudienceId(newId);
+    setCurrentPostIndex(0);
+    setBanner({
+      message: `✂️ Novo público "${newName}" separado com ${filtered.length} grupos!`,
+      tone: 'success',
+    });
+  };
+
   const handleStartBatchJoin = (limitOverride?: number) => {
     const candidates = activeAudienceGroups.filter(
       (g) =>
@@ -2510,6 +2653,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
             imageDataUrl: '',
             autoJoinAndPost: true,
             joinOnly: true,
+            silentMode: silentBackgroundMode,
           },
           '*'
         );
@@ -2697,6 +2841,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
           imageDataUrl: imageToSend,
           autoJoinAndPost: autoJoinAndPostEnabled,
           joinOnly: false,
+          silentMode: silentBackgroundMode,
         },
         '*'
       );
@@ -3044,6 +3189,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
           fullText,
           imageDataUrl: postImageUrl,
           autoJoinAndPost: true,
+          silentMode: silentBackgroundMode,
         },
         '*'
       );
@@ -4335,14 +4481,91 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                 </div>
               </div>
 
-              {/* Saved Global Named Audiences */}
+              {/* Saved Global Named Audiences (with Open vs Closed counts, Split & Merge/Rename) */}
               <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                    <Users className="w-4 h-4 text-emerald-400" />
-                    <span>Públicos Globais Salvos ({globalAudiences.length})</span>
-                  </h4>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                      <Users className="w-4 h-4 text-emerald-400" />
+                      <span>Públicos Globais Salvos ({globalAudiences.length})</span>
+                    </h4>
+                    {globalAudiences.length >= 2 && (
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Marque 2+ públicos para <strong className="text-cyan-300">fundir & recriar</strong> ou separe <strong className="text-emerald-300">Abertos</strong> vs <strong className="text-amber-300">Fechados</strong>.
+                      </p>
+                    )}
+                  </div>
+                  {mergeAudienceIds.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMergeAudienceIds([]);
+                        setMergeNewName('');
+                      }}
+                      className="text-[11px] text-slate-400 hover:text-white underline cursor-pointer"
+                    >
+                      Limpar seleção ({mergeAudienceIds.length})
+                    </button>
+                  )}
                 </div>
+
+                {/* Merge & Recreate Panel when 2+ audiences are checked */}
+                {mergeAudienceIds.length >= 2 && (() => {
+                  const selectedList = globalAudiences.filter((a) => mergeAudienceIds.includes(a.id));
+                  const dedupMap = new Map<string, GlobalGroupItem>();
+                  selectedList.forEach((a) => {
+                    getGroupsForAudience(a, globalGroups).forEach((g) => {
+                      const k = normalizeGroupUrlKey(g.url) || g.id;
+                      if (k && !dedupMap.has(k)) dedupMap.set(k, g);
+                    });
+                  });
+                  const dedupArr = Array.from(dedupMap.values());
+                  const mergedOpen = dedupArr.filter((g) => g.membershipStatus === 'authorized').length;
+                  const mergedClosed = dedupArr.filter(
+                    (g) => g.membershipStatus !== 'authorized' && g.membershipStatus !== 'unavailable'
+                  ).length;
+
+                  return (
+                    <div className="bg-cyan-950/35 border border-cyan-500/60 rounded-xl p-3.5 space-y-2.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <span className="font-bold text-cyan-200 flex items-center gap-1.5">
+                          <Shuffle className="w-3.5 h-3.5" />
+                          <span>Fundir {selectedList.length} Públicos → Recriar & Renomear</span>
+                        </span>
+                        <span className="text-[11px] font-semibold text-slate-200 tabular-nums">
+                          {dedupArr.length} únicos · <span className="text-emerald-300">✅ {mergedOpen} Abertos</span> ·{' '}
+                          <span className="text-amber-300">🔒 {mergedClosed} Fechados</span>
+                        </span>
+                      </div>
+                      <input
+                        type="text"
+                        value={mergeNewName}
+                        onChange={(e) => setMergeNewName(e.target.value)}
+                        placeholder="Digite o nome do novo público fundido..."
+                        className="w-full bg-slate-950 border border-cyan-600/60 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-400"
+                      />
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <label className="inline-flex items-center gap-1.5 text-[11px] text-slate-300 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={mergeReplaceOriginals}
+                            onChange={(e) => setMergeReplaceOriginals(e.target.checked)}
+                            className="rounded border-slate-600 bg-slate-900 text-cyan-500"
+                          />
+                          <span>Apagar originais após recriar</span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={handleMergeAudiences}
+                          className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold rounded-lg inline-flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Sparkles className="w-3.5 h-3.5" />
+                          <span>Fundir & Criar Público</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {globalAudiences.length === 0 ? (
                   <p className="text-xs text-slate-400">
@@ -4354,10 +4577,38 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                       const matched = getGroupsForAudience(aud, globalGroups);
                       const totalMembers = matched.reduce((acc, g) => acc + (g.membersCount || 0), 0);
                       const isActive = activeAudience?.id === aud.id;
+                      const isCheckedForMerge = mergeAudienceIds.includes(aud.id);
+
+                      const openCount = matched.filter((g) => g.membershipStatus === 'authorized').length;
+                      const awaitingCount = matched.filter(
+                        (g) => g.membershipStatus === 'awaiting_admin' || g.membershipStatus === 'join_requested'
+                      ).length;
+                      const blockedCount = matched.filter((g) => g.membershipStatus === 'rate_limited').length;
+                      const closedCount = matched.filter(
+                        (g) => g.membershipStatus !== 'authorized' && g.membershipStatus !== 'unavailable'
+                      ).length;
 
                       return (
-                        <div key={aud.id} className="p-3 space-y-2">
-                          <div className="flex items-center justify-between gap-3">
+                        <div
+                          key={aud.id}
+                          className={`p-3 space-y-2 transition-colors ${
+                            isCheckedForMerge ? 'bg-cyan-950/25' : ''
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2.5">
+                            <button
+                              type="button"
+                              onClick={() => toggleSelectAudienceForMerge(aud.id)}
+                              className="mt-0.5 text-slate-400 hover:text-cyan-300 shrink-0 cursor-pointer"
+                              title="Marcar para fundir com outro público"
+                            >
+                              {isCheckedForMerge ? (
+                                <CheckSquare className="w-4 h-4 text-cyan-400" />
+                              ) : (
+                                <Square className="w-4 h-4" />
+                              )}
+                            </button>
+
                             <div className="min-w-0 flex-1">
                               {renamingAudienceId === aud.id ? (
                                 <div className="flex items-center gap-1.5">
@@ -4391,8 +4642,28 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                                 {aud.countryName} · {aud.languageName} · {matched.length} grupos ·{' '}
                                 {totalMembers.toLocaleString('pt-BR')} membros
                               </div>
+                              {/* Open vs Closed Status Breakdown */}
+                              <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                                <span className="px-1.5 py-0.5 rounded bg-emerald-950/70 border border-emerald-600/50 text-emerald-300 text-[10px] font-semibold tabular-nums">
+                                  ✅ {openCount} Abertos
+                                </span>
+                                <span className="px-1.5 py-0.5 rounded bg-amber-950/70 border border-amber-600/50 text-amber-300 text-[10px] font-semibold tabular-nums">
+                                  🔒 {closedCount} Fechados
+                                </span>
+                                {awaitingCount > 0 && (
+                                  <span className="text-[10px] text-amber-300/80 tabular-nums">
+                                    (⏳ {awaitingCount} pendentes)
+                                  </span>
+                                )}
+                                {blockedCount > 0 && (
+                                  <span className="text-[10px] text-red-300 tabular-nums">
+                                    (🛡️ {blockedCount} bloq.)
+                                  </span>
+                                )}
+                              </div>
                             </div>
-                            <div className="flex items-center gap-1.5 shrink-0">
+
+                            <div className="flex items-center gap-1 shrink-0">
                               <button
                                 type="button"
                                 onClick={() => {
@@ -4427,6 +4698,27 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                               </button>
                             </div>
                           </div>
+
+                          {/* One-Click Split Open vs Closed Groups into Separate Audiences */}
+                          {(openCount > 0 && closedCount > 0) && (
+                            <div className="flex flex-wrap items-center gap-1.5 pl-6 pt-0.5">
+                              <span className="text-[10px] text-slate-400">Separar em novo público:</span>
+                              <button
+                                type="button"
+                                onClick={() => handleSplitAudienceByStatus(aud, 'open_only')}
+                                className="px-2 py-0.5 bg-emerald-950/70 hover:bg-emerald-900 border border-emerald-600/50 text-emerald-200 text-[10px] font-semibold rounded cursor-pointer"
+                              >
+                                ✅ Extrair {openCount} Abertos
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleSplitAudienceByStatus(aud, 'closed_only')}
+                                className="px-2 py-0.5 bg-amber-950/70 hover:bg-amber-900 border border-amber-600/50 text-amber-200 text-[10px] font-semibold rounded cursor-pointer"
+                              >
+                                🔒 Extrair {closedCount} Fechados
+                              </button>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -4684,6 +4976,24 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                               <span>Solicitar Entrada em {batchJoinCountInput} Grupos</span>
                             </button>
                           )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const next = !silentBackgroundMode;
+                              setSilentBackgroundMode(next);
+                              try {
+                                localStorage.setItem('autoviral_global_silent_mode', String(next));
+                              } catch {}
+                            }}
+                            className={`px-2.5 py-1.5 text-[11px] font-semibold rounded-md border cursor-pointer transition-colors ${
+                              silentBackgroundMode
+                                ? 'bg-indigo-600/30 border-indigo-400 text-indigo-100'
+                                : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-white'
+                            }`}
+                            title="Abre as abas em 2º plano silenciosamente sem roubar o foco de outros navegadores ou janelas"
+                          >
+                            {silentBackgroundMode ? '🤫 Silencioso (2º Plano): ON' : '🪟 Foco Normal: OFF'}
+                          </button>
                           {batchJoinProgress && (
                             <span className="text-[11px] text-cyan-300 font-mono tabular-nums truncate max-w-[260px]">
                               ⏳ {batchJoinProgress.current}/{batchJoinProgress.total} · {batchJoinProgress.currentGroupName}
@@ -5858,6 +6168,35 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                           }`}
                         >
                           {autoJoinAndPostEnabled ? 'Auto-Post + Fechar Aba: ON' : 'Manual Assistido'}
+                        </button>
+                      </div>
+
+                      {/* Silent Background Window Mode Toggle */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-950 border border-indigo-700/40 rounded-lg px-3 py-2.5">
+                        <div className="text-xs">
+                          <div className="font-semibold text-indigo-200">
+                            🤫 Abertura Silenciosa em 2º Plano (Não atrapalha outros navegadores/janelas)
+                          </div>
+                          <div className="text-[11px] text-slate-400">
+                            {silentBackgroundMode
+                              ? 'Ativado: abre o grupo em aba oculta (sem puxar foco nem trocar de navegador) para você trabalhar normalmente.'
+                              : 'Desativado: traz a aba do Facebook para frente toda vez que abrir um grupo.'}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = !silentBackgroundMode;
+                            setSilentBackgroundMode(next);
+                            try {
+                              localStorage.setItem('autoviral_global_silent_mode', String(next));
+                            } catch {}
+                          }}
+                          className={`px-3 py-1.5 text-xs font-semibold rounded-md cursor-pointer shrink-0 ${
+                            silentBackgroundMode ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300'
+                          }`}
+                        >
+                          {silentBackgroundMode ? 'Silencioso 2º Plano: ON' : 'Abrir na Frente: OFF'}
                         </button>
                       </div>
 

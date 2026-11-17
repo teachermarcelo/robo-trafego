@@ -1,4 +1,4 @@
-// AutoViral AI Chrome Extension - Content Script V1.4.4
+// AutoViral AI Chrome Extension - Content Script V1.4.5
 // Runs on Facebook, YouTube, Instagram, Pinterest and AutoViral AI Web Platform
 
 (function () {
@@ -693,6 +693,7 @@
         const rect = el.getBoundingClientRect();
         if (rect.width < 60 || rect.height < 16) return false;
         if (el.closest('div[role="dialog"]')) return false;
+        if (el.closest('div[role="article"]')) return false;
         if (el.closest('[aria-busy="true"]')) return false;
         const t = (el.innerText || el.getAttribute('aria-label') || '').trim().toLowerCase();
         return (
@@ -737,17 +738,22 @@
       } catch (e) {}
 
       if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
-        chrome.runtime.sendMessage(
-          { action: 'AUTOVIRAL_MAIN_OPEN_COMPOSER', mode: clickMode },
-          (res) => {
-            if (chrome.runtime.lastError || !res || !res.ok || !res.result || !res.result.found) {
-              try {
-                trigger.focus();
-                trigger.click();
-              } catch (e) {}
-            }
+        chrome.runtime.sendMessage({ action: 'AUTOVIRAL_REAL_CLICK_COMPOSER' }, (realRes) => {
+          if (!chrome.runtime.lastError && realRes && realRes.ok && realRes.result && realRes.result.found) {
+            return;
           }
-        );
+          chrome.runtime.sendMessage(
+            { action: 'AUTOVIRAL_MAIN_OPEN_COMPOSER', mode: clickMode },
+            (res) => {
+              if (chrome.runtime.lastError || !res || !res.ok || !res.result || !res.result.found) {
+                try {
+                  trigger.focus();
+                  trigger.click();
+                } catch (e) {}
+              }
+            }
+          );
+        });
         return;
       }
 
@@ -782,6 +788,8 @@
       const localFallbackInsert = () => {
         const target = findCreatePostTextbox(findCreatePostDialog()) || textbox;
         if (!target) return;
+        const alreadyTxt = (target.innerText || target.textContent || '').trim();
+        if (alreadyTxt.length >= Math.min(10, text.trim().length)) return;
         target.focus();
         try {
           const sel = window.getSelection();
@@ -814,10 +822,15 @@
       };
 
       if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
-        chrome.runtime.sendMessage({ action: 'AUTOVIRAL_MAIN_INSERT_TEXT', text }, (res) => {
-          if (chrome.runtime.lastError || !res || !res.ok || !res.result || !res.result.ok) {
-            localFallbackInsert();
+        chrome.runtime.sendMessage({ action: 'AUTOVIRAL_REAL_INSERT_TEXT', text }, (realRes) => {
+          if (!chrome.runtime.lastError && realRes && realRes.ok && realRes.result && realRes.result.ok) {
+            return;
           }
+          chrome.runtime.sendMessage({ action: 'AUTOVIRAL_MAIN_INSERT_TEXT', text }, (res) => {
+            if (chrome.runtime.lastError || !res || !res.ok || !res.result || !res.result.ok) {
+              localFallbackInsert();
+            }
+          });
         });
         return;
       }
@@ -1297,14 +1310,20 @@
                           msgEl.style.color = '#34d399';
                         }
                         if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
-                          chrome.runtime.sendMessage({ action: 'AUTOVIRAL_MAIN_CLICK_PUBLISH' }, (pubRes) => {
-                            if (chrome.runtime.lastError || !pubRes || !pubRes.ok || !pubRes.result || !pubRes.result.clicked) {
-                              try {
-                                pubBtn.focus();
-                                pubBtn.click();
-                              } catch (e) {}
+                          chrome.runtime.sendMessage({ action: 'AUTOVIRAL_REAL_CLICK_PUBLISH' }, (realPubRes) => {
+                            if (!chrome.runtime.lastError && realPubRes && realPubRes.ok && realPubRes.result && realPubRes.result.clicked) {
+                              startSubmissionMonitor(pending, currentSlug, msgEl, true, cancelAutoBtn);
+                              return;
                             }
-                            startSubmissionMonitor(pending, currentSlug, msgEl, true, cancelAutoBtn);
+                            chrome.runtime.sendMessage({ action: 'AUTOVIRAL_MAIN_CLICK_PUBLISH' }, (pubRes) => {
+                              if (chrome.runtime.lastError || !pubRes || !pubRes.ok || !pubRes.result || !pubRes.result.clicked) {
+                                try {
+                                  pubBtn.focus();
+                                  pubBtn.click();
+                                } catch (e) {}
+                              }
+                              startSubmissionMonitor(pending, currentSlug, msgEl, true, cancelAutoBtn);
+                            });
                           });
                         } else {
                           try {

@@ -2652,13 +2652,13 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       zip.file('README.md', readmeText);
       zip.file(
         'COMO-INSTALAR.txt',
-        `INSTRUÇÕES DE INSTALAÇÃO NO GOOGLE CHROME (AutoViral AI v1.4.4):\n\n1. Extraia este arquivo ZIP em uma pasta nova.\n2. No Chrome, abra chrome://extensions e REMOVA extensões AutoViral antigas (deixe APENAS UMA v1.4.4).\n3. Ative a chave "Modo do desenvolvedor" (topo direito).\n4. Clique em "Carregar sem compactação" (topo esquerdo) e escolha a pasta extraída.\n5. Abra o Facebook (grupos), role a busca, clique em "Mapear Grupos" e depois em "Enviar para o Painel".`
+        `INSTRUÇÕES DE INSTALAÇÃO NO GOOGLE CHROME (AutoViral AI v1.4.5):\n\n1. Extraia este arquivo ZIP em uma pasta nova.\n2. No Chrome, abra chrome://extensions e REMOVA extensões AutoViral antigas (deixe APENAS UMA v1.4.5).\n3. Ative a chave "Modo do desenvolvedor" (topo direito).\n4. Clique em "Carregar sem compactação" (topo esquerdo) e escolha a pasta extraída.\n5. Abra o Facebook (grupos), role a busca, clique em "Mapear Grupos" e depois em "Enviar para o Painel".`
       );
 
       const blob = await zip.generateAsync({ type: 'blob' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = 'extensao-autoviral-v1.4.4.zip';
+      link.download = 'extensao-autoviral-v1.4.5.zip';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -2666,7 +2666,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       console.error('Error generating extension zip:', err);
       const fallbackLink = document.createElement('a');
       fallbackLink.href = '/api/extension/download';
-      fallbackLink.download = 'extensao-autoviral-v1.4.4.zip';
+      fallbackLink.download = 'extensao-autoviral-v1.4.5.zip';
       document.body.appendChild(fallbackLink);
       fallbackLink.click();
       document.body.removeChild(fallbackLink);

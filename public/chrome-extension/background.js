@@ -1,7 +1,7 @@
 // AutoViral AI Chrome Extension - Background Service Worker (Manifest V3)
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('[AutoViral AI] Extensão v1.4.4 instalada com sucesso!');
+  console.log('[AutoViral AI] Extensão v1.4.5 instalada com sucesso!');
   chrome.storage.local.get(['autoviral_interval', 'autoviral_mapped_groups'], (res) => {
     chrome.storage.local.set({
       autoviral_interval: res.autoviral_interval || 350,
@@ -9,6 +9,84 @@ chrome.runtime.onInstalled.addListener(() => {
     });
   });
 });
+
+const sleepMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function withTabDebugger(tabId, fn) {
+  if (!chrome.debugger || typeof tabId !== 'number') {
+    return { usedDebugger: false, error: 'debugger_unavailable' };
+  }
+  const target = { tabId };
+  let attached = false;
+  try {
+    await new Promise((resolve, reject) => {
+      chrome.debugger.attach(target, '1.3', () => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message || 'attach_failed'));
+        } else {
+          attached = true;
+          resolve();
+        }
+      });
+    });
+    const sendCmd = (method, params) =>
+      new Promise((resolve, reject) => {
+        chrome.debugger.sendCommand(target, method, params || {}, (res) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message || method + '_failed'));
+          } else {
+            resolve(res);
+          }
+        });
+      });
+    const value = await fn(sendCmd);
+    return { usedDebugger: true, value };
+  } catch (err) {
+    return { usedDebugger: false, error: String(err && err.message ? err.message : err) };
+  } finally {
+    if (attached) {
+      try {
+        await new Promise((resolve) => {
+          chrome.debugger.detach(target, () => {
+            void chrome.runtime.lastError;
+            resolve();
+          });
+        });
+      } catch (e) {}
+    }
+  }
+}
+
+async function dispatchRealTrustedClick(sendCmd, x, y, hoverDelayMs) {
+  const cx = Math.round(x);
+  const cy = Math.round(y);
+  await sendCmd('Input.dispatchMouseEvent', {
+    type: 'mouseMoved',
+    x: cx,
+    y: cy,
+    pointerType: 'mouse'
+  });
+  await sleepMs(hoverDelayMs || 140);
+  await sendCmd('Input.dispatchMouseEvent', {
+    type: 'mousePressed',
+    x: cx,
+    y: cy,
+    button: 'left',
+    buttons: 1,
+    clickCount: 1,
+    pointerType: 'mouse'
+  });
+  await sleepMs(65);
+  await sendCmd('Input.dispatchMouseEvent', {
+    type: 'mouseReleased',
+    x: cx,
+    y: cy,
+    button: 'left',
+    buttons: 0,
+    clickCount: 1,
+    pointerType: 'mouse'
+  });
+}
 
 function isAutoViralTab(tab) {
   const url = tab.url || '';
@@ -533,6 +611,349 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendResponse({ ok: true, result: results && results[0] ? results[0].result : null });
       }
     );
+    return true;
+  }
+
+  if (request.action === 'AUTOVIRAL_REAL_CLICK_COMPOSER') {
+    const tabId = sender && sender.tab && sender.tab.id;
+    if (!tabId || !chrome.scripting || !chrome.scripting.executeScript) {
+      sendResponse({ ok: false });
+      return false;
+    }
+    (async () => {
+      try {
+        try {
+          await new Promise((resolve) => {
+            chrome.tabs.update(tabId, { active: true }, () => {
+              void chrome.runtime.lastError;
+              resolve();
+            });
+          });
+        } catch (e) {}
+
+        const prepResults = await new Promise((resolve) => {
+          chrome.scripting.executeScript(
+            {
+              target: { tabId },
+              world: 'MAIN',
+              func: () => {
+                const candidates = Array.from(
+                  document.querySelectorAll('[data-pagelet="GroupInlineComposer"] div[role="button"], div[role="button"], span')
+                );
+                const matched = candidates.find((el) => {
+                  const rect = el.getBoundingClientRect();
+                  if (rect.width < 60 || rect.height < 16) return false;
+                  if (el.closest('div[role="dialog"]')) return false;
+                  if (el.closest('div[role="article"]')) return false;
+                  if (el.closest('[aria-busy="true"]')) return false;
+                  const t = (el.innerText || el.getAttribute('aria-label') || '').trim().toLowerCase();
+                  return (
+                    t === 'escreva algo...' ||
+                    t.includes('escreva algo') ||
+                    t.includes('no que você está pensando') ||
+                    t === 'write something...' ||
+                    t.includes('write something') ||
+                    t.includes("what's on your mind") ||
+                    t.includes('criar publicação pública') ||
+                    t.includes('create a public post')
+                  );
+                });
+                const trigger = matched ? (matched.closest('div[role="button"]') || matched) : null;
+                if (!trigger) return { found: false };
+                trigger.scrollIntoView({ behavior: 'instant', block: 'center' });
+                const r = trigger.getBoundingClientRect();
+                return {
+                  found: true,
+                  cx: Math.round(r.left + r.width / 2),
+                  cy: Math.round(r.top + r.height / 2)
+                };
+              }
+            },
+            (results) => {
+              void chrome.runtime.lastError;
+              resolve(results && results[0] ? results[0].result : null);
+            }
+          );
+        });
+
+        if (!prepResults || !prepResults.found) {
+          sendResponse({ ok: false, reason: 'trigger_not_found' });
+          return;
+        }
+
+        await sleepMs(220);
+
+        const freshCoords = await new Promise((resolve) => {
+          chrome.scripting.executeScript(
+            {
+              target: { tabId },
+              world: 'MAIN',
+              func: () => {
+                const candidates = Array.from(
+                  document.querySelectorAll('[data-pagelet="GroupInlineComposer"] div[role="button"], div[role="button"], span')
+                );
+                const matched = candidates.find((el) => {
+                  const rect = el.getBoundingClientRect();
+                  if (rect.width < 60 || rect.height < 16) return false;
+                  if (el.closest('div[role="dialog"]')) return false;
+                  if (el.closest('div[role="article"]')) return false;
+                  if (el.closest('[aria-busy="true"]')) return false;
+                  const t = (el.innerText || el.getAttribute('aria-label') || '').trim().toLowerCase();
+                  return (
+                    t === 'escreva algo...' ||
+                    t.includes('escreva algo') ||
+                    t.includes('no que você está pensando') ||
+                    t === 'write something...' ||
+                    t.includes('write something') ||
+                    t.includes("what's on your mind") ||
+                    t.includes('criar publicação pública') ||
+                    t.includes('create a public post')
+                  );
+                });
+                const trigger = matched ? (matched.closest('div[role="button"]') || matched) : null;
+                if (!trigger) return null;
+                const r = trigger.getBoundingClientRect();
+                return {
+                  cx: Math.round(r.left + Math.min(r.width * 0.5, 180)),
+                  cy: Math.round(r.top + r.height / 2)
+                };
+              }
+            },
+            (results) => {
+              void chrome.runtime.lastError;
+              resolve(results && results[0] ? results[0].result : null);
+            }
+          );
+        });
+
+        const cx = (freshCoords && freshCoords.cx) || prepResults.cx;
+        const cy = (freshCoords && freshCoords.cy) || prepResults.cy;
+
+        const dbg = await withTabDebugger(tabId, async (sendCmd) => {
+          await dispatchRealTrustedClick(sendCmd, cx, cy, 240);
+          return { clicked: true, trusted: true };
+        });
+
+        if (dbg.usedDebugger && dbg.value && dbg.value.clicked) {
+          sendResponse({ ok: true, result: { found: true, mode: 'debugger_trusted', cx, cy } });
+          return;
+        }
+
+        // Fallback if debugger wasn't available
+        await new Promise((resolve) => {
+          chrome.scripting.executeScript(
+            {
+              target: { tabId },
+              world: 'MAIN',
+              func: () => {
+                const candidates = Array.from(
+                  document.querySelectorAll('[data-pagelet="GroupInlineComposer"] div[role="button"], div[role="button"], span')
+                );
+                const matched = candidates.find((el) => {
+                  const rect = el.getBoundingClientRect();
+                  if (rect.width < 60 || rect.height < 16) return false;
+                  if (el.closest('div[role="dialog"]')) return false;
+                  if (el.closest('div[role="article"]')) return false;
+                  if (el.closest('[aria-busy="true"]')) return false;
+                  const t = (el.innerText || el.getAttribute('aria-label') || '').trim().toLowerCase();
+                  return (
+                    t === 'escreva algo...' ||
+                    t.includes('escreva algo') ||
+                    t.includes('no que você está pensando') ||
+                    t === 'write something...' ||
+                    t.includes('write something') ||
+                    t.includes("what's on your mind") ||
+                    t.includes('criar publicação pública') ||
+                    t.includes('create a public post')
+                  );
+                });
+                const trigger = matched ? (matched.closest('div[role="button"]') || matched) : null;
+                if (trigger) {
+                  trigger.focus();
+                  trigger.click();
+                }
+              }
+            },
+            () => {
+              void chrome.runtime.lastError;
+              resolve();
+            }
+          );
+        });
+        sendResponse({ ok: true, result: { found: true, mode: 'main_fallback' } });
+      } catch (err) {
+        sendResponse({ ok: false, error: String(err) });
+      }
+    })();
+    return true;
+  }
+
+  if (request.action === 'AUTOVIRAL_REAL_INSERT_TEXT') {
+    const tabId = sender && sender.tab && sender.tab.id;
+    const textToInsert = String(request.text || '');
+    if (!tabId || !textToInsert || !chrome.scripting || !chrome.scripting.executeScript) {
+      sendResponse({ ok: false });
+      return false;
+    }
+    (async () => {
+      try {
+        const boxInfo = await new Promise((resolve) => {
+          chrome.scripting.executeScript(
+            {
+              target: { tabId },
+              world: 'MAIN',
+              func: () => {
+                const dialogs = Array.from(document.querySelectorAll('div[role="dialog"]')).filter((d) => {
+                  const r = d.getBoundingClientRect();
+                  return r.width > 200 && r.height > 150;
+                });
+                const dlg = dialogs.find((d) => {
+                  const txt = (d.innerText || '').toLowerCase();
+                  const aria = (d.getAttribute('aria-label') || '').toLowerCase();
+                  return (
+                    txt.includes('criar post') ||
+                    txt.includes('create post') ||
+                    txt.includes('criar publicação') ||
+                    txt.includes('create a public post') ||
+                    aria.includes('criar post') ||
+                    aria.includes('create post')
+                  );
+                }) || dialogs[dialogs.length - 1];
+                if (!dlg) return { ok: false };
+                const boxes = Array.from(
+                  dlg.querySelectorAll(
+                    'div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"], div[contenteditable="true"][aria-label]'
+                  )
+                );
+                const tb = boxes.find((el) => {
+                  const rect = el.getBoundingClientRect();
+                  if (rect.width < 40 || rect.height < 20) return false;
+                  const lbl = ((el.getAttribute('aria-label') || el.getAttribute('placeholder') || '') + '').toLowerCase();
+                  return !lbl.includes('coment') && !lbl.includes('comment') && !lbl.includes('responder') && !lbl.includes('reply');
+                });
+                if (!tb) return { ok: false };
+                const existing = (tb.innerText || tb.textContent || '').trim();
+                tb.focus();
+                const r = tb.getBoundingClientRect();
+                return {
+                  ok: true,
+                  alreadyHasText: existing.length >= 10,
+                  cx: Math.round(r.left + Math.min(r.width * 0.4, 120)),
+                  cy: Math.round(r.top + Math.min(r.height * 0.4, 30))
+                };
+              }
+            },
+            (results) => {
+              void chrome.runtime.lastError;
+              resolve(results && results[0] ? results[0].result : null);
+            }
+          );
+        });
+
+        if (!boxInfo || !boxInfo.ok) {
+          sendResponse({ ok: false, reason: 'no_textbox' });
+          return;
+        }
+        if (boxInfo.alreadyHasText) {
+          sendResponse({ ok: true, result: { ok: true, skipped: 'already_filled' } });
+          return;
+        }
+
+        const dbg = await withTabDebugger(tabId, async (sendCmd) => {
+          await dispatchRealTrustedClick(sendCmd, boxInfo.cx, boxInfo.cy, 80);
+          await sleepMs(120);
+          await sendCmd('Input.insertText', { text: textToInsert });
+          return { inserted: true };
+        });
+
+        if (dbg.usedDebugger && dbg.value && dbg.value.inserted) {
+          sendResponse({ ok: true, result: { ok: true, mode: 'debugger_insertText' } });
+          return;
+        }
+        sendResponse({ ok: false, reason: 'debugger_insert_failed' });
+      } catch (err) {
+        sendResponse({ ok: false, error: String(err) });
+      }
+    })();
+    return true;
+  }
+
+  if (request.action === 'AUTOVIRAL_REAL_CLICK_PUBLISH') {
+    const tabId = sender && sender.tab && sender.tab.id;
+    if (!tabId || !chrome.scripting || !chrome.scripting.executeScript) {
+      sendResponse({ ok: false });
+      return false;
+    }
+    (async () => {
+      try {
+        const btnInfo = await new Promise((resolve) => {
+          chrome.scripting.executeScript(
+            {
+              target: { tabId },
+              world: 'MAIN',
+              func: () => {
+                const dialogs = Array.from(document.querySelectorAll('div[role="dialog"]')).filter((d) => {
+                  const r = d.getBoundingClientRect();
+                  return r.width > 200 && r.height > 150;
+                });
+                const dlg = dialogs.find((d) => {
+                  const txt = (d.innerText || '').toLowerCase();
+                  const aria = (d.getAttribute('aria-label') || '').toLowerCase();
+                  return (
+                    txt.includes('criar post') ||
+                    txt.includes('create post') ||
+                    txt.includes('criar publicação') ||
+                    txt.includes('create a public post') ||
+                    aria.includes('criar post') ||
+                    aria.includes('create post')
+                  );
+                }) || dialogs[dialogs.length - 1];
+                if (!dlg) return { ok: false };
+                const candidates = Array.from(dlg.querySelectorAll('div[role="button"], button'));
+                const pubBtn = candidates.find((el) => {
+                  const rect = el.getBoundingClientRect();
+                  if (rect.width === 0 || rect.height === 0) return false;
+                  const txt = ((el.innerText || el.getAttribute('aria-label') || '') + '').trim().toLowerCase();
+                  if (txt !== 'postar' && txt !== 'publicar' && txt !== 'post') return false;
+                  const disabled = el.getAttribute('aria-disabled') === 'true' || el.disabled || el.getAttribute('tabindex') === '-1';
+                  return !disabled;
+                });
+                if (!pubBtn) return { ok: false };
+                pubBtn.scrollIntoView({ behavior: 'instant', block: 'nearest' });
+                const r = pubBtn.getBoundingClientRect();
+                return {
+                  ok: true,
+                  cx: Math.round(r.left + r.width / 2),
+                  cy: Math.round(r.top + r.height / 2)
+                };
+              }
+            },
+            (results) => {
+              void chrome.runtime.lastError;
+              resolve(results && results[0] ? results[0].result : null);
+            }
+          );
+        });
+
+        if (!btnInfo || !btnInfo.ok) {
+          sendResponse({ ok: false, reason: 'no_enabled_btn' });
+          return;
+        }
+
+        const dbg = await withTabDebugger(tabId, async (sendCmd) => {
+          await dispatchRealTrustedClick(sendCmd, btnInfo.cx, btnInfo.cy, 90);
+          return { clicked: true };
+        });
+
+        if (dbg.usedDebugger && dbg.value && dbg.value.clicked) {
+          sendResponse({ ok: true, result: { clicked: true, mode: 'debugger_trusted' } });
+          return;
+        }
+        sendResponse({ ok: false, reason: 'debugger_click_failed' });
+      } catch (err) {
+        sendResponse({ ok: false, error: String(err) });
+      }
+    })();
     return true;
   }
 

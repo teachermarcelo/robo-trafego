@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AutoViral AI - Mapeador FB, Instagram, YouTube & Pinterest",
-  "version": "1.4.4",
+  "version": "1.4.5",
   "description": "Mapeia grupos do Facebook e contas do Instagram sem limite, sincroniza conta conectada para Stories Próprio e integra FB, YouTube e Pinterest ao AutoViral AI.",
   "action": {
     "default_popup": "popup.html",
@@ -11,7 +11,8 @@
     "activeTab",
     "tabs",
     "storage",
-    "scripting"
+    "scripting",
+    "debugger"
   ],
   "host_permissions": [
     "*://*.facebook.com/*",

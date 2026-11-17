@@ -35,6 +35,8 @@ import {
   Pencil,
   Save,
   Shuffle,
+  Image as ImageIcon,
+  Upload,
 } from 'lucide-react';
 import JSZip from 'jszip';
 import { FacebookGroup, FacebookPostLog } from '../types';
@@ -53,6 +55,7 @@ export interface GlobalOffer {
   affiliateUrl: string;
   trackingParamName: 'sub2' | 'sub1' | 'sub3' | 'tid' | 'aff_sub' | 'utm_source';
   presellUrl: string;
+  postImageUrl?: string;
   createdAt: string;
 }
 
@@ -207,6 +210,168 @@ function appendTrackingParam(baseUrl: string, paramName: string, paramValue: str
     const sep = cleanBase.includes('?') ? '&' : '?';
     return `${cleanBase}${sep}${encodeURIComponent(paramName)}=${encodeURIComponent(paramValue)}`;
   }
+}
+
+function ensureClickableUrlsInText(rawText: string): string {
+  return String(rawText || '')
+    .split('\n')
+    .map((line) => line.replace(/(https?:\/\/[^\s<>"']+)(?=\S|$)/gi, (u) => `${u} `).replace(/\s+$/g, ''))
+    .join('\n')
+    .trim();
+}
+
+function renderRichPostBodyWithClickableLinks(text: string): React.ReactNode {
+  const parts = String(text || '').split(/(https?:\/\/[^\s<>"']+)/gi);
+  return parts.map((part, idx) => {
+    if (/^https?:\/\/[^\s<>"']+$/i.test(part)) {
+      return (
+        <a
+          key={idx}
+          href={part}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-sky-400 hover:text-sky-300 underline font-semibold break-all"
+        >
+          {part}
+        </a>
+      );
+    }
+    return <React.Fragment key={idx}>{part}</React.Fragment>;
+  });
+}
+
+function resizeImageFileToDataUrl(file: File, maxDim = 1080): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Falha ao ler arquivo de imagem.'));
+    reader.onload = () => {
+      const img = new window.Image();
+      img.onerror = () => reject(new Error('Arquivo não reconhecido como imagem válida.'));
+      img.onload = () => {
+        let width = img.naturalWidth || img.width || 800;
+        let height = img.naturalHeight || img.height || 600;
+        if (width > maxDim || height > maxDim) {
+          const ratio = Math.min(maxDim / width, maxDim / height);
+          width = Math.max(1, Math.round(width * ratio));
+          height = Math.max(1, Math.round(height * ratio));
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Canvas indisponível.'));
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.85));
+      };
+      img.src = String(reader.result || '');
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function wrapCanvasLines(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, maxLines: number): string[] {
+  const words = String(text || '').trim().split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let current = '';
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (ctx.measureText(candidate).width <= maxWidth) {
+      current = candidate;
+    } else {
+      if (current) lines.push(current);
+      current = word;
+      if (lines.length >= maxLines - 1) break;
+    }
+  }
+  if (current && lines.length < maxLines) lines.push(current);
+  return lines;
+}
+
+function generateOfferPromoImageDataUrl(offer: GlobalOffer, headline?: string): string {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1200;
+  canvas.height = 800;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return '';
+
+  // Dark editorial gradient backdrop
+  const bg = ctx.createLinearGradient(0, 0, 1200, 800);
+  bg.addColorStop(0, '#07111e');
+  bg.addColorStop(0.55, '#0b192c');
+  bg.addColorStop(1, '#062026');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, 1200, 800);
+
+  // Top & bottom subtle accent bars
+  const bar = ctx.createLinearGradient(0, 0, 1200, 0);
+  bar.addColorStop(0, '#06b6d4');
+  bar.addColorStop(1, '#10b981');
+  ctx.fillStyle = bar;
+  ctx.fillRect(0, 0, 1200, 12);
+
+  // Border frame
+  ctx.strokeStyle = 'rgba(34, 211, 238, 0.25)';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(42, 42, 1116, 716);
+
+  // Country & Offer top tag
+  const badgeText = `${(offer.countryCode || 'GLB').toUpperCase()}  |  ${(offer.countryName || 'GLOBAL').toUpperCase()}  ·  ${offer.offerPriceText || 'SPECIAL OFFER'}`;
+  ctx.font = 'bold 24px Inter, system-ui, sans-serif';
+  const badgeW = Math.min(1040, ctx.measureText(badgeText).width + 52);
+  ctx.fillStyle = 'rgba(16, 185, 129, 0.16)';
+  ctx.fillRect(80, 86, badgeW, 54);
+  ctx.strokeStyle = 'rgba(16, 185, 129, 0.55)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(80, 86, badgeW, 54);
+  ctx.fillStyle = '#6ee7b7';
+  ctx.fillText(badgeText, 106, 121);
+
+  // Main Headline
+  const rawTitle = (headline || '').trim() || offer.productName;
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 54px Inter, system-ui, sans-serif';
+  const titleLines = wrapCanvasLines(ctx, rawTitle, 1020, 3);
+  let y = 220;
+  for (const line of titleLines) {
+    ctx.fillText(line, 80, y);
+    y += 70;
+  }
+
+  // Product Name highlight if different from headline
+  if (headline && headline.trim() && headline.trim() !== offer.productName.trim()) {
+    ctx.fillStyle = '#38bdf8';
+    ctx.font = 'bold 30px Inter, system-ui, sans-serif';
+    ctx.fillText(offer.productName.slice(0, 62), 80, y + 12);
+    y += 54;
+  }
+
+  // Comparison / Benefit Box
+  const boxY = Math.max(430, y + 18);
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+  ctx.fillRect(80, boxY, 1040, 175);
+  ctx.strokeStyle = 'rgba(148, 163, 184, 0.28)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(80, boxY, 1040, 175);
+
+  ctx.fillStyle = '#fda4af';
+  ctx.font = 'bold 26px Inter, system-ui, sans-serif';
+  ctx.fillText(`✕  Problem: ${(offer.nichePain || 'Common quality issues').slice(0, 68)}`, 112, boxY + 58);
+
+  ctx.fillStyle = '#34d399';
+  ctx.fillText(`✓  Solution: ${(offer.discountText || offer.offerPriceText || 'Verified Offer').slice(0, 68)}`, 112, boxY + 122);
+
+  // Bottom Link Strip
+  const cleanDomain = (offer.presellUrl || 'https://global-sell-beta.vercel.app/')
+    .replace(/^https?:\/\//i, '')
+    .slice(0, 72);
+  ctx.fillStyle = '#06b6d4';
+  ctx.font = 'bold 26px monospace';
+  ctx.fillText(`Link & Full Comparison: ${cleanDomain}`, 80, 706);
+
+  return canvas.toDataURL('image/jpeg', 0.88);
 }
 
 function detectScopeAndCountry(name: string, searchTerm?: string): { scope: 'global' | 'brazil'; country: string } {
@@ -1604,7 +1769,9 @@ export const GlobalMediaScalersTab: React.FC = () => {
 
     const headline = customPostHeadline.trim();
     const bodyWithLink = customPostBody.replace(/\[PRESELL_LINK\]/g, presellLink).trim();
-    const fullText = headline ? `${headline}\n\n${bodyWithLink}` : bodyWithLink;
+    const rawFullText = headline ? `${headline}\n\n${bodyWithLink}` : bodyWithLink;
+    const fullText = ensureClickableUrlsInText(rawFullText);
+    const postImageUrl = activeOffer?.postImageUrl || '';
 
     try {
       navigator.clipboard?.writeText(fullText);
@@ -1643,7 +1810,11 @@ export const GlobalMediaScalersTab: React.FC = () => {
       groupName: cleanGroupName,
       groupUrl: group.url,
       phase: 'opening',
-      statusLabel: autoJoinAndPostEnabled ? 'Abrindo aba → Entrando → Postando...' : 'Aberto para postagem manual',
+      statusLabel: autoJoinAndPostEnabled
+        ? postImageUrl
+          ? 'Abrindo aba → Entrando → Postando texto + imagem...'
+          : 'Abrindo aba → Entrando → Postando...'
+        : 'Aberto para postagem manual',
       updatedAt: now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
     });
 
@@ -1656,6 +1827,7 @@ export const GlobalMediaScalersTab: React.FC = () => {
           groupUrl: group.url,
           groupName: cleanGroupName,
           fullText,
+          imageDataUrl: postImageUrl,
           autoJoinAndPost: autoJoinAndPostEnabled,
         },
         '*'
@@ -1664,7 +1836,7 @@ export const GlobalMediaScalersTab: React.FC = () => {
 
     setBanner({
       message: autoJoinAndPostEnabled
-        ? `Grupo Global "${cleanGroupName}" aberto! Extensão v1.5.0 vai entrar (ou ativar cookie de espera), postar e fechar a aba automaticamente.`
+        ? `Grupo Global "${cleanGroupName}" aberto! Extensão v1.5.1 vai entrar${postImageUrl ? ', anexar a imagem' : ''}, postar com link clicável e fechar a aba.`
         : `Grupo Global "${cleanGroupName}" aberto e texto copiado para postagem manual assistida.`,
       tone: 'success',
     });
@@ -1738,12 +1910,50 @@ export const GlobalMediaScalersTab: React.FC = () => {
       : 'https://global-sell-beta.vercel.app/';
     const headline = customPostHeadline.trim();
     const bodyWithLink = customPostBody.replace(/\[PRESELL_LINK\]/g, presellLink).trim();
-    const fullText = headline ? `${headline}\n\n${bodyWithLink}` : bodyWithLink;
+    const fullText = ensureClickableUrlsInText(headline ? `${headline}\n\n${bodyWithLink}` : bodyWithLink);
     copyText(fullText, 'full-manual-preview');
     setBanner({
-      message: 'Postagem inteira (Título + Corpo + Link rastreado) copiada! Basta dar Ctrl+V para postar manualmente.',
+      message: 'Postagem inteira (Título + Corpo + Link clicável rastreado) copiada! Basta dar Ctrl+V para postar manualmente.',
       tone: 'success',
     });
+  };
+
+  const handleUploadOfferPostImage = async (file: File | null) => {
+    if (!file || !activeOffer) return;
+    try {
+      const dataUrl = await resizeImageFileToDataUrl(file);
+      handleUpdateOfferField('postImageUrl', dataUrl);
+      setBanner({
+        message: `Imagem "${file.name}" carregada e otimizada para a oferta "${activeOffer.productName}"! Será anexada nos próximos posts.`,
+        tone: 'success',
+      });
+    } catch (err: any) {
+      setBanner({
+        message: err?.message || 'Não foi possível carregar esta imagem.',
+        tone: 'warning',
+      });
+    }
+  };
+
+  const handleGenerateOfferPostImage = () => {
+    if (!activeOffer) return;
+    const dataUrl = generateOfferPromoImageDataUrl(activeOffer, customPostHeadline);
+    if (!dataUrl) return;
+    handleUpdateOfferField('postImageUrl', dataUrl);
+    setBanner({
+      message: `Card visual da oferta "${activeOffer.productName}" gerado em 1 clique! Já aparece na Prévia e vai junto no Facebook.`,
+      tone: 'success',
+    });
+  };
+
+  const handleDownloadOfferPostImage = () => {
+    if (!activeOffer?.postImageUrl) return;
+    const link = document.createElement('a');
+    link.href = activeOffer.postImageUrl;
+    link.download = `post-${(activeOffer.countryCode || 'global').toLowerCase()}.jpg`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const handleCheckWaitingApprovalsNow = () => {
@@ -1806,17 +2016,17 @@ export const GlobalMediaScalersTab: React.FC = () => {
       );
       zip.file(
         'COMO-ATUALIZAR.txt',
-        '1. Extraia este ZIP substituindo os arquivos da pasta anterior (ou em uma pasta nova).\n2. Abra chrome://extensions no Google Chrome.\n3. Clique no ícone de Atualizar (↻) da extensão AutoViral AI v1.5.0.\n4. Recarregue (F5) a aba do AutoViral AI.'
+        '1. Extraia este ZIP substituindo os arquivos da pasta anterior (ou em uma pasta nova).\n2. Abra chrome://extensions no Google Chrome.\n3. Clique no ícone de Atualizar (↻) da extensão AutoViral AI v1.5.1.\n4. Recarregue (F5) a aba do AutoViral AI.'
       );
       const blob = await zip.generateAsync({ type: 'blob' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = 'extensao-autoviral-v1.5.0.zip';
+      link.download = 'extensao-autoviral-v1.5.1.zip';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       setBanner({
-        message: 'Extensão v1.5.0 atualizada baixada! Extraia, recarregue (↻) em chrome://extensions e dê F5 nesta página.',
+        message: 'Extensão v1.5.1 atualizada baixada! Extraia, recarregue (↻) em chrome://extensions e dê F5 nesta página.',
         tone: 'success',
       });
     } catch {
@@ -1843,7 +2053,8 @@ export const GlobalMediaScalersTab: React.FC = () => {
       : 'https://global-sell-beta.vercel.app/';
     const headline = customPostHeadline.trim();
     const bodyWithLink = customPostBody.replace(/\[PRESELL_LINK\]/g, presellLink).trim();
-    const fullText = headline ? `${headline}\n\n${bodyWithLink}` : bodyWithLink;
+    const fullText = ensureClickableUrlsInText(headline ? `${headline}\n\n${bodyWithLink}` : bodyWithLink);
+    const postImageUrl = activeOffer?.postImageUrl || '';
 
     try {
       navigator.clipboard?.writeText(fullText);
@@ -1871,6 +2082,7 @@ export const GlobalMediaScalersTab: React.FC = () => {
           groupUrl: log.groupUrl,
           groupName: sanitizeGlobalGroupName(log.groupName),
           fullText,
+          imageDataUrl: postImageUrl,
           autoJoinAndPost: true,
         },
         '*'
@@ -2223,6 +2435,90 @@ export const GlobalMediaScalersTab: React.FC = () => {
                     <option value="utm_source">utm_source (Genérico / Qualquer Site)</option>
                   </select>
                 </label>
+
+                {/* Post Image Configuration for this Offer */}
+                <div className="md:col-span-2 bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="text-xs font-semibold text-white flex items-center gap-1.5">
+                        <ImageIcon className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>Imagem da Postagem (Anexada automaticamente no Facebook + Prévia)</span>
+                      </div>
+                      <p className="text-[11px] text-slate-400">
+                        Envie uma foto do PC, cole um link HTTPS ou gere um card visual promocional em 1 clique.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs text-white font-medium rounded-md inline-flex items-center gap-1.5 cursor-pointer">
+                        <Upload className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>Enviar Foto do PC</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0] || null;
+                            handleUploadOfferPostImage(f);
+                            e.currentTarget.value = '';
+                          }}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={handleGenerateOfferPostImage}
+                        className="px-2.5 py-1.5 bg-cyan-600/20 hover:bg-cyan-600/35 border border-cyan-500/40 text-cyan-200 text-xs font-semibold rounded-md inline-flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>Gerar Card Visual (1 Clique)</span>
+                      </button>
+                      {activeOffer.postImageUrl && (
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateOfferField('postImageUrl', '')}
+                          className="px-2.5 py-1.5 bg-rose-950/60 hover:bg-rose-900/60 border border-rose-700/50 text-rose-200 text-xs rounded-md inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          <span>Remover</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                    <input
+                      type="url"
+                      value={activeOffer.postImageUrl?.startsWith('data:') ? '' : activeOffer.postImageUrl || ''}
+                      onChange={(e) => handleUpdateOfferField('postImageUrl', e.target.value)}
+                      placeholder={
+                        activeOffer.postImageUrl?.startsWith('data:')
+                          ? 'Imagem local/gerada ativa (ou cole aqui uma URL https://... para substituir)'
+                          : 'Opcional: cole a URL direta da imagem (https://...)'
+                      }
+                      className="flex-1 w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-cyan-500"
+                    />
+                  </div>
+
+                  {activeOffer.postImageUrl && (
+                    <div className="flex items-center gap-3 pt-1">
+                      <img
+                        src={activeOffer.postImageUrl}
+                        alt={`Imagem da oferta ${activeOffer.productName}`}
+                        className="w-28 h-20 object-cover rounded-lg border border-slate-700 bg-slate-900 shrink-0"
+                      />
+                      <div className="text-[11px] text-emerald-300 space-y-1">
+                        <div className="font-semibold">Imagem pronta para anexar no Facebook</div>
+                        <button
+                          type="button"
+                          onClick={handleDownloadOfferPostImage}
+                          className="text-cyan-300 hover:text-cyan-200 underline inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          <Download className="w-3 h-3" />
+                          <span>Baixar imagem (.jpg)</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Universal Tracking Answer & Ready Links */}
@@ -3384,10 +3680,10 @@ export const GlobalMediaScalersTab: React.FC = () => {
                           onClick={handleDownloadGlobalExtensionZip}
                           disabled={isDownloadingExt}
                           className="px-3 py-1.5 bg-cyan-600/20 hover:bg-cyan-600/35 border border-cyan-500/40 text-cyan-200 text-[11px] font-semibold rounded-md inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
-                          title="Baixar Extensão v1.5.0 (Cookie Espera + Gatilho de Aceite + Fluxo Alt Post Anônimo)"
+                          title="Baixar Extensão v1.5.1 (Imagem no Post + Link Clicável + Cookie Espera + Fluxo Alt Post Anônimo)"
                         >
                           <Download className="w-3 h-3" />
-                          <span>{isDownloadingExt ? 'Gerando ZIP...' : 'Atualizar Extensão v1.5.0 (ZIP)'}</span>
+                          <span>{isDownloadingExt ? 'Gerando ZIP...' : 'Atualizar Extensão v1.5.1 (ZIP)'}</span>
                         </button>
                       </div>
                       <div className="flex flex-wrap gap-2">
@@ -3543,7 +3839,7 @@ export const GlobalMediaScalersTab: React.FC = () => {
                       </label>
 
                       <label className="block space-y-1">
-                        <span className="text-xs text-slate-400">Corpo da Postagem (formatação visual + link Presell rastreado)</span>
+                        <span className="text-xs text-slate-400">Corpo da Postagem (formatação visual + link Presell clicável)</span>
                         <textarea
                           rows={7}
                           value={customPostBody}
@@ -3551,6 +3847,64 @@ export const GlobalMediaScalersTab: React.FC = () => {
                           className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-xs text-slate-100 leading-relaxed"
                         />
                       </label>
+
+                      {/* Post Image Bar inside Dispatch Config */}
+                      <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 space-y-2.5">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="text-xs font-semibold text-white inline-flex items-center gap-1.5">
+                            <ImageIcon className="w-3.5 h-3.5 text-cyan-400" />
+                            <span>Imagem da Postagem (Anexada automaticamente no Facebook)</span>
+                          </span>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <label className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-[11px] font-medium text-white rounded-md inline-flex items-center gap-1 cursor-pointer">
+                              <Upload className="w-3 h-3 text-cyan-400" />
+                              <span>Enviar Foto</span>
+                              <input
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={(e) => {
+                                  const f = e.target.files?.[0] || null;
+                                  handleUploadOfferPostImage(f);
+                                  e.currentTarget.value = '';
+                                }}
+                              />
+                            </label>
+                            <button
+                              type="button"
+                              onClick={handleGenerateOfferPostImage}
+                              className="px-2.5 py-1 bg-cyan-600/20 hover:bg-cyan-600/35 border border-cyan-500/40 text-cyan-200 text-[11px] font-semibold rounded-md inline-flex items-center gap-1 cursor-pointer"
+                            >
+                              <Sparkles className="w-3 h-3" />
+                              <span>Gerar Imagem Auto</span>
+                            </button>
+                            {activeOffer.postImageUrl && (
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateOfferField('postImageUrl', '')}
+                                className="px-2 py-1 bg-rose-950/60 hover:bg-rose-900/60 border border-rose-700/50 text-rose-200 text-[11px] rounded-md inline-flex items-center gap-1 cursor-pointer"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                <span>Remover</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                          <input
+                            type="url"
+                            value={activeOffer.postImageUrl?.startsWith('data:') ? '' : activeOffer.postImageUrl || ''}
+                            onChange={(e) => handleUpdateOfferField('postImageUrl', e.target.value)}
+                            placeholder={
+                              activeOffer.postImageUrl?.startsWith('data:')
+                                ? 'Imagem pronta vinculada (cole uma URL https://... se quiser trocar)'
+                                : 'Opcional: cole a URL de uma imagem (https://...) ou gere acima'
+                            }
+                            className="flex-1 bg-slate-900 border border-slate-700 rounded-md px-2.5 py-1.5 text-[11px] text-slate-200"
+                          />
+                        </div>
+                      </div>
 
                       {/* Live Facebook Feed Preview + Editor + Save + Copy Manual */}
                       {showFeedPreview && (
@@ -3643,13 +3997,41 @@ export const GlobalMediaScalersTab: React.FC = () => {
                                 {customPostHeadline && (
                                   <div className="font-bold text-white text-[13px]">{customPostHeadline}</div>
                                 )}
-                                <div>{customPostBody}</div>
+                                <div>{renderRichPostBodyWithClickableLinks(customPostBody)}</div>
                               </div>
                             )}
 
-                            <div className="border border-slate-800 bg-slate-950 rounded-lg p-2.5 flex items-center justify-between gap-3">
+                            {activeOffer.postImageUrl && (
+                              <div className="rounded-lg overflow-hidden border border-slate-800 bg-slate-950">
+                                <img
+                                  src={activeOffer.postImageUrl}
+                                  alt={`Prévia visual ${activeOffer.productName}`}
+                                  className="w-full max-h-72 object-cover"
+                                />
+                                <div className="px-3 py-1.5 bg-slate-950/90 border-t border-slate-800 flex items-center justify-between gap-2 text-[11px]">
+                                  <span className="text-emerald-300 font-medium">
+                                    Imagem anexada (vai junto no Facebook)
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={handleDownloadOfferPostImage}
+                                    className="text-cyan-300 hover:text-cyan-200 inline-flex items-center gap-1 cursor-pointer"
+                                  >
+                                    <Download className="w-3 h-3" />
+                                    <span>Baixar Imagem</span>
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
+                            <a
+                              href={activePresellTrackingUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="border border-slate-800 hover:border-cyan-500/50 bg-slate-950 rounded-lg p-2.5 flex items-center justify-between gap-3 transition-colors group"
+                            >
                               <div className="min-w-0">
-                                <div className="text-[10px] text-emerald-400 font-mono truncate">
+                                <div className="text-[10px] text-sky-400 group-hover:text-sky-300 font-mono truncate underline">
                                   {activePresellTrackingUrl.replace(/^https?:\/\//, '')}
                                 </div>
                                 <div className="text-xs font-semibold text-white truncate">
@@ -3657,21 +4039,24 @@ export const GlobalMediaScalersTab: React.FC = () => {
                                 </div>
                                 <div className="text-[11px] text-slate-400 truncate">{activeOffer.discountText}</div>
                               </div>
-                              <ExternalLink className="w-4 h-4 text-slate-500 shrink-0" />
-                            </div>
+                              <div className="flex items-center gap-1 text-[10px] font-semibold text-sky-400 shrink-0">
+                                <span>Link Clicável</span>
+                                <ExternalLink className="w-3.5 h-3.5" />
+                              </div>
+                            </a>
                           </div>
                         </div>
                       )}
 
-                      {/* Auto Join + Auto Post + Auto Close Tab Toggle (Same System as Brazil v1.5.0) */}
+                      {/* Auto Join + Auto Post + Auto Close Tab Toggle (Same System as Brazil v1.5.1) */}
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5">
                         <div className="text-xs">
                           <div className="font-semibold text-white">
-                            Sistema Automático: Abrir → Entrar / Cookie Espera → Postar → Fechar Aba (v1.5.0)
+                            Sistema Automático: Abrir → Entrar / Cookie Espera → Postar + Imagem → Fechar Aba (v1.5.1)
                           </div>
                           <div className="text-[11px] text-slate-400">
                             {autoJoinAndPostEnabled
-                              ? 'Ativado: entra automaticamente (ou ativa cookie + fecha aba se aguardar admin), posta (com fluxo Alt se pedir Post Anônimo) e fecha em 4s.'
+                              ? 'Ativado: entra automaticamente (ou ativa cookie + fecha aba se aguardar admin), posta texto com link clicável + imagem e fecha em 4s.'
                               : 'Desativado: apenas abre o grupo e copia o texto para você postar manualmente.'}
                           </div>
                         </div>

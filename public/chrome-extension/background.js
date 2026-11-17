@@ -1,7 +1,7 @@
 // AutoViral AI Chrome Extension - Background Service Worker (Manifest V3)
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('[AutoViral AI] Extensão v1.5.0 instalada com sucesso!');
+  console.log('[AutoViral AI] Extensão v1.5.1 instalada com sucesso!');
   chrome.storage.local.get(['autoviral_interval', 'autoviral_mapped_groups', 'autoviral_waiting_approval_map'], (res) => {
     chrome.storage.local.set({
       autoviral_interval: res.autoviral_interval || 350,
@@ -355,6 +355,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       groupSlug: groupSlug,
       groupName: request.groupName || '',
       fullText: request.fullText || '',
+      imageDataUrl: request.imageDataUrl || '',
       autoJoinAndPost: request.autoJoinAndPost !== false,
       createdAt: new Date().toISOString()
     };
@@ -970,12 +971,66 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const dbg = await withTabDebugger(tabId, async (sendCmd) => {
           await dispatchRealTrustedClick(sendCmd, boxInfo.cx, boxInfo.cy, 80);
           await sleepMs(120);
-          await sendCmd('Input.insertText', { text: textToInsert });
+
+          // Split text on URLs so each URL gets a real Space/Return keystroke triggering Facebook's clickable AutoLink!
+          const tokens = textToInsert.split(/(https?:\/\/[^\s<>"']+)/gi);
+          for (let i = 0; i < tokens.length; i++) {
+            const part = tokens[i];
+            if (!part) continue;
+            if (/^https?:\/\//i.test(part)) {
+              await sendCmd('Input.insertText', { text: part });
+              await sendCmd('Input.dispatchKeyEvent', {
+                type: 'keyDown',
+                key: ' ',
+                code: 'Space',
+                text: ' ',
+                windowsVirtualKeyCode: 32,
+                nativeVirtualKeyCode: 32
+              });
+              await sendCmd('Input.dispatchKeyEvent', {
+                type: 'keyUp',
+                key: ' ',
+                code: 'Space',
+                windowsVirtualKeyCode: 32,
+                nativeVirtualKeyCode: 32
+              });
+              await sleepMs(380);
+            } else {
+              let cleaned = part;
+              if (i > 0 && /^https?:\/\//i.test(tokens[i - 1]) && cleaned.startsWith(' ')) {
+                cleaned = cleaned.slice(1);
+              }
+              const lines = cleaned.split('\n');
+              for (let li = 0; li < lines.length; li++) {
+                if (lines[li]) {
+                  await sendCmd('Input.insertText', { text: lines[li] });
+                }
+                if (li < lines.length - 1) {
+                  await sendCmd('Input.dispatchKeyEvent', {
+                    type: 'keyDown',
+                    key: 'Enter',
+                    code: 'Enter',
+                    text: '\r',
+                    windowsVirtualKeyCode: 13,
+                    nativeVirtualKeyCode: 13
+                  });
+                  await sendCmd('Input.dispatchKeyEvent', {
+                    type: 'keyUp',
+                    key: 'Enter',
+                    code: 'Enter',
+                    windowsVirtualKeyCode: 13,
+                    nativeVirtualKeyCode: 13
+                  });
+                  await sleepMs(45);
+                }
+              }
+            }
+          }
           return { inserted: true };
         });
 
         if (dbg.usedDebugger && dbg.value && dbg.value.inserted) {
-          sendResponse({ ok: true, result: { ok: true, mode: 'debugger_insertText' } });
+          sendResponse({ ok: true, result: { ok: true, mode: 'debugger_insertText_autolink' } });
           return;
         }
         sendResponse({ ok: false, reason: 'debugger_insert_failed' });
@@ -983,6 +1038,119 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendResponse({ ok: false, error: String(err) });
       }
     })();
+    return true;
+  }
+
+  if (request.action === 'AUTOVIRAL_FETCH_IMAGE_DATAURL') {
+    const rawUrl = String(request.imageUrl || '').trim();
+    if (!rawUrl) {
+      sendResponse({ ok: false, reason: 'empty_url' });
+      return false;
+    }
+    if (rawUrl.startsWith('data:image/')) {
+      sendResponse({ ok: true, dataUrl: rawUrl });
+      return false;
+    }
+    (async () => {
+      try {
+        const resp = await fetch(rawUrl);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const blob = await resp.blob();
+        const mimeType = blob.type && blob.type.startsWith('image/') ? blob.type : 'image/jpeg';
+        const ab = await blob.arrayBuffer();
+        const bytes = new Uint8Array(ab);
+        let binary = '';
+        const chunk = 8192;
+        for (let i = 0; i < bytes.length; i += chunk) {
+          binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
+        }
+        const dataUrl = `data:${mimeType};base64,${btoa(binary)}`;
+        sendResponse({ ok: true, dataUrl });
+      } catch (err) {
+        sendResponse({ ok: false, error: String(err) });
+      }
+    })();
+    return true;
+  }
+
+  if (request.action === 'AUTOVIRAL_MAIN_ATTACH_IMAGE') {
+    const tabId = sender && sender.tab && sender.tab.id;
+    const dataUrl = String(request.dataUrl || '');
+    if (!tabId || !dataUrl.startsWith('data:image/') || !chrome.scripting || !chrome.scripting.executeScript) {
+      sendResponse({ ok: false });
+      return false;
+    }
+    chrome.scripting.executeScript(
+      {
+        target: { tabId },
+        world: 'MAIN',
+        args: [dataUrl],
+        func: (imgDataUrl) => {
+          try {
+            const parts = imgDataUrl.split(',');
+            const mimeMatch = parts[0].match(/data:([^;]+);/i);
+            const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+            const byteStr = atob(parts[1] || '');
+            const ab = new ArrayBuffer(byteStr.length);
+            const ia = new Uint8Array(ab);
+            for (let i = 0; i < byteStr.length; i++) ia[i] = byteStr.charCodeAt(i);
+            const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg';
+            const file = new File([ab], `autoviral-post.${ext}`, { type: mime });
+            const dt = new DataTransfer();
+            dt.items.add(file);
+
+            const dialogs = Array.from(document.querySelectorAll('div[role="dialog"]')).filter((d) => {
+              const r = d.getBoundingClientRect();
+              return r.width > 200 && r.height > 150;
+            });
+            const dlg = dialogs.find((d) => {
+              const txt = (d.innerText || '').toLowerCase();
+              return txt.includes('criar post') || txt.includes('create post') || txt.includes('criar publicação');
+            }) || dialogs[dialogs.length - 1];
+            if (!dlg) return { attached: false, reason: 'no_dialog' };
+
+            const findImgFileInput = () => {
+              const inputs = Array.from(dlg.querySelectorAll('input[type="file"]'));
+              return inputs.find((inp) => (inp.accept || '').includes('image')) || inputs[0] || null;
+            };
+
+            let fileInput = findImgFileInput();
+            if (!fileInput) {
+              const photoBtns = Array.from(dlg.querySelectorAll('div[role="button"], button')).filter((el) => {
+                const lbl = ((el.getAttribute('aria-label') || el.innerText || '') + '').toLowerCase();
+                return lbl.includes('foto') || lbl.includes('photo') || lbl.includes('imagem') || lbl.includes('image');
+              });
+              if (photoBtns[0]) {
+                try { photoBtns[0].click(); } catch (e) {}
+                fileInput = findImgFileInput();
+              }
+            }
+
+            if (fileInput) {
+              fileInput.files = dt.files;
+              fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+              fileInput.dispatchEvent(new Event('input', { bubbles: true }));
+              return { attached: true, method: 'file_input' };
+            }
+
+            const tb = dlg.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]');
+            if (tb) {
+              tb.focus();
+              tb.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+              return { attached: true, method: 'clipboard_paste' };
+            }
+
+            return { attached: false, reason: 'no_target' };
+          } catch (err) {
+            return { attached: false, error: String(err) };
+          }
+        }
+      },
+      (results) => {
+        void chrome.runtime.lastError;
+        sendResponse({ ok: true, result: results && results[0] ? results[0].result : null });
+      }
+    );
     return true;
   }
 
@@ -1107,6 +1275,7 @@ async function triggerApprovedGroupPostBySlug(slug, alreadyInTab, existingTabId)
     groupSlug: cleanSlug,
     groupName: item.groupName || '',
     fullText: item.fullText || '',
+    imageDataUrl: item.imageDataUrl || '',
     autoJoinAndPost: true,
     createdAt: new Date().toISOString()
   };

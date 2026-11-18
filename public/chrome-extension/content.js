@@ -1,4 +1,4 @@
-// AutoViral AI Chrome Extension - Content Script V1.5.5
+// AutoViral AI Chrome Extension - Content Script V1.5.6
 // Runs on Facebook, YouTube, Instagram, Pinterest and AutoViral AI Web Platform
 
 (function () {
@@ -1111,12 +1111,16 @@
 
     function hasAttachedPhotoInComposerDialog(dlg) {
       if (!dlg) return false;
-      const hasBlobOrDataImg = Array.from(dlg.querySelectorAll('img')).some((img) => {
+      const hasAttachedImg = Array.from(dlg.querySelectorAll('img')).some((img) => {
         const r = img.getBoundingClientRect();
         const src = img.getAttribute('src') || '';
-        return (src.startsWith('blob:') || src.startsWith('data:image/')) && r.width > 72 && r.height > 72;
+        return (
+          (src.startsWith('blob:') || src.startsWith('data:image/') || src.includes('scontent') || src.includes('fbcdn')) &&
+          r.width > 72 &&
+          r.height > 72
+        );
       });
-      if (hasBlobOrDataImg) return true;
+      if (hasAttachedImg) return true;
       return Boolean(
         dlg.querySelector(
           '[aria-label="Editar"], [aria-label="Edit"], [aria-label*="Editar tudo" i], [aria-label*="Edit all" i], [aria-label*="Editar foto" i], [aria-label*="Edit photo" i]'
@@ -1138,6 +1142,34 @@
           if (onDone) onDone(false);
           return;
         }
+        const tryRealClipboardPaste = () => {
+          if (msgEl) {
+            msgEl.textContent = '📋 Aplicando colagem automática (Ctrl+V) da foto em "Criar post"...';
+            msgEl.style.color = '#38bdf8';
+          }
+          chrome.runtime.sendMessage({ action: 'AUTOVIRAL_REAL_PASTE_IMAGE', dataUrl: fetchRes.dataUrl }, (pasteRes) => {
+            void chrome.runtime.lastError;
+            if (pasteRes && pasteRes.ok && pasteRes.result && pasteRes.result.previewDetected) {
+              if (onDone) onDone(true);
+              return;
+            }
+            let pasteTries = 0;
+            const waitPaste = setInterval(() => {
+              pasteTries++;
+              const dlg = findCreatePostDialog();
+              if (hasAttachedPhotoInComposerDialog(dlg)) {
+                clearInterval(waitPaste);
+                if (onDone) onDone(true);
+                return;
+              }
+              if (pasteTries >= 8) {
+                clearInterval(waitPaste);
+                if (onDone) onDone(Boolean(pasteRes && pasteRes.ok));
+              }
+            }, 350);
+          });
+        };
+
         const attemptAttach = (attemptNo) => {
           chrome.runtime.sendMessage({ action: 'AUTOVIRAL_MAIN_ATTACH_IMAGE', dataUrl: fetchRes.dataUrl }, (attRes) => {
             void chrome.runtime.lastError;
@@ -1151,12 +1183,12 @@
                 if (onDone) onDone(true);
                 return;
               }
-              if (tries >= 9) {
+              if (tries >= 8) {
                 clearInterval(waitPreview);
                 if (attemptNo < 2) {
                   attemptAttach(attemptNo + 1);
-                } else if (onDone) {
-                  onDone(Boolean(attRes && attRes.result && attRes.result.attached));
+                } else {
+                  tryRealClipboardPaste();
                 }
               }
             }, 350);
@@ -1178,13 +1210,20 @@
     }
 
     function findCreatePostDialog() {
-      const dialogs = Array.from(document.querySelectorAll('div[role="dialog"]')).filter((d) => {
+      const allDialogs = Array.from(document.querySelectorAll('div[role="dialog"]'));
+      const scored = [];
+      allDialogs.forEach((d, idx) => {
         const r = d.getBoundingClientRect();
-        return r.width > 200 && r.height > 150;
-      });
-      return dialogs.find((d) => {
-        const hasTb = Boolean(d.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]'));
-        if (hasTb) return true;
+        if (r.width < 200 || r.height < 150) return;
+        if (d.getAttribute('aria-hidden') === 'true') return;
+        try {
+          const st = window.getComputedStyle(d);
+          if (st.display === 'none' || st.visibility === 'hidden' || st.pointerEvents === 'none') return;
+          const op = parseFloat(st.opacity || '1');
+          if (!isNaN(op) && op < 0.35) return;
+        } catch (e) {}
+
+        const tb = d.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]');
         const txt = (d.innerText || '').toLowerCase();
         const aria = (d.getAttribute('aria-label') || '').toLowerCase();
         const isComposerTitle =
@@ -1194,6 +1233,7 @@
           txt.includes('crear publicación') ||
           txt.includes('crear publicacion') ||
           txt.includes('create a public post') ||
+          txt.includes('crie um post público') ||
           txt.includes('publicação anônima') ||
           txt.includes('publicación anónima') ||
           txt.includes('anonymous post') ||
@@ -1204,8 +1244,39 @@
           const bt = ((b.innerText || b.getAttribute('aria-label') || '') + '').trim().toLowerCase();
           return bt === 'postar' || bt === 'publicar' || bt === 'post';
         });
-        return isComposerTitle || hasPublishBtn;
-      }) || null;
+        if (!tb && !isComposerTitle && !hasPublishBtn) return;
+
+        let score = idx * 100 + (tb ? 500 : 0) + (hasPublishBtn ? 200 : 0);
+        let cur = d;
+        for (let depth = 0; depth < 6 && cur && cur !== document.body; depth++) {
+          try {
+            const z = parseInt(window.getComputedStyle(cur).zIndex, 10);
+            if (!isNaN(z) && z > 0) score += Math.min(z, 50000);
+          } catch (e) {}
+          cur = cur.parentElement;
+        }
+        const testPts = [];
+        if (tb) {
+          const tr = tb.getBoundingClientRect();
+          if (tr.width > 20 && tr.height > 15) {
+            testPts.push([tr.left + Math.min(tr.width * 0.4, 100), tr.top + Math.min(tr.height * 0.5, 24)]);
+          }
+        }
+        testPts.push([r.left + r.width * 0.5, r.top + Math.min(r.height * 0.25, 90)]);
+        testPts.push([r.left + r.width * 0.5, r.top + r.height * 0.5]);
+        for (const [px, py] of testPts) {
+          if (px >= 0 && py >= 0 && px <= window.innerWidth && py <= window.innerHeight) {
+            const topEl = document.elementFromPoint(px, py);
+            if (topEl && d.contains(topEl)) {
+              score += 1000000;
+              break;
+            }
+          }
+        }
+        scored.push({ d, score });
+      });
+      scored.sort((a, b) => b.score - a.score);
+      return scored[0] ? scored[0].d : null;
     }
 
     function findCreatePostTextbox(dlg) {
@@ -1822,14 +1893,17 @@
                           dismissFacebookLinkPreviewCardIfPhotoPresent();
                         }
                         let pubTries = 0;
+                        let latePasteWaitUntil = 0;
+                        let didLatePaste = false;
                         const waitPubBtn = setInterval(() => {
+                          if (Date.now() < latePasteWaitUntil) return;
                           pubTries++;
                           if (cancelled) {
                             clearInterval(waitPubBtn);
                             return;
                           }
                           const activeDlg = findCreatePostDialog() || freshBox.closest('div[role="dialog"]');
-                          const freshTb = findCreatePostTextbox(activeDlg) || freshBox;
+                          const freshTb = (activeDlg && findCreatePostTextbox(activeDlg)) || freshBox;
                           const currentContent = (freshTb.innerText || freshTb.textContent || '').trim();
                           if (currentContent.length < 5) {
                             if (pubTries === 1 || pubTries === 3 || pubTries === 6) {
@@ -1847,6 +1921,14 @@
                             return;
                           }
                           if (pending.imageDataUrl && !hasAttachedPhotoInComposerDialog(activeDlg)) {
+                            if (!didLatePaste) {
+                              didLatePaste = true;
+                              latePasteWaitUntil = Date.now() + 3600;
+                              attachImageToFacebookComposer(pending.imageDataUrl, msgEl, () => {
+                                latePasteWaitUntil = 0;
+                              });
+                              return;
+                            }
                             clearInterval(waitPubBtn);
                             if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
                             if (msgEl) {
@@ -1969,7 +2051,7 @@
                   groupUrl: window.location.href,
                   groupName: pending.groupName,
                   approvalStatus: 'composer_stuck',
-                  note: 'Facebook travou o modal automático (Atualize p/ Extensão v1.5.5 ou pause AdBlock). Texto copiado.'
+                  note: 'Facebook travou o modal automático (Atualize p/ Extensão v1.5.6 ou pause AdBlock). Texto copiado.'
                 });
                 if (msgEl) {
                   msgEl.style.color = '#fbbf24';

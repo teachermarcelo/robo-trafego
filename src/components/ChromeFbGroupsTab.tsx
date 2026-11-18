@@ -3260,7 +3260,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
     try {
       const zip = new JSZip();
 
-      const cacheBust = `v=1.5.5&t=${Date.now()}`;
+      const cacheBust = `v=1.5.6&t=${Date.now()}`;
       const manifestRes = await fetch(`/chrome-extension/manifest.json?${cacheBust}`, { cache: 'no-store' });
       const manifestText = await manifestRes.text();
 
@@ -3287,21 +3287,21 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       zip.file('README.md', readmeText);
       zip.file(
         'COMO-INSTALAR.txt',
-        `INSTRUÇÕES DE INSTALAÇÃO NO GOOGLE CHROME (AutoViral AI v1.5.5):\n\n1. Extraia este arquivo ZIP em uma pasta nova.\n2. No Chrome, abra chrome://extensions e REMOVA extensões AutoViral antigas (deixe APENAS UMA v1.5.5).\n3. Ative a chave "Modo do desenvolvedor" (topo direito).\n4. Clique em "Carregar sem compactação" (topo esquerdo) e escolha a pasta extraída.\n5. Abra o Facebook (grupos), role a busca, clique em "Mapear Grupos" e depois em "Enviar para o Painel".`
+        `INSTRUÇÕES DE INSTALAÇÃO NO GOOGLE CHROME (AutoViral AI v1.5.6):\n\n1. Extraia este arquivo ZIP em uma pasta nova.\n2. No Chrome, abra chrome://extensions e REMOVA extensões AutoViral antigas (deixe APENAS UMA v1.5.6).\n3. Ative a chave "Modo do desenvolvedor" (topo direito).\n4. Clique em "Carregar sem compactação" (topo esquerdo) e escolha a pasta extraída.\n5. Abra o Facebook (grupos), role a busca, clique em "Mapear Grupos" e depois em "Enviar para o Painel".`
       );
 
       const blob = await zip.generateAsync({ type: 'blob' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = 'extensao-autoviral-v1.5.5.zip';
+      link.download = 'extensao-autoviral-v1.5.6.zip';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
     } catch (err) {
       console.error('Error generating extension zip:', err);
       const fallbackLink = document.createElement('a');
-      fallbackLink.href = '/api/extension/download?v=1.5.5';
-      fallbackLink.download = 'extensao-autoviral-v1.5.5.zip';
+      fallbackLink.href = '/api/extension/download?v=1.5.6';
+      fallbackLink.download = 'extensao-autoviral-v1.5.6.zip';
       document.body.appendChild(fallbackLink);
       fallbackLink.click();
       document.body.removeChild(fallbackLink);
@@ -3469,7 +3469,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
               ) : (
                 <>
                   <Download className="w-4 h-4" />
-                  Baixar Extensão v1.5.5 (.ZIP)
+                  Baixar Extensão v1.5.6 (.ZIP)
                 </>
               )}
             </button>
@@ -4915,7 +4915,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                           <span className="text-[11px] text-emerald-400 font-medium">Verifica sem abrir abas</span>
                         </div>
                         <p className="text-[11px] text-slate-400">
-                          Consulta cada grupo via Extensão v1.5.5: <strong>✅ Aceito</strong>, <strong>⏳ Pendente Admin</strong>, <strong>🛡️ Bloqueado FB</strong>, <strong>📝 Perguntas</strong> ou <strong>❌ Recusado</strong>.
+                          Consulta cada grupo via Extensão v1.5.6: <strong>✅ Aceito</strong>, <strong>⏳ Pendente Admin</strong>, <strong>🛡️ Bloqueado FB</strong>, <strong>📝 Perguntas</strong> ou <strong>❌ Recusado</strong>.
                         </p>
                         <div className="flex flex-wrap items-center gap-2 pt-0.5">
                           <button
@@ -6432,7 +6432,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
               <div className="bg-slate-950 border border-emerald-800/50 rounded-xl p-3.5 space-y-2.5 text-xs">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <span className="font-bold text-white flex items-center gap-1.5">
-                    🤖 Fluxo Automático: Solicitar Entrada + Postagem (Extensão v1.5.5)
+                    🤖 Fluxo Automático: Solicitar Entrada + Postagem (Extensão v1.5.6)
                   </span>
                   <div className="flex flex-wrap items-center gap-3">
                     <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">

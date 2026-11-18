@@ -36,10 +36,10 @@ export function pruneExpendableStorage(preserveKey?: string): void {
       } catch {}
     };
 
-    trimArrayKey('autoviral_fb_bot_logs_v3', 30);
-    trimArrayKey('autoviral_global_bot_logs_v1', 30);
-    trimArrayKey('autoviral_dispatch_logs', 30);
-    trimArrayKey('autoviral_tracking_events', 100);
+    trimArrayKey('autoviral_fb_bot_logs_v3', 15);
+    trimArrayKey('autoviral_global_bot_logs_v1', 15);
+    trimArrayKey('autoviral_dispatch_logs', 15);
+    trimArrayKey('autoviral_tracking_events', 50);
   } catch {}
 }
 
@@ -55,14 +55,17 @@ export function safeSetLocalStorage(key: string, value: string): boolean {
       localStorage.setItem(key, value);
       return true;
     } catch {
-      // If campaigns contain large base64 data:image strings, store compact local cache (full copy remains in state & cloud)
-      if (key === 'autoviral_campaigns') {
+      // If campaigns or offers contain large base64 data:image strings, store compact local cache (full copy remains in IndexedDB, state & cloud)
+      if (key === 'autoviral_campaigns' || key === 'autoviral_global_offers_v1') {
         try {
           const parsed = JSON.parse(value);
           if (Array.isArray(parsed)) {
             const compacted = parsed.map((c: any) => {
               if (c && typeof c.imageUrl === 'string' && c.imageUrl.startsWith('data:image/') && c.imageUrl.length > 60000) {
                 return { ...c, imageUrl: '' };
+              }
+              if (c && typeof c.postImageUrl === 'string' && c.postImageUrl.startsWith('data:image/') && c.postImageUrl.length > 60000) {
+                return { ...c, postImageUrl: '' };
               }
               return c;
             });

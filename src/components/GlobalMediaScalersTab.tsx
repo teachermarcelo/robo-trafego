@@ -86,6 +86,7 @@ export interface GlobalOffer {
   trackingParamName: 'sub2' | 'sub1' | 'sub3' | 'tid' | 'aff_sub' | 'utm_source';
   presellUrl: string;
   postImageUrl?: string;
+  postImageUpdatedAt?: number;
   createdAt: string;
 }
 
@@ -364,24 +365,30 @@ function renderRichPostBodyWithClickableLinks(text: string): React.ReactNode {
 const OFFER_IMG_DB_NAME = 'autoviral_offer_images_db_v1';
 const OFFER_IMG_STORE = 'offer_images';
 const OFFER_IMG_LS_PREFIX = 'autoviral_offer_img_';
+const OFFER_IMG_TS_PREFIX = 'autoviral_offer_imgts_';
 
-function readCompactOfferImgLocal(offerId: string): string {
+function readCompactOfferImgLocal(offerId: string): { imageUrl: string; updatedAt: number } {
   try {
-    return localStorage.getItem(`${OFFER_IMG_LS_PREFIX}${offerId}`) || '';
+    const imageUrl = localStorage.getItem(`${OFFER_IMG_LS_PREFIX}${offerId}`) || '';
+    const updatedAt = Number(localStorage.getItem(`${OFFER_IMG_TS_PREFIX}${offerId}`) || 0) || 0;
+    return { imageUrl, updatedAt };
   } catch {
-    return '';
+    return { imageUrl: '', updatedAt: 0 };
   }
 }
 
-function saveCompactOfferImgLocal(offerId: string, dataUrl: string): void {
+function saveCompactOfferImgLocal(offerId: string, dataUrl: string, updatedAt = Date.now()): void {
   try {
     const key = `${OFFER_IMG_LS_PREFIX}${offerId}`;
+    const tsKey = `${OFFER_IMG_TS_PREFIX}${offerId}`;
     if (!dataUrl) {
       localStorage.removeItem(key);
+      localStorage.setItem(tsKey, String(updatedAt));
       return;
     }
     if (dataUrl.length <= 320000) {
       localStorage.setItem(key, dataUrl);
+      localStorage.setItem(tsKey, String(updatedAt));
     }
   } catch {}
 }
@@ -408,20 +415,16 @@ function openOfferImgDb(): Promise<IDBDatabase | null> {
   });
 }
 
-async function saveOfferImageIdb(offerId: string, imageUrl: string): Promise<void> {
+async function saveOfferImageIdb(offerId: string, imageUrl: string, updatedAt = Date.now()): Promise<void> {
   if (!offerId) return;
-  saveCompactOfferImgLocal(offerId, imageUrl);
+  saveCompactOfferImgLocal(offerId, imageUrl, updatedAt);
   try {
     const db = await openOfferImgDb();
     if (!db) return;
     await new Promise<void>((resolve) => {
       const tx = db.transaction(OFFER_IMG_STORE, 'readwrite');
       const store = tx.objectStore(OFFER_IMG_STORE);
-      if (!imageUrl) {
-        store.delete(offerId);
-      } else {
-        store.put({ offerId, imageUrl, updatedAt: Date.now() });
-      }
+      store.put({ offerId, imageUrl: imageUrl || '', updatedAt, removed: !imageUrl });
       tx.oncomplete = () => resolve();
       tx.onerror = () => resolve();
       tx.onabort = () => resolve();
@@ -429,19 +432,20 @@ async function saveOfferImageIdb(offerId: string, imageUrl: string): Promise<voi
   } catch {}
 }
 
-async function deleteOfferImageIdb(offerId: string): Promise<void> {
-  await saveOfferImageIdb(offerId, '');
+async function deleteOfferImageIdb(offerId: string, updatedAt = Date.now()): Promise<void> {
+  await saveOfferImageIdb(offerId, '', updatedAt);
 }
 
-async function loadAllOfferImagesIdb(): Promise<Record<string, string>> {
-  const result: Record<string, string> = {};
+async function loadAllOfferImagesIdb(): Promise<Record<string, { imageUrl: string; updatedAt: number; removed?: boolean }>> {
+  const result: Record<string, { imageUrl: string; updatedAt: number; removed?: boolean }> = {};
   try {
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
       if (k && k.startsWith(OFFER_IMG_LS_PREFIX)) {
         const offerId = k.slice(OFFER_IMG_LS_PREFIX.length);
         const val = localStorage.getItem(k);
-        if (offerId && val) result[offerId] = val;
+        const ts = Number(localStorage.getItem(`${OFFER_IMG_TS_PREFIX}${offerId}`) || 0) || 0;
+        if (offerId && val) result[offerId] = { imageUrl: val, updatedAt: ts };
       }
     }
   } catch {}
@@ -455,8 +459,16 @@ async function loadAllOfferImagesIdb(): Promise<Record<string, string>> {
       req.onsuccess = () => {
         const rows = Array.isArray(req.result) ? req.result : [];
         rows.forEach((row: any) => {
-          if (row?.offerId && typeof row?.imageUrl === 'string' && row.imageUrl.trim()) {
-            result[row.offerId] = row.imageUrl;
+          if (row?.offerId && typeof row?.imageUrl === 'string') {
+            const prevTs = result[row.offerId]?.updatedAt || 0;
+            const rowTs = Number(row.updatedAt || 0) || 0;
+            if (!result[row.offerId] || rowTs >= prevTs) {
+              result[row.offerId] = {
+                imageUrl: row.imageUrl,
+                updatedAt: rowTs,
+                removed: Boolean(row.removed || !row.imageUrl),
+              };
+            }
           }
         });
         resolve();
@@ -1269,10 +1281,16 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
       }
     } catch {}
     return base.map((o) => {
-      const localImg = o?.id ? readCompactOfferImgLocal(o.id) : '';
-      return localImg ? { ...o, postImageUrl: localImg } : o;
+      const localEntry = o?.id ? readCompactOfferImgLocal(o.id) : { imageUrl: '', updatedAt: 0 };
+      if (localEntry.imageUrl && localEntry.updatedAt >= (o.postImageUpdatedAt || 0)) {
+        return { ...o, postImageUrl: localEntry.imageUrl, postImageUpdatedAt: localEntry.updatedAt || o.postImageUpdatedAt };
+      }
+      return o;
     });
   });
+  const offersRef = useRef<GlobalOffer[]>(offers);
+  offersRef.current = offers;
+  const localImgLockUntilRef = useRef<Record<string, number>>({});
 
   const [selectedOfferId, setSelectedOfferId] = useState<string>(() => {
     try {
@@ -1586,13 +1604,21 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
           setOffers((prev) => {
             let changed = false;
             const next = prev.map((o) => {
-              const idbImg = imgMap[o.id];
-              if (idbImg && o.postImageUrl !== idbImg) {
+              if ((localImgLockUntilRef.current[o.id] || 0) > Date.now()) return o;
+              const entry = imgMap[o.id];
+              if (!entry) return o;
+              const localTs = o.postImageUpdatedAt || 0;
+              if (entry.removed && entry.updatedAt > localTs && o.postImageUrl) {
                 changed = true;
-                return { ...o, postImageUrl: idbImg };
+                return { ...o, postImageUrl: '', postImageUpdatedAt: entry.updatedAt };
+              }
+              if (entry.imageUrl && (!o.postImageUrl || entry.updatedAt >= localTs) && o.postImageUrl !== entry.imageUrl) {
+                changed = true;
+                return { ...o, postImageUrl: entry.imageUrl, postImageUpdatedAt: entry.updatedAt || localTs };
               }
               return o;
             });
+            if (changed) offersRef.current = next;
             return changed ? next : prev;
           });
         }
@@ -1705,25 +1731,46 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
       }
       if (Array.isArray(cloud.globalOffers) && cloud.globalOffers.length > 0) {
         setOffers((prev) => {
+          const now = Date.now();
+          const prevMap = new Map(prev.map((o) => [o.id, o]));
           const cloudMap = new Map<string, any>();
           cloud.globalOffers!.forEach((o: any) => {
-            if (o?.id) {
-              cloudMap.set(o.id, o);
-              if (o.postImageUrl) saveOfferImageIdb(o.id, o.postImageUrl);
+            if (!o?.id) return;
+            cloudMap.set(o.id, o);
+            const localOffer = prevMap.get(o.id);
+            const isLocked = (localImgLockUntilRef.current[o.id] || 0) > now;
+            const localTs = localOffer?.postImageUpdatedAt || 0;
+            const cloudTs = Number(o.postImageUpdatedAt || 0) || 0;
+            // NEVER overwrite an existing local offer image or locked offer in IndexedDB with stale cloud data!
+            if (
+              o.postImageUrl &&
+              !isLocked &&
+              (!localOffer || (!localOffer.postImageUrl && cloudTs >= localTs) || cloudTs > localTs)
+            ) {
+              saveOfferImageIdb(o.id, o.postImageUrl, cloudTs || now);
             }
           });
           let changed = false;
           const updatedPrev = prev.map((o) => {
+            if ((localImgLockUntilRef.current[o.id] || 0) > now) return o;
             const c = cloudMap.get(o.id);
-            if (c && !o.postImageUrl && c.postImageUrl) {
+            if (!c) return o;
+            const localTs = o.postImageUpdatedAt || 0;
+            const cloudTs = Number(c.postImageUpdatedAt || 0) || 0;
+            if ((!o.postImageUrl && c.postImageUrl && cloudTs >= localTs) || (c.postImageUrl && cloudTs > localTs && o.postImageUrl !== c.postImageUrl)) {
               changed = true;
-              return { ...o, postImageUrl: c.postImageUrl };
+              return { ...o, postImageUrl: c.postImageUrl, postImageUpdatedAt: cloudTs || localTs };
             }
             return o;
           });
           const existingIds = new Set(updatedPrev.map((o) => o.id));
           const fresh = cloud.globalOffers!.filter((o: any) => o?.id && !existingIds.has(o.id));
-          if (fresh.length > 0) return [...updatedPrev, ...fresh];
+          if (fresh.length > 0) {
+            const combined = [...updatedPrev, ...fresh];
+            offersRef.current = combined;
+            return combined;
+          }
+          if (changed) offersRef.current = updatedPrev;
           return changed ? updatedPrev : prev;
         });
       }
@@ -1918,7 +1965,9 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
           existing.discountText !== converted.discountText ||
           existing.affiliateUrl !== converted.affiliateUrl ||
           existing.presellUrl !== converted.presellUrl ||
-          (!existing.postImageUrl && Boolean(converted.postImageUrl))
+          (!existing.postImageUrl &&
+            Boolean(converted.postImageUrl) &&
+            !((localImgLockUntilRef.current[offerId] || 0) > Date.now()))
         ) {
           const idx = next.findIndex((o) => o.id === offerId);
           if (idx >= 0) {
@@ -2078,7 +2127,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
         join_requested: 'Entrada Solicitada (Cookie Ativo)',
         approved_posting: 'ADMIN ACEITOU! Gatilho disparado → Postando agora!',
         not_member: 'Precisa Participar',
-        composer_stuck: 'Janela Travada no FB (Atualize Extensão v1.5.5)',
+        composer_stuck: 'Janela Travada no FB (Atualize Extensão v1.5.6)',
         rate_limited: 'Limite Temporário FB',
         unavailable: 'Grupo Indisponível',
       };
@@ -2423,47 +2472,55 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
 
   const handleUpdateOfferField = (field: keyof GlobalOffer, value: string) => {
     if (!activeOffer) return;
-    let computedNextOffers: GlobalOffer[] | null = null;
-    setOffers((prev) => {
-      const next = prev.map((o) => {
-        if (o.id !== activeOffer.id) return o;
-        if (field === 'currencyCode') {
-          const nextCode = String(value || 'USD').toUpperCase();
-          const nextPriceText = replacePriceCurrencyPrefix(o.offerPriceText, nextCode);
-          return {
-            ...o,
-            currencyCode: nextCode,
-            offerPriceText: nextPriceText || o.offerPriceText,
-          };
-        }
-        return { ...o, [field]: value };
-      });
-      computedNextOffers = next;
-      safeSetLocalStorageJson(STORAGE_KEYS.OFFERS, next);
-      return next;
+    const nowTs = Date.now();
+    const nextOffers = offersRef.current.map((o) => {
+      if (o.id !== activeOffer.id) return o;
+      if (field === 'currencyCode') {
+        const nextCode = String(value || 'USD').toUpperCase();
+        const nextPriceText = replacePriceCurrencyPrefix(o.offerPriceText, nextCode);
+        return {
+          ...o,
+          currencyCode: nextCode,
+          offerPriceText: nextPriceText || o.offerPriceText,
+        };
+      }
+      if (field === 'postImageUrl') {
+        return { ...o, postImageUrl: value, postImageUpdatedAt: nowTs };
+      }
+      return { ...o, [field]: value };
     });
+    offersRef.current = nextOffers;
+    setOffers(nextOffers);
+    safeSetLocalStorageJson(STORAGE_KEYS.OFFERS, nextOffers);
+
     if (field === 'postImageUrl') {
+      localImgLockUntilRef.current[activeOffer.id] = nowTs + 180000;
       if (value) {
-        saveOfferImageIdb(activeOffer.id, value);
+        saveOfferImageIdb(activeOffer.id, value, nowTs);
       } else {
-        deleteOfferImageIdb(activeOffer.id);
+        deleteOfferImageIdb(activeOffer.id, nowTs);
       }
       syncLandingCampaignImageOnServer(activeOffer, value);
-      if (computedNextOffers) {
-        saveGlobalWorkspaceSyncToFirebase({ globalOffers: computedNextOffers }, { force: true }).catch(() => {});
-      }
+      saveGlobalWorkspaceSyncToFirebase({ globalOffers: nextOffers }, { force: true }).catch(() => {});
     }
   };
 
   const handleSaveOfferChanges = () => {
     if (!activeOffer) return;
-    safeSetLocalStorageJson(STORAGE_KEYS.OFFERS, offers);
+    const nowTs = Date.now();
+    const latestOffers = offersRef.current.map((o) =>
+      o.id === activeOffer.id ? { ...o, postImageUpdatedAt: o.postImageUpdatedAt || nowTs } : o
+    );
+    offersRef.current = latestOffers;
+    setOffers(latestOffers);
+    localImgLockUntilRef.current[activeOffer.id] = nowTs + 180000;
+    safeSetLocalStorageJson(STORAGE_KEYS.OFFERS, latestOffers);
     if (activeOffer.postImageUrl) {
-      saveOfferImageIdb(activeOffer.id, activeOffer.postImageUrl);
+      saveOfferImageIdb(activeOffer.id, activeOffer.postImageUrl, nowTs);
     } else {
-      deleteOfferImageIdb(activeOffer.id);
+      deleteOfferImageIdb(activeOffer.id, nowTs);
     }
-    saveGlobalWorkspaceSyncToFirebase({ globalOffers: offers }, { force: true }).catch(() => {});
+    saveGlobalWorkspaceSyncToFirebase({ globalOffers: latestOffers }, { force: true }).catch(() => {});
 
     // Rebuild structured template kit for this offer so copy reflects updated currency, language and price
     const updatedTpl = buildStructuredTemplateKit(activeOffer);
@@ -3893,7 +3950,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
     } else {
       setBanner({
         message: autoJoinAndPostEnabled
-          ? `Grupo Global "${cleanGroupName}" aberto (${dispatchLimitCount > 0 ? `${nextSentCount}/${dispatchLimitCount}` : `#${nextSentCount}`})! Extensão v1.5.5 vai postar ${imageToSend ? 'imagem + link clicável' : 'card de link clicável'} e fechar a aba.`
+          ? `Grupo Global "${cleanGroupName}" aberto (${dispatchLimitCount > 0 ? `${nextSentCount}/${dispatchLimitCount}` : `#${nextSentCount}`})! Extensão v1.5.6 vai postar ${imageToSend ? 'imagem + link clicável' : 'card de link clicável'} e fechar a aba.`
           : `Grupo Global "${cleanGroupName}" aberto e texto copiado para postagem manual assistida.`,
         tone: 'success',
       });
@@ -4234,7 +4291,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
     try {
       const zip = new JSZip();
       const files = ['manifest.json', 'popup.html', 'popup.js', 'content.js', 'background.js', 'README.md'];
-      const cacheBust = `v=1.5.5&t=${Date.now()}`;
+      const cacheBust = `v=1.5.6&t=${Date.now()}`;
       await Promise.all(
         files.map(async (fname) => {
           const r = await fetch(`/chrome-extension/${fname}?${cacheBust}`, { cache: 'no-store' });
@@ -4243,17 +4300,17 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
       );
       zip.file(
         'COMO-ATUALIZAR.txt',
-        '1. Extraia este ZIP substituindo os arquivos da pasta anterior (ou em uma pasta nova).\n2. Abra chrome://extensions no Google Chrome.\n3. Clique no ícone de Atualizar (↻) da extensão AutoViral AI v1.5.5.\n4. Recarregue (F5) a aba do AutoViral AI.'
+        '1. Extraia este ZIP substituindo os arquivos da pasta anterior (ou em uma pasta nova).\n2. Abra chrome://extensions no Google Chrome.\n3. Clique no ícone de Atualizar (↻) da extensão AutoViral AI v1.5.6.\n4. Recarregue (F5) a aba do AutoViral AI.'
       );
       const blob = await zip.generateAsync({ type: 'blob' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = 'extensao-autoviral-v1.5.5.zip';
+      link.download = 'extensao-autoviral-v1.5.6.zip';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       setBanner({
-        message: 'Extensão v1.5.5 atualizada baixada! Extraia, recarregue (↻) em chrome://extensions e dê F5 nesta página.',
+        message: 'Extensão v1.5.6 atualizada baixada! Extraia, recarregue (↻) em chrome://extensions e dê F5 nesta página.',
         tone: 'success',
       });
     } catch {
@@ -7316,10 +7373,10 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                           onClick={handleDownloadGlobalExtensionZip}
                           disabled={isDownloadingExt}
                           className="px-3 py-1.5 bg-cyan-600/20 hover:bg-cyan-600/35 border border-cyan-500/40 text-cyan-200 text-[11px] font-semibold rounded-md inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
-                          title="Baixar Extensão v1.5.5 (Card de Imagem Clicável + Responder Perguntas Espanhol/PT + Destravar Modal FB)"
+                          title="Baixar Extensão v1.5.6 (Foco no Modal Ativo + Foto Automática + Texto & Link Automático)"
                         >
                           <Download className="w-3 h-3" />
-                          <span>{isDownloadingExt ? 'Gerando ZIP...' : 'Atualizar Extensão v1.5.5 (ZIP)'}</span>
+                          <span>{isDownloadingExt ? 'Gerando ZIP...' : 'Atualizar Extensão v1.5.6 (ZIP)'}</span>
                         </button>
                       </div>
                       <div className="flex flex-wrap gap-2">
@@ -7683,7 +7740,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                                   )}
                                   <div className="min-w-0">
                                     <span className="font-bold text-amber-300">🛡️ Proteção Anti-Caixa Cinza Ativada:</span>{' '}
-                                    Como <span className="font-mono text-amber-100">{getDisplayDomain(previewUrl)}</span> é externo e não gera capa automática, o formato está travado em <strong className="text-white">Foto do Produto + Link Clicável</strong> (baixe/atualize a extensão v1.5.5 para o robô anexar a foto ao lado automaticamente).
+                                    Como <span className="font-mono text-amber-100">{getDisplayDomain(previewUrl)}</span> é externo e não gera capa automática, o formato está travado em <strong className="text-white">Foto do Produto + Link Clicável</strong> (baixe/atualize a extensão v1.5.6 para o robô anexar a foto ao lado automaticamente).
                                   </div>
                                 </div>
                               )}
@@ -7893,7 +7950,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5">
                         <div className="text-xs">
                           <div className="font-semibold text-white">
-                            Sistema Automático: Abrir → Entrar / Responder Perguntas → Card Imagem Clicável → Fechar Aba (v1.5.5)
+                            Sistema Automático: Abrir → Entrar / Responder Perguntas → Card Imagem Clicável → Fechar Aba (v1.5.6)
                           </div>
                           <div className="text-[11px] text-slate-400">
                             {autoJoinAndPostEnabled

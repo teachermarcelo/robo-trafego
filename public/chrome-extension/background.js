@@ -1,7 +1,7 @@
 // AutoViral AI Chrome Extension - Background Service Worker (Manifest V3)
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('[AutoViral AI] Extensão v1.5.5 instalada com sucesso!');
+  console.log('[AutoViral AI] Extensão v1.5.6 instalada com sucesso!');
   chrome.storage.local.get(['autoviral_interval', 'autoviral_mapped_groups', 'autoviral_waiting_approval_map'], (res) => {
     chrome.storage.local.set({
       autoviral_interval: res.autoviral_interval || 350,
@@ -458,6 +458,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             const existingDialog = Array.from(document.querySelectorAll('div[role="dialog"]')).find((d) => {
               const r = d.getBoundingClientRect();
               if (r.width < 200 || r.height < 150) return false;
+              if (d.getAttribute('aria-hidden') === 'true') return false;
+              try {
+                const st = window.getComputedStyle(d);
+                if (st.display === 'none' || st.visibility === 'hidden' || st.pointerEvents === 'none') return false;
+                const op = parseFloat(st.opacity || '1');
+                if (!isNaN(op) && op < 0.35) return false;
+              } catch (e) {}
               const tb = d.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]');
               if (tb) return true;
               const txt = (d.innerText || '').toLowerCase();
@@ -468,6 +475,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 txt.includes('crear publicación') ||
                 txt.includes('crear publicacion') ||
                 txt.includes('create a public post') ||
+                txt.includes('crie um post público') ||
                 txt.includes('publicação anônima') ||
                 txt.includes('publicación anónima') ||
                 txt.includes('anonymous post')
@@ -668,29 +676,71 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         args: [textToInsert],
         func: (text) => {
           try {
-            const dialogs = Array.from(document.querySelectorAll('div[role="dialog"]')).filter((d) => {
-              const r = d.getBoundingClientRect();
-              return r.width > 200 && r.height > 150;
-            });
-            const dlg = dialogs.find((d) => {
-              if (d.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]')) return true;
-              const txt = (d.innerText || '').toLowerCase();
-              const aria = (d.getAttribute('aria-label') || '').toLowerCase();
-              return (
-                txt.includes('criar post') ||
-                txt.includes('create post') ||
-                txt.includes('criar publicação') ||
-                txt.includes('crear publicación') ||
-                txt.includes('crear publicacion') ||
-                txt.includes('create a public post') ||
-                txt.includes('publicação anônima') ||
-                txt.includes('publicación anónima') ||
-                txt.includes('anonymous post') ||
-                aria.includes('criar post') ||
-                aria.includes('create post') ||
-                aria.includes('crear publicación')
-              );
-            }) || dialogs[dialogs.length - 1];
+            const pickActiveComposerDialog = () => {
+              const allDialogs = Array.from(document.querySelectorAll('div[role="dialog"]'));
+              const scored = [];
+              allDialogs.forEach((d, idx) => {
+                const r = d.getBoundingClientRect();
+                if (r.width < 200 || r.height < 150) return;
+                if (d.getAttribute('aria-hidden') === 'true') return;
+                try {
+                  const st = window.getComputedStyle(d);
+                  if (st.display === 'none' || st.visibility === 'hidden' || st.pointerEvents === 'none') return;
+                  const op = parseFloat(st.opacity || '1');
+                  if (!isNaN(op) && op < 0.35) return;
+                } catch (e) {}
+                const tb = d.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]');
+                const txt = (d.innerText || '').toLowerCase();
+                const aria = (d.getAttribute('aria-label') || '').toLowerCase();
+                const isComposer =
+                  Boolean(tb) ||
+                  txt.includes('criar post') ||
+                  txt.includes('create post') ||
+                  txt.includes('criar publicação') ||
+                  txt.includes('crear publicación') ||
+                  txt.includes('crear publicacion') ||
+                  txt.includes('create a public post') ||
+                  txt.includes('crie um post público') ||
+                  txt.includes('publicação anônima') ||
+                  txt.includes('publicación anónima') ||
+                  txt.includes('anonymous post') ||
+                  aria.includes('criar post') ||
+                  aria.includes('create post') ||
+                  aria.includes('crear publicación');
+                if (!isComposer) return;
+                let score = idx * 100 + (tb ? 500 : 0);
+                let cur = d;
+                for (let depth = 0; depth < 6 && cur && cur !== document.body; depth++) {
+                  try {
+                    const z = parseInt(window.getComputedStyle(cur).zIndex, 10);
+                    if (!isNaN(z) && z > 0) score += Math.min(z, 50000);
+                  } catch (e) {}
+                  cur = cur.parentElement;
+                }
+                const testPts = [];
+                if (tb) {
+                  const tr = tb.getBoundingClientRect();
+                  if (tr.width > 20 && tr.height > 15) {
+                    testPts.push([tr.left + Math.min(tr.width * 0.4, 100), tr.top + Math.min(tr.height * 0.5, 24)]);
+                  }
+                }
+                testPts.push([r.left + r.width * 0.5, r.top + Math.min(r.height * 0.25, 90)]);
+                testPts.push([r.left + r.width * 0.5, r.top + r.height * 0.5]);
+                for (const [px, py] of testPts) {
+                  if (px >= 0 && py >= 0 && px <= window.innerWidth && py <= window.innerHeight) {
+                    const topEl = document.elementFromPoint(px, py);
+                    if (topEl && d.contains(topEl)) {
+                      score += 1000000;
+                      break;
+                    }
+                  }
+                }
+                scored.push({ d, score });
+              });
+              scored.sort((a, b) => b.score - a.score);
+              return scored[0] ? scored[0].d : null;
+            };
+            const dlg = pickActiveComposerDialog();
             const scope = dlg || document.querySelector('[data-pagelet="GroupInlineComposer"]') || document.querySelector('[role="main"]');
             if (!scope) return { ok: false, reason: 'no_dialog' };
 
@@ -766,29 +816,66 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         world: 'MAIN',
         func: () => {
           try {
-            const dialogs = Array.from(document.querySelectorAll('div[role="dialog"]')).filter((d) => {
-              const r = d.getBoundingClientRect();
-              return r.width > 200 && r.height > 150;
-            });
-            const dlg = dialogs.find((d) => {
-              if (d.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]')) return true;
-              const txt = (d.innerText || '').toLowerCase();
-              const aria = (d.getAttribute('aria-label') || '').toLowerCase();
-              return (
-                txt.includes('criar post') ||
-                txt.includes('create post') ||
-                txt.includes('criar publicação') ||
-                txt.includes('crear publicación') ||
-                txt.includes('crear publicacion') ||
-                txt.includes('create a public post') ||
-                txt.includes('publicação anônima') ||
-                txt.includes('publicación anónima') ||
-                txt.includes('anonymous post') ||
-                aria.includes('criar post') ||
-                aria.includes('create post') ||
-                aria.includes('crear publicación')
-              );
-            }) || dialogs[dialogs.length - 1];
+            const pickActiveComposerDialog = () => {
+              const allDialogs = Array.from(document.querySelectorAll('div[role="dialog"]'));
+              const scored = [];
+              allDialogs.forEach((d, idx) => {
+                const r = d.getBoundingClientRect();
+                if (r.width < 200 || r.height < 150) return;
+                if (d.getAttribute('aria-hidden') === 'true') return;
+                try {
+                  const st = window.getComputedStyle(d);
+                  if (st.display === 'none' || st.visibility === 'hidden' || st.pointerEvents === 'none') return;
+                  const op = parseFloat(st.opacity || '1');
+                  if (!isNaN(op) && op < 0.35) return;
+                } catch (e) {}
+                const tb = d.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]');
+                const txt = (d.innerText || '').toLowerCase();
+                const aria = (d.getAttribute('aria-label') || '').toLowerCase();
+                const isComposer =
+                  Boolean(tb) ||
+                  txt.includes('criar post') ||
+                  txt.includes('create post') ||
+                  txt.includes('criar publicação') ||
+                  txt.includes('crear publicación') ||
+                  txt.includes('crear publicacion') ||
+                  txt.includes('create a public post') ||
+                  txt.includes('crie um post público') ||
+                  txt.includes('publicação anônima') ||
+                  txt.includes('publicación anónima') ||
+                  txt.includes('anonymous post') ||
+                  aria.includes('criar post') ||
+                  aria.includes('create post') ||
+                  aria.includes('crear publicación');
+                if (!isComposer) return;
+                let score = idx * 100 + (tb ? 500 : 0);
+                let cur = d;
+                for (let depth = 0; depth < 6 && cur && cur !== document.body; depth++) {
+                  try {
+                    const z = parseInt(window.getComputedStyle(cur).zIndex, 10);
+                    if (!isNaN(z) && z > 0) score += Math.min(z, 50000);
+                  } catch (e) {}
+                  cur = cur.parentElement;
+                }
+                const testPts = [
+                  [r.left + r.width * 0.5, r.top + Math.min(r.height * 0.25, 90)],
+                  [r.left + r.width * 0.5, r.top + r.height * 0.5]
+                ];
+                for (const [px, py] of testPts) {
+                  if (px >= 0 && py >= 0 && px <= window.innerWidth && py <= window.innerHeight) {
+                    const topEl = document.elementFromPoint(px, py);
+                    if (topEl && d.contains(topEl)) {
+                      score += 1000000;
+                      break;
+                    }
+                  }
+                }
+                scored.push({ d, score });
+              });
+              scored.sort((a, b) => b.score - a.score);
+              return scored[0] ? scored[0].d : null;
+            };
+            const dlg = pickActiveComposerDialog();
             const scope = dlg || document.querySelector('[data-pagelet="GroupInlineComposer"]') || document.querySelector('[role="main"]');
             if (!scope) return { clicked: false, reason: 'no_dialog' };
 
@@ -862,7 +949,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 func: () => {
                   const existingDialog = Array.from(document.querySelectorAll('div[role="dialog"]')).find((d) => {
                     const r = d.getBoundingClientRect();
-                    return r.width > 200 && r.height > 150 && Boolean(d.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]'));
+                    if (r.width < 200 || r.height < 150) return false;
+                    if (d.getAttribute('aria-hidden') === 'true') return false;
+                    try {
+                      const st = window.getComputedStyle(d);
+                      if (st.display === 'none' || st.visibility === 'hidden' || st.pointerEvents === 'none') return false;
+                      const op = parseFloat(st.opacity || '1');
+                      if (!isNaN(op) && op < 0.35) return false;
+                    } catch (e) {}
+                    return Boolean(d.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]'));
                   });
                   if (existingDialog) return { found: true, alreadyOpen: true };
                   const inlineTb = document.querySelector('[data-pagelet="GroupInlineComposer"] div[role="textbox"][contenteditable="true"], [data-pagelet="GroupInlineComposer"] div[contenteditable="true"][data-lexical-editor="true"]');
@@ -1048,29 +1143,71 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 target: { tabId },
                 world: 'MAIN',
                 func: () => {
-                  const dialogs = Array.from(document.querySelectorAll('div[role="dialog"]')).filter((d) => {
-                    const r = d.getBoundingClientRect();
-                    return r.width > 200 && r.height > 150;
-                  });
-                  const dlg = dialogs.find((d) => {
-                    if (d.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]')) return true;
-                    const txt = (d.innerText || '').toLowerCase();
-                    const aria = (d.getAttribute('aria-label') || '').toLowerCase();
-                    return (
-                      txt.includes('criar post') ||
-                      txt.includes('create post') ||
-                      txt.includes('criar publicação') ||
-                      txt.includes('crear publicación') ||
-                      txt.includes('crear publicacion') ||
-                      txt.includes('create a public post') ||
-                      txt.includes('publicação anônima') ||
-                      txt.includes('publicación anónima') ||
-                      txt.includes('anonymous post') ||
-                      aria.includes('criar post') ||
-                      aria.includes('create post') ||
-                      aria.includes('crear publicación')
-                    );
-                  }) || dialogs[dialogs.length - 1];
+                  const pickActiveComposerDialog = () => {
+                    const allDialogs = Array.from(document.querySelectorAll('div[role="dialog"]'));
+                    const scored = [];
+                    allDialogs.forEach((d, idx) => {
+                      const r = d.getBoundingClientRect();
+                      if (r.width < 200 || r.height < 150) return;
+                      if (d.getAttribute('aria-hidden') === 'true') return;
+                      try {
+                        const st = window.getComputedStyle(d);
+                        if (st.display === 'none' || st.visibility === 'hidden' || st.pointerEvents === 'none') return;
+                        const op = parseFloat(st.opacity || '1');
+                        if (!isNaN(op) && op < 0.35) return;
+                      } catch (e) {}
+                      const tb = d.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]');
+                      const txt = (d.innerText || '').toLowerCase();
+                      const aria = (d.getAttribute('aria-label') || '').toLowerCase();
+                      const isComposer =
+                        Boolean(tb) ||
+                        txt.includes('criar post') ||
+                        txt.includes('create post') ||
+                        txt.includes('criar publicação') ||
+                        txt.includes('crear publicación') ||
+                        txt.includes('crear publicacion') ||
+                        txt.includes('create a public post') ||
+                        txt.includes('crie um post público') ||
+                        txt.includes('publicação anônima') ||
+                        txt.includes('publicación anónima') ||
+                        txt.includes('anonymous post') ||
+                        aria.includes('criar post') ||
+                        aria.includes('create post') ||
+                        aria.includes('crear publicación');
+                      if (!isComposer) return;
+                      let score = idx * 100 + (tb ? 500 : 0);
+                      let cur = d;
+                      for (let depth = 0; depth < 6 && cur && cur !== document.body; depth++) {
+                        try {
+                          const z = parseInt(window.getComputedStyle(cur).zIndex, 10);
+                          if (!isNaN(z) && z > 0) score += Math.min(z, 50000);
+                        } catch (e) {}
+                        cur = cur.parentElement;
+                      }
+                      const testPts = [];
+                      if (tb) {
+                        const tr = tb.getBoundingClientRect();
+                        if (tr.width > 20 && tr.height > 15) {
+                          testPts.push([tr.left + Math.min(tr.width * 0.4, 100), tr.top + Math.min(tr.height * 0.5, 24)]);
+                        }
+                      }
+                      testPts.push([r.left + r.width * 0.5, r.top + Math.min(r.height * 0.25, 90)]);
+                      testPts.push([r.left + r.width * 0.5, r.top + r.height * 0.5]);
+                      for (const [px, py] of testPts) {
+                        if (px >= 0 && py >= 0 && px <= window.innerWidth && py <= window.innerHeight) {
+                          const topEl = document.elementFromPoint(px, py);
+                          if (topEl && d.contains(topEl)) {
+                            score += 1000000;
+                            break;
+                          }
+                        }
+                      }
+                      scored.push({ d, score });
+                    });
+                    scored.sort((a, b) => b.score - a.score);
+                    return scored[0] ? scored[0].d : null;
+                  };
+                  const dlg = pickActiveComposerDialog();
                   const scope = dlg || document.querySelector('[data-pagelet="GroupInlineComposer"]') || document.querySelector('[role="main"]');
                   if (!scope) return { ok: false };
                   const boxes = Array.from(
@@ -1249,22 +1386,82 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             const dt = new DataTransfer();
             dt.items.add(file);
 
-            const dialogs = Array.from(document.querySelectorAll('div[role="dialog"]')).filter((d) => {
-              const r = d.getBoundingClientRect();
-              return r.width > 200 && r.height > 150;
-            });
-            const dlg = dialogs.find((d) => {
-              if (d.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]')) return true;
-              const txt = (d.innerText || '').toLowerCase();
-              return txt.includes('criar post') || txt.includes('create post') || txt.includes('criar publicação') || txt.includes('publicação anônima') || txt.includes('anonymous post');
-            }) || dialogs[dialogs.length - 1];
+            const pickActiveComposerDialog = () => {
+              const allDialogs = Array.from(document.querySelectorAll('div[role="dialog"]'));
+              const scored = [];
+              allDialogs.forEach((d, idx) => {
+                const r = d.getBoundingClientRect();
+                if (r.width < 200 || r.height < 150) return;
+                if (d.getAttribute('aria-hidden') === 'true') return;
+                try {
+                  const st = window.getComputedStyle(d);
+                  if (st.display === 'none' || st.visibility === 'hidden' || st.pointerEvents === 'none') return;
+                  const op = parseFloat(st.opacity || '1');
+                  if (!isNaN(op) && op < 0.35) return;
+                } catch (e) {}
+                const tb = d.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]');
+                const txt = (d.innerText || '').toLowerCase();
+                const aria = (d.getAttribute('aria-label') || '').toLowerCase();
+                const isComposer =
+                  Boolean(tb) ||
+                  txt.includes('criar post') ||
+                  txt.includes('create post') ||
+                  txt.includes('criar publicação') ||
+                  txt.includes('crear publicación') ||
+                  txt.includes('crear publicacion') ||
+                  txt.includes('create a public post') ||
+                  txt.includes('crie um post público') ||
+                  txt.includes('publicação anônima') ||
+                  txt.includes('publicación anónima') ||
+                  txt.includes('anonymous post') ||
+                  aria.includes('criar post') ||
+                  aria.includes('create post') ||
+                  aria.includes('crear publicación');
+                if (!isComposer) return;
+                let score = idx * 100 + (tb ? 500 : 0);
+                let cur = d;
+                for (let depth = 0; depth < 6 && cur && cur !== document.body; depth++) {
+                  try {
+                    const z = parseInt(window.getComputedStyle(cur).zIndex, 10);
+                    if (!isNaN(z) && z > 0) score += Math.min(z, 50000);
+                  } catch (e) {}
+                  cur = cur.parentElement;
+                }
+                const testPts = [];
+                if (tb) {
+                  const tr = tb.getBoundingClientRect();
+                  if (tr.width > 20 && tr.height > 15) {
+                    testPts.push([tr.left + Math.min(tr.width * 0.4, 100), tr.top + Math.min(tr.height * 0.5, 24)]);
+                  }
+                }
+                testPts.push([r.left + r.width * 0.5, r.top + Math.min(r.height * 0.25, 90)]);
+                testPts.push([r.left + r.width * 0.5, r.top + r.height * 0.5]);
+                for (const [px, py] of testPts) {
+                  if (px >= 0 && py >= 0 && px <= window.innerWidth && py <= window.innerHeight) {
+                    const topEl = document.elementFromPoint(px, py);
+                    if (topEl && d.contains(topEl)) {
+                      score += 1000000;
+                      break;
+                    }
+                  }
+                }
+                scored.push({ d, score });
+              });
+              scored.sort((a, b) => b.score - a.score);
+              return scored[0] ? scored[0].d : null;
+            };
+            const dlg = pickActiveComposerDialog();
             if (!dlg) return { attached: false, reason: 'no_dialog' };
 
             const hasPhotoPreviewNow = () => {
               const imgs = Array.from(dlg.querySelectorAll('img')).some((img) => {
                 const r = img.getBoundingClientRect();
                 const src = img.getAttribute('src') || '';
-                return (src.startsWith('blob:') || src.startsWith('data:image/')) && r.width > 72 && r.height > 72;
+                return (
+                  (src.startsWith('blob:') || src.startsWith('data:image/') || src.includes('scontent') || src.includes('fbcdn')) &&
+                  r.width > 72 &&
+                  r.height > 72
+                );
               });
               const editBtn = Boolean(
                 dlg.querySelector(
@@ -1275,11 +1472,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             };
 
             const findComposerFileInputs = () => {
-              const roots = [
-                dlg,
-                dlg.parentElement,
-                dlg.parentElement && dlg.parentElement.parentElement
-              ].filter(Boolean);
+              const roots = [dlg];
+              let ancestor = dlg.parentElement;
+              for (let depth = 0; depth < 5 && ancestor && ancestor !== document.body; depth++) {
+                roots.push(ancestor);
+                ancestor = ancestor.parentElement;
+              }
               const collected = [];
               for (const root of roots) {
                 const inps = Array.from(root.querySelectorAll('input[type="file"]')).filter(
@@ -1289,9 +1487,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                   if (!collected.includes(inp)) collected.push(inp);
                 }
               }
+              // Document-wide fallback outside feed articles
+              const docInputs = Array.from(document.querySelectorAll('input[type="file"]')).filter(
+                (inp) => !inp.closest('div[role="article"]')
+              );
+              for (const inp of docInputs) {
+                if (!collected.includes(inp)) collected.push(inp);
+              }
               return collected.sort((a, b) => {
-                const aScore = ((a.accept || '').includes('image') ? 2 : 0) + (a.multiple ? 2 : 0) + (dlg.contains(a) ? 3 : 0);
-                const bScore = ((b.accept || '').includes('image') ? 2 : 0) + (b.multiple ? 2 : 0) + (dlg.contains(b) ? 3 : 0);
+                const aScore = ((a.accept || '').includes('image') ? 3 : 0) + (a.multiple ? 2 : 0) + (dlg.contains(a) ? 5 : 0);
+                const bScore = ((b.accept || '').includes('image') ? 3 : 0) + (b.multiple ? 2 : 0) + (dlg.contains(b) ? 5 : 0);
                 return bScore - aScore;
               });
             };
@@ -1315,32 +1520,45 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
             const triggerReactPropsFallback = (inp) => {
               try {
+                const syntheticEvt = {
+                  target: inp,
+                  currentTarget: inp,
+                  nativeEvent: new Event('change', { bubbles: true }),
+                  preventDefault: () => {},
+                  stopPropagation: () => {}
+                };
                 const propsKey = Object.keys(inp).find((k) => k.startsWith('__reactProps$'));
                 if (propsKey && inp[propsKey] && typeof inp[propsKey].onChange === 'function') {
-                  inp[propsKey].onChange({
-                    target: inp,
-                    currentTarget: inp,
-                    nativeEvent: new Event('change', { bubbles: true }),
-                    preventDefault: () => {},
-                    stopPropagation: () => {}
-                  });
+                  inp[propsKey].onChange(syntheticEvt);
+                }
+                const fiberKey = Object.keys(inp).find((k) => k.startsWith('__reactFiber$') || k.startsWith('__reactInternalInstance$'));
+                if (fiberKey) {
+                  let node = inp[fiberKey];
+                  for (let i = 0; i < 4 && node; i++) {
+                    if (node.memoizedProps && typeof node.memoizedProps.onChange === 'function') {
+                      node.memoizedProps.onChange(syntheticEvt);
+                      break;
+                    }
+                    node = node.return;
+                  }
                 }
               } catch (e) {}
             };
 
             let inputs = findComposerFileInputs();
 
-            // Try existing inputs first
-            for (const inp of inputs.slice(0, 2)) {
+            // Try existing inputs inside active foreground dialog first
+            for (const inp of inputs.slice(0, 3)) {
               setFilesNatively(inp);
-              await wait(650);
+              triggerReactPropsFallback(inp);
+              await wait(700);
               if (hasPhotoPreviewNow()) {
                 return { attached: true, method: 'file_input_verified', previewDetected: true };
               }
             }
 
-            // If no preview yet, click "Foto/vídeo" inside dlg while trapping HTMLInputElement.prototype.click
-            // so Facebook mounts/reveals its exact <input type="file"> WITHOUT ever opening the OS Windows picker!
+            // If no preview yet, click "Foto/vídeo" inside dlg while trapping both createElement('input') and HTMLInputElement.prototype.click
+            // so Facebook mounts/reveals its exact <input type="file"> WITHOUT ever opening the OS file picker!
             const photoBtn = Array.from(
               dlg.querySelectorAll('div[role="button"], button')
             ).find((el) => {
@@ -1361,6 +1579,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             if (photoBtn) {
               let capturedInp = null;
               const origClick = HTMLInputElement.prototype.click;
+              const origCreate = Document.prototype.createElement;
               HTMLInputElement.prototype.click = function () {
                 if (this && this.type === 'file') {
                   capturedInp = this;
@@ -1368,11 +1587,29 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 }
                 return origClick.apply(this, arguments);
               };
+              Document.prototype.createElement = function (tagName) {
+                const el = origCreate.apply(this, arguments);
+                if (typeof tagName === 'string' && tagName.toLowerCase() === 'input') {
+                  setTimeout(() => {
+                    if (el && el.type === 'file') capturedInp = el;
+                  }, 0);
+                }
+                return el;
+              };
               try {
-                photoBtn.click();
-              } catch (e) {}
-              await wait(600);
-              HTMLInputElement.prototype.click = origClick;
+                const pr = photoBtn.getBoundingClientRect();
+                const cx = Math.round(pr.left + pr.width / 2);
+                const cy = Math.round(pr.top + pr.height / 2);
+                try { photoBtn.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, clientX: cx, clientY: cy, pointerType: 'mouse' })); } catch (e) {}
+                try { photoBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: cx, clientY: cy })); } catch (e) {}
+                try { photoBtn.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, clientX: cx, clientY: cy, pointerType: 'mouse' })); } catch (e) {}
+                try { photoBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, clientX: cx, clientY: cy })); } catch (e) {}
+                try { photoBtn.click(); } catch (e) {}
+                await wait(700);
+              } finally {
+                HTMLInputElement.prototype.click = origClick;
+                Document.prototype.createElement = origCreate;
+              }
 
               if (capturedInp && !inputs.includes(capturedInp)) {
                 inputs = [capturedInp, ...inputs];
@@ -1380,21 +1617,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 inputs = findComposerFileInputs();
               }
 
-              for (const inp of inputs.slice(0, 2)) {
+              for (const inp of inputs.slice(0, 3)) {
                 setFilesNatively(inp);
-                await wait(700);
+                await wait(750);
                 if (hasPhotoPreviewNow()) {
                   return { attached: true, method: 'trapped_photo_btn_verified', previewDetected: true };
                 }
                 triggerReactPropsFallback(inp);
-                await wait(450);
+                await wait(500);
                 if (hasPhotoPreviewNow()) {
                   return { attached: true, method: 'react_props_verified', previewDetected: true };
                 }
               }
             }
 
-            // Final fallback: dispatch paste + drop directly onto dropzone and Lexical textbox
+            // Dispatch paste + drop directly onto dropzone and foreground Lexical textbox
             const tb = dlg.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]');
             const dropTargets = [
               dlg.querySelector('[aria-label*="arraste" i], [aria-label*="drag" i], [aria-label*="Adicionar fotos" i], [aria-label*="Add photos" i]'),
@@ -1410,7 +1647,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 target.dispatchEvent(new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true }));
                 target.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
               } catch (e) {}
-              await wait(450);
+              await wait(550);
               if (hasPhotoPreviewNow()) {
                 return { attached: true, method: 'clipboard_drop_verified', previewDetected: true };
               }
@@ -1446,21 +1683,42 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         world: 'MAIN',
         func: () => {
           try {
-            const dialogs = Array.from(document.querySelectorAll('div[role="dialog"]')).filter((d) => {
-              const r = d.getBoundingClientRect();
-              return r.width > 200 && r.height > 150;
-            });
-            const dlg = dialogs.find((d) => {
-              if (d.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]')) return true;
-              const txt = (d.innerText || '').toLowerCase();
-              return txt.includes('criar post') || txt.includes('create post') || txt.includes('criar publicação');
-            }) || dialogs[dialogs.length - 1];
+            const pickActiveComposerDialog = () => {
+              const allDialogs = Array.from(document.querySelectorAll('div[role="dialog"]'));
+              const scored = [];
+              allDialogs.forEach((d, idx) => {
+                const r = d.getBoundingClientRect();
+                if (r.width < 200 || r.height < 150) return;
+                if (d.getAttribute('aria-hidden') === 'true') return;
+                try {
+                  const st = window.getComputedStyle(d);
+                  if (st.display === 'none' || st.visibility === 'hidden' || st.pointerEvents === 'none') return;
+                  const op = parseFloat(st.opacity || '1');
+                  if (!isNaN(op) && op < 0.35) return;
+                } catch (e) {}
+                const tb = d.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]');
+                const txt = (d.innerText || '').toLowerCase();
+                const isComposer = Boolean(tb) || txt.includes('criar post') || txt.includes('create post') || txt.includes('criar publicação');
+                if (!isComposer) return;
+                let score = idx * 100 + (tb ? 500 : 0);
+                const topEl = document.elementFromPoint(r.left + r.width * 0.5, r.top + Math.min(r.height * 0.25, 90));
+                if (topEl && d.contains(topEl)) score += 1000000;
+                scored.push({ d, score });
+              });
+              scored.sort((a, b) => b.score - a.score);
+              return scored[0] ? scored[0].d : null;
+            };
+            const dlg = pickActiveComposerDialog();
             if (!dlg) return { dismissed: false, reason: 'no_dialog' };
 
             const isRealAttachedPhotoImg = (img) => {
               const r = img.getBoundingClientRect();
               const src = img.getAttribute('src') || '';
-              return (src.startsWith('blob:') || src.startsWith('data:image/')) && r.width > 72 && r.height > 72;
+              return (
+                (src.startsWith('blob:') || src.startsWith('data:image/') || src.includes('scontent') || src.includes('fbcdn')) &&
+                r.width > 72 &&
+                r.height > 72
+              );
             };
 
             const hasPhotoAttached =
@@ -1540,29 +1798,55 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 target: { tabId },
                 world: 'MAIN',
                 func: () => {
-                  const dialogs = Array.from(document.querySelectorAll('div[role="dialog"]')).filter((d) => {
-                    const r = d.getBoundingClientRect();
-                    return r.width > 200 && r.height > 150;
-                  });
-                  const dlg = dialogs.find((d) => {
-                    if (d.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]')) return true;
-                    const txt = (d.innerText || '').toLowerCase();
-                    const aria = (d.getAttribute('aria-label') || '').toLowerCase();
-                    return (
-                      txt.includes('criar post') ||
-                      txt.includes('create post') ||
-                      txt.includes('criar publicação') ||
-                      txt.includes('crear publicación') ||
-                      txt.includes('crear publicacion') ||
-                      txt.includes('create a public post') ||
-                      txt.includes('publicação anônima') ||
-                      txt.includes('publicación anónima') ||
-                      txt.includes('anonymous post') ||
-                      aria.includes('criar post') ||
-                      aria.includes('create post') ||
-                      aria.includes('crear publicación')
-                    );
-                  }) || dialogs[dialogs.length - 1];
+                  const pickActiveComposerDialog = () => {
+                    const allDialogs = Array.from(document.querySelectorAll('div[role="dialog"]'));
+                    const scored = [];
+                    allDialogs.forEach((d, idx) => {
+                      const r = d.getBoundingClientRect();
+                      if (r.width < 200 || r.height < 150) return;
+                      if (d.getAttribute('aria-hidden') === 'true') return;
+                      try {
+                        const st = window.getComputedStyle(d);
+                        if (st.display === 'none' || st.visibility === 'hidden' || st.pointerEvents === 'none') return;
+                        const op = parseFloat(st.opacity || '1');
+                        if (!isNaN(op) && op < 0.35) return;
+                      } catch (e) {}
+                      const tb = d.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]');
+                      const txt = (d.innerText || '').toLowerCase();
+                      const aria = (d.getAttribute('aria-label') || '').toLowerCase();
+                      const isComposer =
+                        Boolean(tb) ||
+                        txt.includes('criar post') ||
+                        txt.includes('create post') ||
+                        txt.includes('criar publicação') ||
+                        txt.includes('crear publicación') ||
+                        txt.includes('crear publicacion') ||
+                        txt.includes('create a public post') ||
+                        txt.includes('crie um post público') ||
+                        txt.includes('publicação anônima') ||
+                        txt.includes('publicación anónima') ||
+                        txt.includes('anonymous post') ||
+                        aria.includes('criar post') ||
+                        aria.includes('create post') ||
+                        aria.includes('crear publicación');
+                      if (!isComposer) return;
+                      let score = idx * 100 + (tb ? 500 : 0);
+                      let cur = d;
+                      for (let depth = 0; depth < 6 && cur && cur !== document.body; depth++) {
+                        try {
+                          const z = parseInt(window.getComputedStyle(cur).zIndex, 10);
+                          if (!isNaN(z) && z > 0) score += Math.min(z, 50000);
+                        } catch (e) {}
+                        cur = cur.parentElement;
+                      }
+                      const topEl = document.elementFromPoint(r.left + r.width * 0.5, r.top + Math.min(r.height * 0.25, 90));
+                      if (topEl && d.contains(topEl)) score += 1000000;
+                      scored.push({ d, score });
+                    });
+                    scored.sort((a, b) => b.score - a.score);
+                    return scored[0] ? scored[0].d : null;
+                  };
+                  const dlg = pickActiveComposerDialog();
                   const scope = dlg || document.querySelector('[data-pagelet="GroupInlineComposer"]') || document.querySelector('[role="main"]');
                   if (!scope) return { ok: false };
                   const candidates = Array.from(scope.querySelectorAll('div[role="button"], button'));
@@ -1605,6 +1889,238 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           return;
         }
         sendResponse({ ok: false, reason: (dbg.value && dbg.value.reason) || 'debugger_click_failed' });
+      } catch (err) {
+        sendResponse({ ok: false, error: String(err) });
+      }
+    })();
+    return true;
+  }
+
+  if (request.action === 'AUTOVIRAL_REAL_PASTE_IMAGE') {
+    const tabId = sender && sender.tab && sender.tab.id;
+    const imgDataUrl = String(request.dataUrl || '');
+    if (!tabId || !imgDataUrl.startsWith('data:image/') || !chrome.scripting || !chrome.scripting.executeScript) {
+      sendResponse({ ok: false });
+      return false;
+    }
+    (async () => {
+      try {
+        const isSilentTab = await new Promise((resolve) => {
+          if (silentTabIds.has(tabId)) {
+            resolve(true);
+            return;
+          }
+          chrome.storage.local.get(['autoviral_silent_tabs'], (r) => {
+            const m = r && r.autoviral_silent_tabs;
+            resolve(Boolean(m && m[String(tabId)]));
+          });
+        });
+        if (!isSilentTab) {
+          try {
+            await new Promise((resolve) => {
+              chrome.tabs.update(tabId, { active: true }, () => {
+                void chrome.runtime.lastError;
+                resolve();
+              });
+            });
+          } catch (e) {}
+        }
+
+        const prepClipboardAndCoords = () =>
+          new Promise((resolve) => {
+            chrome.scripting.executeScript(
+              {
+                target: { tabId },
+                world: 'MAIN',
+                args: [imgDataUrl],
+                func: async (dataUrl) => {
+                  try {
+                    const pickActiveComposerDialog = () => {
+                      const allDialogs = Array.from(document.querySelectorAll('div[role="dialog"]'));
+                      const scored = [];
+                      allDialogs.forEach((d, idx) => {
+                        const r = d.getBoundingClientRect();
+                        if (r.width < 200 || r.height < 150) return;
+                        if (d.getAttribute('aria-hidden') === 'true') return;
+                        try {
+                          const st = window.getComputedStyle(d);
+                          if (st.display === 'none' || st.visibility === 'hidden' || st.pointerEvents === 'none') return;
+                          const op = parseFloat(st.opacity || '1');
+                          if (!isNaN(op) && op < 0.35) return;
+                        } catch (e) {}
+                        const tb = d.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]');
+                        const txt = (d.innerText || '').toLowerCase();
+                        const isComposer = Boolean(tb) || txt.includes('criar post') || txt.includes('create post') || txt.includes('criar publicação');
+                        if (!isComposer) return;
+                        let score = idx * 100 + (tb ? 500 : 0);
+                        const testPts = [];
+                        if (tb) {
+                          const tr = tb.getBoundingClientRect();
+                          if (tr.width > 20 && tr.height > 15) {
+                            testPts.push([tr.left + Math.min(tr.width * 0.4, 100), tr.top + Math.min(tr.height * 0.5, 24)]);
+                          }
+                        }
+                        testPts.push([r.left + r.width * 0.5, r.top + Math.min(r.height * 0.25, 90)]);
+                        for (const [px, py] of testPts) {
+                          if (px >= 0 && py >= 0 && px <= window.innerWidth && py <= window.innerHeight) {
+                            const topEl = document.elementFromPoint(px, py);
+                            if (topEl && d.contains(topEl)) {
+                              score += 1000000;
+                              break;
+                            }
+                          }
+                        }
+                        scored.push({ d, score });
+                      });
+                      scored.sort((a, b) => b.score - a.score);
+                      return scored[0] ? scored[0].d : null;
+                    };
+
+                    const dlg = pickActiveComposerDialog();
+                    if (!dlg) return { ok: false, reason: 'no_dialog' };
+
+                    const hasPhoto = Array.from(dlg.querySelectorAll('img')).some((img) => {
+                      const r = img.getBoundingClientRect();
+                      const src = img.getAttribute('src') || '';
+                      return (src.startsWith('blob:') || src.startsWith('data:image/') || src.includes('scontent') || src.includes('fbcdn')) && r.width > 72 && r.height > 72;
+                    });
+                    if (hasPhoto) return { ok: true, alreadyAttached: true };
+
+                    const tb = Array.from(
+                      dlg.querySelectorAll('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"], div[contenteditable="true"][aria-placeholder], div[contenteditable="true"][aria-label]')
+                    ).find((el) => {
+                      const rect = el.getBoundingClientRect();
+                      if (rect.width < 40 || rect.height < 20) return false;
+                      const lbl = ((el.getAttribute('aria-label') || el.getAttribute('aria-placeholder') || '') + '').toLowerCase();
+                      return !lbl.includes('coment') && !lbl.includes('comment') && !lbl.includes('pesquis') && !lbl.includes('search');
+                    });
+                    if (!tb) return { ok: false, reason: 'no_textbox' };
+
+                    const pngBlob = await new Promise((resBlob) => {
+                      const img = new Image();
+                      img.onload = () => {
+                        try {
+                          const canvas = document.createElement('canvas');
+                          canvas.width = img.naturalWidth || img.width || 600;
+                          canvas.height = img.naturalHeight || img.height || 600;
+                          const ctx = canvas.getContext('2d');
+                          ctx.drawImage(img, 0, 0);
+                          canvas.toBlob((b) => resBlob(b), 'image/png');
+                        } catch (e) {
+                          resBlob(null);
+                        }
+                      };
+                      img.onerror = () => resBlob(null);
+                      img.src = dataUrl;
+                    });
+                    if (!pngBlob) return { ok: false, reason: 'png_encode_failed' };
+
+                    window.__avClipWriteStatus = 'waiting';
+                    const armHandler = () => {
+                      try {
+                        if (navigator.clipboard && navigator.clipboard.write && typeof ClipboardItem !== 'undefined') {
+                          navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })])
+                            .then(() => { window.__avClipWriteStatus = 'ok'; })
+                            .catch((e) => { window.__avClipWriteStatus = 'err:' + String(e); });
+                        } else {
+                          window.__avClipWriteStatus = 'no_clipboard_api';
+                        }
+                      } catch (err) {
+                        window.__avClipWriteStatus = 'err:' + String(err);
+                      }
+                    };
+                    document.addEventListener('click', armHandler, { capture: true, once: true });
+
+                    const r = tb.getBoundingClientRect();
+                    return {
+                      ok: true,
+                      cx: Math.round(r.left + Math.min(r.width * 0.4, 120)),
+                      cy: Math.round(r.top + Math.min(r.height * 0.4, 30))
+                    };
+                  } catch (e) {
+                    return { ok: false, error: String(e) };
+                  }
+                }
+              },
+              (results) => {
+                void chrome.runtime.lastError;
+                resolve(results && results[0] ? results[0].result : null);
+              }
+            );
+          });
+
+        const checkClipAndPreview = () =>
+          new Promise((resolve) => {
+            chrome.scripting.executeScript(
+              {
+                target: { tabId },
+                world: 'MAIN',
+                func: () => {
+                  const hasPhoto = Array.from(document.querySelectorAll('div[role="dialog"]')).some((d) => {
+                    if (d.getAttribute('aria-hidden') === 'true') return false;
+                    return Array.from(d.querySelectorAll('img')).some((img) => {
+                      const r = img.getBoundingClientRect();
+                      const src = img.getAttribute('src') || '';
+                      return (src.startsWith('blob:') || src.startsWith('data:image/') || src.includes('scontent') || src.includes('fbcdn')) && r.width > 72 && r.height > 72;
+                    });
+                  });
+                  return { clipStatus: window.__avClipWriteStatus || 'unknown', hasPhoto };
+                }
+              },
+              (results) => {
+                void chrome.runtime.lastError;
+                resolve(results && results[0] ? results[0].result : { clipStatus: 'unknown', hasPhoto: false });
+              }
+            );
+          });
+
+        const dbg = await withTabDebugger(tabId, async (sendCmd) => {
+          await sleepMs(260);
+          const prep = await prepClipboardAndCoords();
+          if (!prep || !prep.ok) return { pasted: false, reason: (prep && prep.reason) || 'prep_failed' };
+          if (prep.alreadyAttached) return { pasted: true, previewDetected: true };
+
+          await dispatchRealTrustedClick(sendCmd, prep.cx, prep.cy, 90);
+          for (let i = 0; i < 6; i++) {
+            await sleepMs(100);
+            const st = await checkClipAndPreview();
+            if (st.clipStatus === 'ok' || (st.clipStatus && st.clipStatus.startsWith('err:'))) break;
+          }
+
+          await sendCmd('Input.dispatchKeyEvent', {
+            type: 'rawKeyDown',
+            modifiers: 2,
+            windowsVirtualKeyCode: 86,
+            nativeVirtualKeyCode: 86,
+            key: 'v',
+            code: 'KeyV',
+            commands: ['paste']
+          });
+          await sleepMs(45);
+          await sendCmd('Input.dispatchKeyEvent', {
+            type: 'keyUp',
+            modifiers: 2,
+            windowsVirtualKeyCode: 86,
+            nativeVirtualKeyCode: 86,
+            key: 'v',
+            code: 'KeyV'
+          });
+
+          for (let t = 0; t < 7; t++) {
+            await sleepMs(350);
+            const st = await checkClipAndPreview();
+            if (st.hasPhoto) {
+              return { pasted: true, previewDetected: true };
+            }
+          }
+          const finalSt = await checkClipAndPreview();
+          return { pasted: finalSt.hasPhoto, previewDetected: finalSt.hasPhoto, clipStatus: finalSt.clipStatus };
+        });
+
+        sendResponse({
+          ok: Boolean(dbg.usedDebugger && dbg.value && dbg.value.pasted),
+          result: dbg.value || null
+        });
       } catch (err) {
         sendResponse({ ok: false, error: String(err) });
       }

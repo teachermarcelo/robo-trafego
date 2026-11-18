@@ -30,8 +30,16 @@ import { WhatsAppFunnelX1Tab } from './components/WhatsAppFunnelX1Tab';
 import { ManyChatPreChatPage } from './components/ManyChatPreChatPage';
 import { PWAInstallModal } from './components/PWAInstallModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
+import { BackupTransferModal } from './components/BackupTransferModal';
 import { getCampaignSlug, getShortFunnelSlug } from './utils/campaignSlug';
 import { safeSetLocalStorageJson, pruneExpendableStorage } from './utils/safeStorage';
+import {
+  collectFullWorkspaceBackup,
+  collectNonSecretExtraKeys,
+  applyNonSecretExtraKeysToLocalStorage,
+  applyFullWorkspaceSnapshotToLocalStorage,
+  isBrowserStorageBlank,
+} from './utils/fullBackupSync';
 import { INITIAL_CAMPAIGNS } from './data/defaultCampaigns';
 import { Campaign, TrackingEvent, PainPointData, PushNotification, CustomerLead } from './types';
 import {
@@ -61,6 +69,10 @@ import {
   saveGlobalWorkspaceSyncToFirebase,
   subscribeGlobalWorkspaceSync,
   pullGlobalWorkspaceSyncFromFirebase,
+  saveExtrasWorkspaceToFirebase,
+  pullExtrasWorkspaceFromFirebase,
+  saveTransferVaultToFirebase,
+  pullTransferVaultFromFirebase,
   fetchRecoverableArchivedCampaigns,
   restoreArchivedCampaignToFirebase,
   resetFirebaseQuotaPause,
@@ -151,6 +163,8 @@ export default function App() {
   const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
   const [isVercelModalOpen, setIsVercelModalOpen] = useState(false);
   const [isPWAInstallModalOpen, setIsPWAInstallModalOpen] = useState(false);
+  const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
+  const [vaultRestoredBanner, setVaultRestoredBanner] = useState<string | null>(null);
   const [bridgeModalCampaign, setBridgeModalCampaign] = useState<Campaign | null>(null);
   const [cloudProvider, setCloudProvider] = useState<CloudDbProvider>(() => getPrimaryCloudProvider());
   const cloudProviderRef = React.useRef<CloudDbProvider>(cloudProvider);
@@ -382,6 +396,10 @@ export default function App() {
       }
       if (snap.globalWorkspace) {
         mergeGlobalWorkspaceIntoLocalStorage(snap.globalWorkspace);
+      }
+      if (snap.extrasWorkspace) {
+        applyNonSecretExtraKeysToLocalStorage(snap.extrasWorkspace, { mergeOnly: true });
+        window.dispatchEvent(new CustomEvent('autoviral_full_state_restored'));
       }
       if (Array.isArray(snap.customerLeads) && snap.customerLeads.length > 0) {
         setCustomerLeads((prev) => {
@@ -1262,113 +1280,173 @@ export default function App() {
 
   const [backupRestoreStatus, setBackupRestoreStatus] = useState<string | null>(null);
 
-  // Export full cloud + local workspace backup
-  const handleExportBackup = () => {
-    const safeParse = (key: string) => {
-      try {
-        const raw = localStorage.getItem(key);
-        return raw ? JSON.parse(raw) : null;
-      } catch {
-        return null;
+  const hydrateFromSnapshotObject = React.useCallback(
+    (snapshot: any, options?: { mergeOnly?: boolean }) => {
+      const applied = applyFullWorkspaceSnapshotToLocalStorage(snapshot, options);
+
+      if (applied.deletedCampaignIds.length > 0) {
+        setDeletedCampaignIds((prev) => {
+          const next = new Set([...Array.from(prev), ...applied.deletedCampaignIds]);
+          try {
+            localStorage.setItem('autoviral_deleted_campaign_ids', JSON.stringify(Array.from(next)));
+          } catch {}
+          return next;
+        });
+      }
+
+      if (applied.campaigns.length > 0) {
+        setCampaigns((prev) => {
+          const byId = new Map(prev.map((c) => [c.id, c]));
+          applied.campaigns.forEach((c: Campaign) => {
+            if (c?.id) {
+              if (!options?.mergeOnly || !byId.has(c.id)) {
+                byId.set(c.id, c);
+              }
+            }
+          });
+          const merged = Array.from(byId.values());
+          safeSetLocalStorageJson('autoviral_campaigns', merged);
+          return merged;
+        });
+      }
+
+      if (applied.trackingEvents.length > 0) {
+        setTrackingEvents((prev) => {
+          const seen = new Set(prev.map((t) => t.id));
+          const fresh = applied.trackingEvents.filter((t: TrackingEvent) => t?.id && !seen.has(t.id));
+          if (fresh.length === 0) return prev;
+          const merged = [...fresh, ...prev].slice(0, 300);
+          safeSetLocalStorageJson('autoviral_tracking_events', merged);
+          return merged;
+        });
+      }
+
+      if (applied.customerLeads.length > 0) {
+        setCustomerLeads((prev) => {
+          const seen = new Set(prev.map((l) => l.id));
+          const fresh = applied.customerLeads.filter((l: CustomerLead) => l?.id && !seen.has(l.id));
+          return fresh.length > 0 ? [...fresh, ...prev] : prev;
+        });
+      }
+
+      return applied;
+    },
+    []
+  );
+
+  // Boot-time Cross-Browser & Incognito Auto-Hydration (?sync_code=AV-XXXXXX or blank browser/incognito vault)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    let active = true;
+
+    const runBootHydration = async () => {
+      const params = new URLSearchParams(window.location.search);
+      const syncCode = (params.get('sync_code') || '').trim().toUpperCase();
+
+      if (syncCode) {
+        let snapshot: any = null;
+        try {
+          const res = await fetch(`/api/workspace/vault/${encodeURIComponent(syncCode)}`, { cache: 'no-store' });
+          if (res.ok) {
+            const json = await res.json();
+            if (json?.ok && json.snapshot) snapshot = json.snapshot;
+          }
+        } catch {}
+
+        if (!snapshot) {
+          snapshot = await pullTransferVaultFromFirebase(syncCode).catch(() => null);
+        }
+
+        if (active && snapshot) {
+          const applied = hydrateFromSnapshotObject(snapshot, { mergeOnly: false });
+          if (applied.hasSupabaseCredentials && getPrimaryCloudProvider() === 'supabase') {
+            setCloudProvider('supabase');
+            cloudProviderRef.current = 'supabase';
+          }
+          try {
+            params.delete('sync_code');
+            const nextSearch = params.toString();
+            const cleanUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash}`;
+            window.history.replaceState({}, '', cleanUrl);
+          } catch {}
+          setVaultRestoredBanner(
+            `✅ Tudo restaurado pelo código ${syncCode}! (${applied.campaigns.length} campanhas + ${applied.restoredKeys} blocos de grupos, públicos, kits e copys ativos neste navegador)`
+          );
+          return;
+        }
+      }
+
+      // If this is a blank browser or Incognito Window opened directly on the URL,
+      // automatically hydrate saved vault + Firebase extras without ever touching existing work
+      if (isBrowserStorageBlank()) {
+        try {
+          const latestRes = await fetch('/api/workspace/vault/latest', { cache: 'no-store' });
+          if (latestRes.ok) {
+            const latestJson = await latestRes.json();
+            if (active && latestJson?.hasData && latestJson.snapshot) {
+              const applied = hydrateFromSnapshotObject(latestJson.snapshot, { mergeOnly: true });
+              if (applied.hasSupabaseCredentials && getPrimaryCloudProvider() === 'supabase') {
+                setCloudProvider('supabase');
+                cloudProviderRef.current = 'supabase';
+              }
+              setVaultRestoredBanner(
+                `🔄 Navegador novo / Aba Anônima detectada — ${applied.restoredKeys} conjuntos de dados e ${applied.campaigns.length} campanhas restaurados automaticamente!`
+              );
+              return;
+            }
+          }
+        } catch {}
+
+        if (getPrimaryCloudProvider() !== 'supabase') {
+          const extras = await pullExtrasWorkspaceFromFirebase().catch(() => null);
+          if (active && extras) {
+            const count = applyNonSecretExtraKeysToLocalStorage(extras, { mergeOnly: true });
+            if (count > 0) {
+              window.dispatchEvent(new CustomEvent('autoviral_full_state_restored'));
+            }
+          }
+        }
       }
     };
-    const backupData = {
-      version: '2.0.0',
-      exportedAt: new Date().toISOString(),
-      campaigns,
-      trackingEventsCount: trackingEvents.length,
-      trackingEvents,
-      customerLeads,
-      totalRevenue,
-      workspace: {
-        managedCampaigns: safeParse('autoviral_managed_campaigns_v5'),
-        savedCopiesMap: safeParse('autoviral_saved_copies_v1'),
-        customCopyPresets: safeParse('autoviral_custom_copy_presets_v1'),
-        mappedGroups: safeParse('autoviral_fb_mapped_groups_v5_real') || safeParse('autoviral_fb_mapped_groups_v3'),
-        audiences: safeParse('autoviral_fb_audiences_v4') || safeParse('autoviral_fb_audiences_v3'),
-        botLogs: safeParse('autoviral_fb_bot_logs_v3'),
-        youtubeVideos: safeParse('autoviral_yt_videos_v2'),
-        pinterestPins: safeParse('autoviral_pinterest_pins_v1'),
-        instaCampaigns: safeParse('autoviral_insta_campaigns_v1'),
-        storyQueue: safeParse('autoviral_insta_story_queue') || safeParse('autoviral_insta_story_queue_v2'),
-        mappedInstaTargets: safeParse('autoviral_insta_mapped_targets_v2'),
-        whatsappX1Flows: safeParse('autoviral_whatsapp_x1_flows_v1'),
-        globalAudiences: safeParse('autoviral_global_audiences_v1'),
-        globalTrashAudiences: safeParse('autoviral_global_audiences_trash_v1'),
-        globalGroups: safeParse('autoviral_global_fb_groups_v1'),
-        globalOffers: safeParse('autoviral_global_offers_v1'),
-        globalInboxGroups: safeParse('autoviral_global_inbox_groups_v1'),
-        globalBotLogs: safeParse('autoviral_global_bot_logs_v1'),
-      },
+
+    runBootHydration();
+    return () => {
+      active = false;
     };
+  }, [hydrateFromSnapshotObject]);
+
+  // Export 100% full cloud + local workspace backup (all autoviral_* keys)
+  const handleExportBackup = (includeCredentials = true) => {
+    const backupData = collectFullWorkspaceBackup(campaigns, trackingEvents, customerLeads, {
+      includeCredentials,
+      totalRevenue,
+    });
     const blob = new Blob([JSON.stringify(backupData, null, 2)], {
       type: 'application/json',
     });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `autoviral_backup_${new Date().toISOString().split('T')[0]}.json`;
+    a.download = `autoviral_backup_completo_${new Date().toISOString().split('T')[0]}.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
 
-  // Restore full backup from JSON file (merges non-destructively & syncs to Firebase)
+  // Restore full backup from JSON file (merges non-destructively & syncs to Cloud + Server Vault)
   const handleImportBackup = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
       const text = await file.text();
       const parsed = JSON.parse(text);
-      let restoredCampaignsCount = 0;
+      const applied = hydrateFromSnapshotObject(parsed, { mergeOnly: false });
 
-      if (Array.isArray(parsed.campaigns) && parsed.campaigns.length > 0) {
-        setCampaigns((prev) => {
-          const seen = new Set(prev.map((c) => c.id));
-          const incoming = parsed.campaigns.filter((c: any) => c?.id && !seen.has(c.id));
-          restoredCampaignsCount = incoming.length;
-          const merged = [...incoming, ...prev];
-          try {
-            localStorage.setItem('autoviral_campaigns', JSON.stringify(merged));
-          } catch {}
-          incoming.forEach((c: Campaign) => saveCampaignToFirebase(c).catch(console.warn));
-          return merged;
-        });
+      if (applied.campaigns.length > 0) {
+        applied.campaigns.forEach((c: Campaign) => saveCampaignToFirebase(c).catch(console.warn));
       }
 
       if (parsed.workspace && typeof parsed.workspace === 'object') {
         const w = parsed.workspace;
-        const putJson = (key: string, val: any) => {
-          if (val !== null && val !== undefined) {
-            try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
-          }
-        };
-        if (w.savedCopiesMap) putJson('autoviral_saved_copies_v1', w.savedCopiesMap);
-        if (w.customCopyPresets) putJson('autoviral_custom_copy_presets_v1', w.customCopyPresets);
-        if (w.mappedGroups) {
-          putJson('autoviral_fb_mapped_groups_v5_real', w.mappedGroups);
-          putJson('autoviral_fb_mapped_groups_v3', w.mappedGroups);
-        }
-        if (w.audiences) {
-          putJson('autoviral_fb_audiences_v4', w.audiences);
-          putJson('autoviral_fb_audiences_v3', w.audiences);
-        }
-        if (w.botLogs) putJson('autoviral_fb_bot_logs_v3', w.botLogs);
-        if (w.youtubeVideos) putJson('autoviral_yt_videos_v2', w.youtubeVideos);
-        if (w.pinterestPins) putJson('autoviral_pinterest_pins_v1', w.pinterestPins);
-        if (w.instaCampaigns) putJson('autoviral_insta_campaigns_v1', w.instaCampaigns);
-        if (w.storyQueue) {
-          putJson('autoviral_insta_story_queue', w.storyQueue);
-          putJson('autoviral_insta_story_queue_v2', w.storyQueue);
-        }
-        if (w.mappedInstaTargets) putJson('autoviral_insta_mapped_targets_v2', w.mappedInstaTargets);
-        if (w.whatsappX1Flows) putJson('autoviral_whatsapp_x1_flows_v1', w.whatsappX1Flows);
-        if (w.globalAudiences) putJson('autoviral_global_audiences_v1', w.globalAudiences);
-        if (w.globalTrashAudiences) putJson('autoviral_global_audiences_trash_v1', w.globalTrashAudiences);
-        if (w.globalGroups) putJson('autoviral_global_fb_groups_v1', w.globalGroups);
-        if (w.globalOffers) putJson('autoviral_global_offers_v1', w.globalOffers);
-        if (w.globalInboxGroups) putJson('autoviral_global_inbox_groups_v1', w.globalInboxGroups);
-        if (w.globalBotLogs) putJson('autoviral_global_bot_logs_v1', w.globalBotLogs);
-
         saveWorkspaceSyncToFirebase({
           savedCopiesMap: w.savedCopiesMap || undefined,
           customCopyPresets: w.customCopyPresets || undefined,
@@ -1390,8 +1468,18 @@ export default function App() {
         }).catch(console.warn);
       }
 
+      saveExtrasWorkspaceToFirebase(collectNonSecretExtraKeys()).catch(console.warn);
+      if (isSupabaseConnected()) {
+        pushLocalSnapshotToSupabase(campaigns, customerLeads).catch(console.warn);
+      }
+      fetch('/api/workspace/vault', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ snapshot: parsed }),
+      }).catch(() => {});
+
       setBackupRestoreStatus(
-        `✅ Backup restaurado com sucesso! (${restoredCampaignsCount} novas campanhas + grupos, públicos e copys sincronizados na nuvem)`
+        `✅ Backup 100% restaurado! (${applied.campaigns.length} campanhas + ${applied.restoredKeys} blocos de grupos, públicos, kits e copys preservados)`
       );
     } catch {
       setBackupRestoreStatus('⚠️ Arquivo inválido. Selecione um backup .json válido do AutoViral AI.');
@@ -1399,10 +1487,137 @@ export default function App() {
     e.target.value = '';
   };
 
-  // Manual 2-way Cloud Sync (Desktop <-> Mobile)
+  // Save EVERYTHING to Cloud + Server Vault and generate 1-click Magic Link for Incognito / Any Browser
+  const handleSaveCloudAndGenerateLink = async (includeCredentials: boolean) => {
+    const fullSnapshot = collectFullWorkspaceBackup(campaigns, trackingEvents, customerLeads, {
+      includeCredentials,
+      totalRevenue,
+    });
+    const nonSecretSnapshot = collectFullWorkspaceBackup(campaigns, trackingEvents, customerLeads, {
+      includeCredentials: false,
+      totalRevenue,
+    });
+
+    const randomChars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let code = 'AV-';
+    for (let i = 0; i < 6; i++) {
+      code += randomChars[Math.floor(Math.random() * randomChars.length)];
+    }
+
+    let savedServer = false;
+    let savedFirebaseVault = false;
+    let savedSupabase = false;
+
+    try {
+      const vaultRes = await fetch('/api/workspace/vault', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, snapshot: fullSnapshot }),
+      });
+      if (vaultRes.ok) {
+        const json = await vaultRes.json();
+        if (json?.ok && json.code) {
+          code = json.code;
+          savedServer = true;
+        }
+      }
+    } catch {}
+
+    // Always also sync extras + transfer code to Firebase (safe non-secret copy) and Supabase
+    await Promise.all([
+      saveTransferVaultToFirebase(code, nonSecretSnapshot)
+        .then((r) => {
+          if (r.ok) savedFirebaseVault = true;
+        })
+        .catch(() => {}),
+      saveExtrasWorkspaceToFirebase(collectNonSecretExtraKeys()).catch(() => {}),
+      isSupabaseConnected()
+        ? pushLocalSnapshotToSupabase(campaigns, customerLeads)
+            .then((r) => {
+              if (r.ok) savedSupabase = true;
+            })
+            .catch(() => {})
+        : Promise.resolve(),
+    ]);
+
+    if (!savedServer && !savedFirebaseVault && !savedSupabase) {
+      return {
+        ok: false,
+        message: '⚠️ Não foi possível enviar para a nuvem agora. Use o botão "Baixar Backup Completo (.JSON)" abaixo — ele garante 100% offline.',
+      };
+    }
+
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const magicUrl = `${origin}/?sync_code=${encodeURIComponent(code)}`;
+    const targets: string[] = [];
+    if (savedServer) targets.push('Cofre do Servidor (inclui Aba Anônima)');
+    if (savedFirebaseVault) targets.push('Nuvem Firebase');
+    if (savedSupabase) targets.push('Supabase');
+
+    return {
+      ok: true,
+      code,
+      magicUrl,
+      message: `✅ Tudo salvo em: ${targets.join(' + ')}! Copie o link ou o código ${code} e abra em qualquer navegador ou Aba Anônima.`,
+    };
+  };
+
+  const handleRestoreByCode = async (rawCode: string) => {
+    const cleanCode = rawCode.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+    if (!cleanCode) {
+      return { ok: false, message: 'Digite um código válido (ex: AV-849201).' };
+    }
+    let snapshot: any = null;
+    try {
+      const res = await fetch(`/api/workspace/vault/${encodeURIComponent(cleanCode)}`, { cache: 'no-store' });
+      if (res.ok) {
+        const json = await res.json();
+        if (json?.ok && json.snapshot) snapshot = json.snapshot;
+      }
+    } catch {}
+
+    if (!snapshot) {
+      snapshot = await pullTransferVaultFromFirebase(cleanCode).catch(() => null);
+    }
+
+    if (!snapshot) {
+      return {
+        ok: false,
+        message: `⚠️ Código "${cleanCode}" não encontrado. Confira se digitou exatamente igual ou restaure pelo arquivo .JSON.`,
+      };
+    }
+
+    const applied = hydrateFromSnapshotObject(snapshot, { mergeOnly: false });
+    if (applied.hasSupabaseCredentials && getPrimaryCloudProvider() === 'supabase') {
+      setCloudProvider('supabase');
+      cloudProviderRef.current = 'supabase';
+    }
+    setVaultRestoredBanner(
+      `✅ Código ${cleanCode} restaurado com sucesso neste navegador! (${applied.campaigns.length} campanhas + ${applied.restoredKeys} blocos restaurados)`
+    );
+    return {
+      ok: true,
+      message: `✅ Tudo restaurado pelo código ${cleanCode}! (${applied.campaigns.length} campanhas + ${applied.restoredKeys} blocos de grupos, públicos, kits e copys).`,
+    };
+  };
+
+  // Manual 2-way Cloud Sync (Desktop <-> Mobile <-> Incognito)
   const handleForceCloudSync = async () => {
     setIsSyncingCloud(true);
     setFirebaseQuotaExceeded(false);
+
+    // Always also update Server Vault silently so an incognito window on same PC is 100% up-to-date
+    try {
+      const fullSnap = collectFullWorkspaceBackup(campaigns, trackingEvents, customerLeads, {
+        includeCredentials: true,
+        totalRevenue,
+      });
+      fetch('/api/workspace/vault', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ snapshot: fullSnap }),
+      }).catch(() => {});
+    } catch {}
 
     if (getPrimaryCloudProvider() === 'supabase' && isSupabaseConnected()) {
       try {
@@ -1457,15 +1672,17 @@ export default function App() {
           globalGroups: safeParse('autoviral_global_fb_groups_v1'),
           globalOffers: safeParse('autoviral_global_offers_v1'),
         }),
+        saveExtrasWorkspaceToFirebase(collectNonSecretExtraKeys()),
       ]);
       if (wsRes.quotaExceeded || globalWsRes.quotaExceeded) {
         setFirebaseQuotaExceeded(true);
       }
 
       // 2. Pull fresh snapshot directly from Firestore server
-      const [snap, globalSnap] = await Promise.all([
+      const [snap, globalSnap, extrasSnap] = await Promise.all([
         pullFullCloudSnapshotFromFirebase(),
         pullGlobalWorkspaceSyncFromFirebase(),
+        pullExtrasWorkspaceFromFirebase(),
       ]);
       const cloudDelSet = new Set(snap.deletedIds);
       setDeletedCampaignIds(cloudDelSet);
@@ -1487,12 +1704,16 @@ export default function App() {
         });
       }
 
+      if (extrasSnap) {
+        applyNonSecretExtraKeysToLocalStorage(extrasSnap, { mergeOnly: true });
+      }
       if (snap.workspace) {
-        window.dispatchEvent(new CustomEvent('autoviral_workspace_synced', { detail: snap.workspace }));
+        mergeWorkspaceIntoLocalStorage(snap.workspace);
       }
       if (globalSnap) {
-        window.dispatchEvent(new CustomEvent('autoviral_global_workspace_synced', { detail: globalSnap }));
+        mergeGlobalWorkspaceIntoLocalStorage(globalSnap);
       }
+      window.dispatchEvent(new CustomEvent('autoviral_full_state_restored'));
     } catch (err) {
       console.warn('Manual cloud sync error:', err);
       setFirebaseSyncStatus('error');
@@ -1699,6 +1920,7 @@ export default function App() {
         onOpenVercel={() => setIsVercelModalOpen(true)}
         onResetAllMetrics={handleResetToRealMode}
         onOpenPWAInstall={() => setIsPWAInstallModalOpen(true)}
+        onOpenBackupTransfer={() => setIsBackupModalOpen(true)}
         firebaseSyncStatus={firebaseSyncStatus}
         cloudProvider={cloudProvider}
         cloudCampaignsCount={cloudCampaignsCount || campaigns.length}
@@ -1709,6 +1931,18 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6">
+        {vaultRestoredBanner && (
+          <div className="mb-5 rounded-2xl border border-indigo-500/60 bg-indigo-950/60 px-4 py-3 text-xs text-indigo-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <p className="font-semibold">{vaultRestoredBanner}</p>
+            <button
+              type="button"
+              onClick={() => setVaultRestoredBanner(null)}
+              className="px-3 py-1 rounded-lg bg-indigo-800/80 hover:bg-indigo-700 text-white font-semibold whitespace-nowrap self-start sm:self-center cursor-pointer"
+            >
+              OK
+            </button>
+          </div>
+        )}
         {autoSwitchedBanner && cloudProvider === 'supabase' && (
           <div className="mb-5 rounded-2xl border border-emerald-600/60 bg-emerald-950/60 px-4 py-3 text-xs text-emerald-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="space-y-0.5">
@@ -1949,10 +2183,17 @@ export default function App() {
                 </p>
                 <div className="flex flex-wrap items-center gap-2.5">
                   <button
-                    onClick={handleExportBackup}
+                    type="button"
+                    onClick={() => setIsBackupModalOpen(true)}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-xl text-xs font-semibold text-white cursor-pointer"
+                  >
+                    Gerar Link p/ Aba Anônima / Outro Navegador
+                  </button>
+                  <button
+                    onClick={() => handleExportBackup(true)}
                     className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-xs font-semibold text-white cursor-pointer"
                   >
-                    Baixar Arquivo de Backup Completo (JSON)
+                    Baixar Backup Completo (JSON)
                   </button>
                   <label className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-xl text-xs font-semibold text-white cursor-pointer inline-flex items-center">
                     <span>Restaurar Backup (.JSON)</span>
@@ -2054,6 +2295,19 @@ export default function App() {
         cloudCampaignsCount={cloudCampaignsCount || campaigns.length}
         isSyncingCloud={isSyncingCloud}
         onForceCloudSync={handleForceCloudSync}
+      />
+
+      <BackupTransferModal
+        isOpen={isBackupModalOpen}
+        onClose={() => setIsBackupModalOpen(false)}
+        campaigns={campaigns}
+        trackingEvents={trackingEvents}
+        customerLeads={customerLeads}
+        onExportBackup={handleExportBackup}
+        onImportBackup={handleImportBackup}
+        onSaveCloudAndGenerateLink={handleSaveCloudAndGenerateLink}
+        onRestoreByCode={handleRestoreByCode}
+        backupRestoreStatus={backupRestoreStatus}
       />
 
       <OfflineIndicator />

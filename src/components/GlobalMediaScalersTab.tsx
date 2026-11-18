@@ -1505,6 +1505,13 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
         cloud.dismissedRecoveryKeys.forEach((k) => k && mergedDismissedSet.add(String(k).toLowerCase()));
         setDismissedRecoveryKeys(Array.from(mergedDismissedSet).slice(-400));
       }
+      if (Array.isArray(cloud.globalOffers) && cloud.globalOffers.length > 0) {
+        setOffers((prev) => {
+          const existingIds = new Set(prev.map((o) => o.id));
+          const fresh = cloud.globalOffers!.filter((o: any) => o?.id && !existingIds.has(o.id));
+          return fresh.length > 0 ? [...prev, ...fresh] : prev;
+        });
+      }
       if (Array.isArray(cloud.globalGroups) && cloud.globalGroups.length > 0) {
         setGlobalGroups((prev) => {
           const existingKeys = new Set(prev.map((g) => normalizeGroupUrlKey(g.url) || g.id));
@@ -1536,11 +1543,83 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
       }
     };
 
+    const rehydrateExtrasFromStorage = () => {
+      try {
+        const offersRaw = localStorage.getItem(STORAGE_KEYS.OFFERS);
+        if (offersRaw) {
+          const parsed = JSON.parse(offersRaw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setOffers((prev) => {
+              const seen = new Set(prev.map((o) => o.id));
+              const fresh = parsed.filter((o: any) => o?.id && !seen.has(o.id));
+              return fresh.length > 0 ? [...prev, ...fresh] : prev;
+            });
+          }
+        }
+        const kitsRaw = localStorage.getItem(STORAGE_KEYS.KITS_BY_OFFER);
+        if (kitsRaw) {
+          const parsed = JSON.parse(kitsRaw);
+          if (parsed && typeof parsed === 'object') {
+            setKitsByOffer((prev) => ({ ...parsed, ...prev }));
+          }
+        }
+        const inboxRaw = localStorage.getItem(STORAGE_KEYS.INBOX);
+        if (inboxRaw) {
+          const parsed = JSON.parse(inboxRaw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setInboxGroups((prev) => {
+              const seen = new Set(prev.map((g) => normalizeGroupUrlKey(g.url) || g.id));
+              const fresh = parsed.filter((g: any) => {
+                const k = normalizeGroupUrlKey(g?.url || '') || g?.id;
+                if (!k || seen.has(k)) return false;
+                seen.add(k);
+                return true;
+              });
+              return fresh.length > 0 ? [...prev, ...fresh] : prev;
+            });
+          }
+        }
+        const selOffer = localStorage.getItem(STORAGE_KEYS.SELECTED_OFFER);
+        if (selOffer) setSelectedOfferId(selOffer);
+        const selAud = localStorage.getItem(STORAGE_KEYS.SELECTED_AUDIENCE);
+        if (selAud) setSelectedAudienceId(selAud);
+        const logsRaw = localStorage.getItem(STORAGE_KEYS.LOGS);
+        if (logsRaw) {
+          const parsed = JSON.parse(logsRaw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setBotLogs((prev) => (prev.length === 0 ? parsed : prev));
+          }
+        }
+        const ytRaw = localStorage.getItem(STORAGE_KEYS.YT_ITEMS);
+        if (ytRaw) {
+          const parsed = JSON.parse(ytRaw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setYtItems((prev) => (prev.length === 0 ? parsed : prev));
+          }
+        }
+        const pinRaw = localStorage.getItem(STORAGE_KEYS.PIN_ITEMS);
+        if (pinRaw) {
+          const parsed = JSON.parse(pinRaw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setPinItems((prev) => (prev.length === 0 ? parsed : prev));
+          }
+        }
+      } catch {}
+    };
+
     const onGlobalSynced = (ev: Event) => {
       mergeCloudGlobal((ev as CustomEvent)?.detail as GlobalWorkspaceSyncData);
+      rehydrateExtrasFromStorage();
+    };
+    const onFullRestored = () => {
+      rehydrateExtrasFromStorage();
     };
     window.addEventListener('autoviral_global_workspace_synced', onGlobalSynced);
-    return () => window.removeEventListener('autoviral_global_workspace_synced', onGlobalSynced);
+    window.addEventListener('autoviral_full_state_restored', onFullRestored);
+    return () => {
+      window.removeEventListener('autoviral_global_workspace_synced', onGlobalSynced);
+      window.removeEventListener('autoviral_full_state_restored', onFullRestored);
+    };
   }, [trashAudiences, dismissedRecoveryKeys]);
 
   useEffect(() => {
@@ -3474,17 +3553,21 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
     const rawFullText = headline ? `${headline}\n\n${bodyWithLink}` : bodyWithLink;
     const fullText = ensureClickableUrlsInText(rawFullText);
 
-    // Clickable Image Card mode (default): imageDataUrl = '' so Facebook renders the OG Clickable Card linking to Landing Page.
-    // Direct Photo mode (when attachImageInComposer === true): attach PNG/JPG directly.
+    // If presellLink is our own OG-enabled Landing Page (?camp=, ?p=, /z/, /api/og) AND user chose Clickable Card,
+    // send imageDataUrl = '' so Facebook renders the Clickable Image Card linking to the Landing Page.
+    // Otherwise (e.g. external global-sell-beta.vercel.app which lacks og:image), ALWAYS attach the real image
+    // (auto-generating one if needed) so Facebook NEVER renders an empty gray box without photo!
+    const isOwnOgLanding = /(\/\?camp=|\/\?p=|\/z\/|\/api\/og)/i.test(presellLink);
+    const shouldAttachRealPhoto = attachImageInComposer || !isOwnOgLanding;
     let postImageUrl = activeOffer?.postImageUrl || '';
-    if (attachImageInComposer && !postImageUrl && activeOffer) {
+    if (shouldAttachRealPhoto && !postImageUrl && activeOffer) {
       const autoGeneratedImg = generateOfferPromoImageDataUrl(activeOffer, customPostHeadline, flyerTheme);
       if (autoGeneratedImg) {
         postImageUrl = autoGeneratedImg;
         handleUpdateOfferField('postImageUrl', autoGeneratedImg);
       }
     }
-    const imageToSend = attachImageInComposer ? postImageUrl : '';
+    const imageToSend = shouldAttachRealPhoto ? postImageUrl : '';
 
     try {
       navigator.clipboard?.writeText(fullText);
@@ -3931,10 +4014,20 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
     const presellLink = activeOffer
       ? appendTrackingParam(activeOffer.presellUrl || 'https://global-sell-beta.vercel.app/', 'utm_source', 'facebook_groups')
       : 'https://global-sell-beta.vercel.app/';
-    const headline = customPostHeadline.trim();
-    const bodyWithLink = customPostBody.replace(/\[PRESELL_LINK\]/g, presellLink).trim();
+    const headline = stripRobotMentionsFromPost(customPostHeadline.trim());
+    const bodyWithLink = stripRobotMentionsFromPost(customPostBody.replace(/\[PRESELL_LINK\]/g, presellLink).trim());
     const fullText = ensureClickableUrlsInText(headline ? `${headline}\n\n${bodyWithLink}` : bodyWithLink);
-    const postImageUrl = activeOffer?.postImageUrl || '';
+    const isOwnOgLanding = /(\/\?camp=|\/\?p=|\/z\/|\/api\/og)/i.test(presellLink);
+    const shouldAttachRealPhoto = attachImageInComposer || !isOwnOgLanding;
+    let postImageUrl = activeOffer?.postImageUrl || '';
+    if (shouldAttachRealPhoto && !postImageUrl && activeOffer) {
+      const autoGeneratedImg = generateOfferPromoImageDataUrl(activeOffer, customPostHeadline, flyerTheme);
+      if (autoGeneratedImg) {
+        postImageUrl = autoGeneratedImg;
+        handleUpdateOfferField('postImageUrl', autoGeneratedImg);
+      }
+    }
+    const imageToSend = shouldAttachRealPhoto ? postImageUrl : '';
 
     try {
       navigator.clipboard?.writeText(fullText);
@@ -3962,7 +4055,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
           groupUrl: log.groupUrl,
           groupName: sanitizeGlobalGroupName(log.groupName),
           fullText,
-          imageDataUrl: postImageUrl,
+          imageDataUrl: imageToSend,
           autoJoinAndPost: true,
           silentMode: silentBackgroundMode,
         },
@@ -7198,6 +7291,14 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                           </button>
                         </div>
 
+                        {!/(\/\?camp=|\/\?p=|\/z\/|\/api\/og)/i.test(activePresellTrackingUrl || activeOffer.presellUrl || '') && (
+                          <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/35 text-[11px] text-amber-200 leading-relaxed">
+                            <span className="font-bold text-amber-300">🛡️ Proteção Anti-Caixa Cinza Ativada:</span>{' '}
+                            Seu link atual (<span className="font-mono text-amber-100">{getDisplayDomain(activePresellTrackingUrl || activeOffer.presellUrl)}</span>) é externo e não gera capa automática no Facebook.
+                            Para a postagem nunca ir sem foto, o disparador <strong className="text-white">anexa automaticamente a foto do produto/arte</strong> junto com o link azul clicável e remove a caixinha cinza vazia!
+                          </div>
+                        )}
+
                         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                           <input
                             type="url"
@@ -7317,8 +7418,8 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                               </div>
                             )}
 
-                            {/* Modo 1 (Padrão): Card Clicável da Landing Page no estilo exato do Facebook (sem menção a robô) */}
-                            {!attachImageInComposer ? (
+                            {/* Modo 1 (Padrão em links próprios com OG): Card Clicável; em links externos sem og:image, força foto anexa anti-caixa-cinza */}
+                            {!attachImageInComposer && /(\/\?camp=|\/\?p=|\/z\/|\/api\/og)/i.test(activePresellTrackingUrl || '') ? (
                               <a
                                 href={activePresellTrackingUrl}
                                 target="_blank"
@@ -7359,7 +7460,9 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                                   />
                                   <div className="px-3 py-1.5 bg-slate-950/90 border-t border-slate-800 flex flex-wrap items-center justify-between gap-2 text-[11px]">
                                     <span className="text-emerald-300 font-medium">
-                                      ✅ Foto direta anexada + Link clicável no texto
+                                      {!/(\/\?camp=|\/\?p=|\/z\/|\/api\/og)/i.test(activePresellTrackingUrl || '')
+                                        ? '🛡️ Foto anexada automaticamente (anti-caixa cinza para link externo) + Link clicável'
+                                        : '✅ Foto direta anexada + Link clicável no texto'}
                                     </span>
                                     <div className="flex items-center gap-3">
                                       <button

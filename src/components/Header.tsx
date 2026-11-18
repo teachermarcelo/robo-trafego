@@ -17,7 +17,8 @@ import {
   Share2,
   Smartphone,
   MessageCircle,
-  Globe
+  Globe,
+  HardDrive
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -33,6 +34,7 @@ interface HeaderProps {
   onOpenVercel?: () => void;
   onResetAllMetrics?: () => void;
   onOpenPWAInstall?: () => void;
+  onOpenBackupTransfer?: () => void;
   firebaseSyncStatus?: 'connecting' | 'synced' | 'error';
   cloudProvider?: 'supabase' | 'firebase';
   cloudCampaignsCount?: number;
@@ -53,6 +55,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenVercel,
   onResetAllMetrics,
   onOpenPWAInstall,
+  onOpenBackupTransfer,
   firebaseSyncStatus = 'synced',
   cloudProvider = 'firebase',
   cloudCampaignsCount,
@@ -184,6 +187,18 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
               <span>📱 Instalar App / APK</span>
+            </button>
+          )}
+
+          {onOpenBackupTransfer && (
+            <button
+              type="button"
+              onClick={onOpenBackupTransfer}
+              className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs transition border bg-indigo-950/70 border-indigo-500/60 text-indigo-200 hover:text-white hover:bg-indigo-600/60 hover:border-indigo-400 font-bold shadow-sm cursor-pointer"
+              title="Salvar 100% tudo para usar em outro navegador ou Aba Anônima (Link Mágico + Backup JSON)"
+            >
+              <HardDrive className="w-3.5 h-3.5 text-indigo-300" />
+              <span>Salvar Tudo / Outro Navegador</span>
             </button>
           )}
 

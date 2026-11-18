@@ -2827,6 +2827,134 @@ app.post('/api/supabase-proxy', async (req, res) => {
   }
 });
 
+// Cross-Browser & Incognito Transfer Vault (persisted on disk in .autoviral_vault.json)
+const VAULT_FILE = path.join(process.cwd(), '.autoviral_vault.json');
+
+interface VaultEntry {
+  code: string;
+  savedAt: string;
+  snapshot: any;
+}
+
+interface VaultStore {
+  latestCode: string | null;
+  entries: Record<string, VaultEntry>;
+}
+
+function readVaultStore(): VaultStore {
+  try {
+    if (fs.existsSync(VAULT_FILE)) {
+      const raw = fs.readFileSync(VAULT_FILE, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && parsed.entries) {
+        return {
+          latestCode: parsed.latestCode || null,
+          entries: parsed.entries || {},
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('[Vault] Could not read .autoviral_vault.json:', err);
+  }
+  return { latestCode: null, entries: {} };
+}
+
+function writeVaultStore(store: VaultStore): boolean {
+  try {
+    // Keep at most 8 most recent codes to keep disk tidy
+    const keys = Object.keys(store.entries);
+    if (keys.length > 8) {
+      keys
+        .sort((a, b) => (store.entries[b]?.savedAt || '').localeCompare(store.entries[a]?.savedAt || ''))
+        .slice(8)
+        .forEach((oldKey) => delete store.entries[oldKey]);
+    }
+    fs.writeFileSync(VAULT_FILE, JSON.stringify(store), 'utf-8');
+    return true;
+  } catch (err) {
+    console.warn('[Vault] Could not write .autoviral_vault.json:', err);
+    return false;
+  }
+}
+
+function generateVaultCode(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let out = 'AV-';
+  for (let i = 0; i < 6; i++) {
+    out += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return out;
+}
+
+app.post('/api/workspace/vault', (req, res) => {
+  try {
+    const { snapshot, code } = req.body || {};
+    if (!snapshot || typeof snapshot !== 'object') {
+      return res.status(400).json({ ok: false, error: 'Snapshot inválido.' });
+    }
+    const cleanCode =
+      typeof code === 'string' && code.trim().length >= 4
+        ? code.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '')
+        : generateVaultCode();
+    const savedAt = new Date().toISOString();
+    const store = readVaultStore();
+    store.latestCode = cleanCode;
+    store.entries[cleanCode] = { code: cleanCode, savedAt, snapshot };
+    const persisted = writeVaultStore(store);
+    return res.json({
+      ok: true,
+      code: cleanCode,
+      savedAt,
+      persistedToDisk: persisted,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ ok: false, error: err?.message || 'Erro ao salvar cofre.' });
+  }
+});
+
+app.get('/api/workspace/vault/latest', (req, res) => {
+  try {
+    const store = readVaultStore();
+    const entry = store.latestCode ? store.entries[store.latestCode] : null;
+    if (!entry) {
+      return res.json({ ok: true, hasData: false });
+    }
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json({
+      ok: true,
+      hasData: true,
+      code: entry.code,
+      savedAt: entry.savedAt,
+      snapshot: entry.snapshot,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ ok: false, hasData: false, error: err?.message || 'Erro ao ler cofre.' });
+  }
+});
+
+app.get('/api/workspace/vault/:code', (req, res) => {
+  try {
+    const cleanCode = String(req.params.code || '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+    if (!cleanCode) {
+      return res.status(400).json({ ok: false, error: 'Código inválido.' });
+    }
+    const store = readVaultStore();
+    const entry = store.entries[cleanCode];
+    if (!entry) {
+      return res.status(404).json({ ok: false, error: 'Código não encontrado neste servidor.' });
+    }
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json({
+      ok: true,
+      code: entry.code,
+      savedAt: entry.savedAt,
+      snapshot: entry.snapshot,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ ok: false, error: err?.message || 'Erro ao buscar código.' });
+  }
+});
+
 app.get('/api/health', (req, res) => {
   const ai = getGeminiClient();
   res.json({

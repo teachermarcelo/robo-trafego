@@ -1,5 +1,6 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Campaign, CustomerLead, TrackingEvent } from '../types';
+import { collectNonSecretExtraKeys } from '../utils/fullBackupSync';
 
 export type CloudDbProvider = 'supabase' | 'firebase';
 
@@ -518,6 +519,7 @@ export async function fetchAllAutoViralFromSupabase(): Promise<{
   campaigns: Campaign[];
   workspace: any | null;
   globalWorkspace: any | null;
+  extrasWorkspace: Record<string, any> | null;
   deletedIds: string[] | null;
   customerLeads: CustomerLead[] | null;
   trackingEvents: TrackingEvent[] | null;
@@ -529,6 +531,7 @@ export async function fetchAllAutoViralFromSupabase(): Promise<{
       campaigns: [],
       workspace: null,
       globalWorkspace: null,
+      extrasWorkspace: null,
       deletedIds: null,
       customerLeads: null,
       trackingEvents: null,
@@ -544,6 +547,7 @@ export async function fetchAllAutoViralFromSupabase(): Promise<{
   let missingStoreTable = false;
   let workspace: any = null;
   let globalWorkspace: any = null;
+  let extrasWorkspace: Record<string, any> | null = null;
   let deletedIds: string[] | null = null;
   let customerLeads: CustomerLead[] | null = null;
 
@@ -564,6 +568,7 @@ export async function fetchAllAutoViralFromSupabase(): Promise<{
       } catch {}
       if (row.key === 'workspace_sync_v1') workspace = row.data;
       if (row.key === 'global_workspace_sync_v1') globalWorkspace = row.data;
+      if (row.key === 'workspace_extras_v1' && row.data && typeof row.data === 'object') extrasWorkspace = row.data;
       if (row.key === 'deleted_campaign_ids' && Array.isArray(row.data)) deletedIds = row.data;
       if (row.key === 'customer_leads' && Array.isArray(row.data)) customerLeads = row.data;
     });
@@ -575,6 +580,7 @@ export async function fetchAllAutoViralFromSupabase(): Promise<{
     campaigns: campaignsRes || [],
     workspace,
     globalWorkspace,
+    extrasWorkspace,
     deletedIds,
     customerLeads,
     trackingEvents: eventsRes,
@@ -646,12 +652,17 @@ export async function pushLocalSnapshotToSupabase(extraCampaigns?: Campaign[], e
 
   const deletedIds = safeParse('autoviral_deleted_campaign_ids') || ['camp-1', 'camp-2', 'camp-3'];
 
-  const [wsRes, glRes, delRes, leadsRes] = await Promise.all([
+  const extrasPayload = collectNonSecretExtraKeys();
+
+  const [wsRes, glRes, exRes, delRes, leadsRes] = await Promise.all([
     Object.keys(workspacePayload).length > 0
       ? saveWorkspaceJsonToSupabase('workspace_sync_v1', workspacePayload, { mergeObject: true, force: true })
       : Promise.resolve({ ok: true } as { ok: boolean; missingTable?: boolean; error?: string }),
     Object.keys(globalPayload).length > 0
       ? saveWorkspaceJsonToSupabase('global_workspace_sync_v1', globalPayload, { mergeObject: true, force: true })
+      : Promise.resolve({ ok: true } as { ok: boolean; missingTable?: boolean; error?: string }),
+    Object.keys(extrasPayload).length > 0
+      ? saveWorkspaceJsonToSupabase('workspace_extras_v1', extrasPayload, { mergeObject: true, force: true })
       : Promise.resolve({ ok: true } as { ok: boolean; missingTable?: boolean; error?: string }),
     saveWorkspaceJsonToSupabase('deleted_campaign_ids', deletedIds, { force: true }),
     extraLeads && extraLeads.length > 0
@@ -659,7 +670,7 @@ export async function pushLocalSnapshotToSupabase(extraCampaigns?: Campaign[], e
       : Promise.resolve({ ok: true } as { ok: boolean; missingTable?: boolean; error?: string }),
   ]);
 
-  if (wsRes.missingTable || glRes.missingTable || delRes.missingTable || (leadsRes as any).missingTable) {
+  if (wsRes.missingTable || glRes.missingTable || exRes.missingTable || delRes.missingTable || (leadsRes as any).missingTable) {
     return {
       ok: false,
       missingStoreTable: true,

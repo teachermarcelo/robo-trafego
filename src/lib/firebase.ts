@@ -1103,3 +1103,121 @@ export async function restoreArchivedCampaignToFirebase(campaign: Campaign): Pro
   }
 }
 
+/**
+ * Sync extra non-secret workspace settings (Global Kits, Inbox, Bot Logs, Preferences, Multi-channel states)
+ * in autoviral_settings/workspace_extras_v1 so fresh/incognito browsers stay 100% identical.
+ */
+export async function saveExtrasWorkspaceToFirebase(
+  extraKeys: Record<string, any>
+): Promise<{ ok: boolean; quotaExceeded?: boolean; error?: string }> {
+  if (!extraKeys || typeof extraKeys !== 'object' || Object.keys(extraKeys).length === 0) {
+    return { ok: true };
+  }
+  if (isSupabaseConnected()) {
+    await saveWorkspaceJsonToSupabase('workspace_extras_v1', stripUndefinedDeep(extraKeys), {
+      mergeObject: true,
+      force: true,
+    }).catch(() => {});
+    if (isPrimarySupabase()) {
+      return { ok: true };
+    }
+  }
+  if (isFirestoreWritesPaused()) {
+    return { ok: false, quotaExceeded: true, error: 'quota-paused' };
+  }
+  const path = `${SETTINGS_COLLECTION}/workspace_extras_v1`;
+  try {
+    const clean = stripUndefinedDeep({ ...extraKeys });
+    const payload = {
+      extraKeys: clean,
+      updatedAt: new Date().toISOString(),
+    };
+    if (JSON.stringify(payload).length > 850000) {
+      delete clean.autoviral_fb_bot_logs_v3;
+      delete clean.autoviral_global_bot_logs_v1;
+      delete clean.autoviral_global_inbox_groups_v1;
+    }
+    await setDoc(doc(db, SETTINGS_COLLECTION, 'workspace_extras_v1'), payload, { merge: true });
+    return { ok: true };
+  } catch (error: any) {
+    if (isQuotaExceededError(error)) {
+      triggerQuotaExhaustedFailover('[Firebase Quota] Cota atingida ao salvar extras do workspace.');
+      return { ok: false, quotaExceeded: true, error: error?.message || String(error) };
+    }
+    console.warn('Extras workspace sync notice:', error);
+    return { ok: false, error: error?.message || String(error) };
+  }
+}
+
+export async function pullExtrasWorkspaceFromFirebase(): Promise<Record<string, any> | null> {
+  try {
+    const snap = await getDocFromServer(doc(db, SETTINGS_COLLECTION, 'workspace_extras_v1')).catch(() =>
+      getDoc(doc(db, SETTINGS_COLLECTION, 'workspace_extras_v1'))
+    );
+    if (snap.exists()) {
+      const data = snap.data() as any;
+      return data?.extraKeys && typeof data.extraKeys === 'object' ? data.extraKeys : null;
+    }
+    return null;
+  } catch (err) {
+    console.warn('Pull extras workspace error:', err);
+    return null;
+  }
+}
+
+/**
+ * Save & Pull a cross-browser / incognito transfer snapshot in Firestore (non-secret data only)
+ */
+export async function saveTransferVaultToFirebase(
+  code: string,
+  snapshot: Record<string, any>
+): Promise<{ ok: boolean; error?: string }> {
+  const cleanCode = code.replace(/[^a-zA-Z0-9_-]/g, '').toUpperCase();
+  if (!cleanCode || cleanCode.length > 64) return { ok: false, error: 'invalid-code' };
+  if (isFirestoreWritesPaused()) return { ok: false, error: 'quota-paused' };
+
+  const docId = `vault_${cleanCode}`;
+  const path = `${SETTINGS_COLLECTION}/${docId}`;
+  try {
+    const cleanSnap = stripUndefinedDeep(snapshot);
+    // Guard Firestore 1MB limit while preserving campaigns, offers, kits, audiences, groups
+    if (JSON.stringify(cleanSnap).length > 850000 && cleanSnap?.workspace) {
+      if (Array.isArray(cleanSnap.workspace.botLogs)) cleanSnap.workspace.botLogs = cleanSnap.workspace.botLogs.slice(0, 20);
+      if (Array.isArray(cleanSnap.workspace.globalBotLogs)) cleanSnap.workspace.globalBotLogs = cleanSnap.workspace.globalBotLogs.slice(0, 20);
+      if (Array.isArray(cleanSnap.trackingEvents)) cleanSnap.trackingEvents = cleanSnap.trackingEvents.slice(0, 50);
+    }
+    await setDoc(doc(db, SETTINGS_COLLECTION, docId), {
+      code: cleanCode,
+      snapshot: cleanSnap,
+      updatedAt: new Date().toISOString(),
+    });
+    return { ok: true };
+  } catch (error: any) {
+    if (isQuotaExceededError(error)) {
+      triggerQuotaExhaustedFailover('[Firebase Quota] Cota atingida ao salvar cofre de transferência.');
+      return { ok: false, error: 'quota-exceeded' };
+    }
+    handleWriteError(error, OperationType.WRITE, path);
+    return { ok: false, error: error?.message || String(error) };
+  }
+}
+
+export async function pullTransferVaultFromFirebase(code: string): Promise<Record<string, any> | null> {
+  const cleanCode = code.replace(/[^a-zA-Z0-9_-]/g, '').toUpperCase();
+  if (!cleanCode) return null;
+  try {
+    const snap = await getDocFromServer(doc(db, SETTINGS_COLLECTION, `vault_${cleanCode}`)).catch(() =>
+      getDoc(doc(db, SETTINGS_COLLECTION, `vault_${cleanCode}`))
+    );
+    if (snap.exists()) {
+      const data = snap.data() as any;
+      return data?.snapshot || null;
+    }
+    return null;
+  } catch (err) {
+    console.warn('Pull transfer vault from Firebase error:', err);
+    return null;
+  }
+}
+
+

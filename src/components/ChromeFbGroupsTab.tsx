@@ -1863,10 +1863,28 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       const detail = (ev as CustomEvent).detail;
       if (detail) applyCloudWorkspace(detail);
     };
+    const onFullRestored = () => {
+      try {
+        const readJson = (k: string) => {
+          const r = localStorage.getItem(k);
+          return r ? JSON.parse(r) : null;
+        };
+        applyCloudWorkspace({
+          savedCopiesMap: readJson('autoviral_saved_copies_v1'),
+          customCopyPresets: readJson('autoviral_custom_copy_presets_v1'),
+          audiences: readJson('autoviral_fb_audiences_v4') || readJson('autoviral_fb_audiences_v3'),
+          youtubeVideos: readJson('autoviral_yt_videos_v2'),
+          pinterestPins: readJson('autoviral_pinterest_pins_v1'),
+          mappedGroups: readJson('autoviral_fb_mapped_groups_v5_real') || readJson('autoviral_fb_mapped_groups_v3'),
+        });
+      } catch {}
+    };
     window.addEventListener('autoviral_workspace_synced', onManualSync);
+    window.addEventListener('autoviral_full_state_restored', onFullRestored);
     return () => {
       unsub();
       window.removeEventListener('autoviral_workspace_synced', onManualSync);
+      window.removeEventListener('autoviral_full_state_restored', onFullRestored);
     };
   }, []);
 
@@ -2406,8 +2424,9 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
     const rawCombined = cleanHead ? `${cleanHead}\n\n${cleanCopy}` : cleanCopy;
     const hasAnyUrl = /https?:\/\/[^\s]+/i.test(rawCombined);
     const fullText = hasAnyUrl ? `${rawCombined} ` : `${rawCombined}\n\n👉 Confira os detalhes completos:\n${brLandingUrl} `;
+    const hasOwnOgLink = /(\/\?camp=|\/\?p=|\/z\/|\/api\/og)/i.test(fullText);
     const brImageToSend =
-      brPostVisualMode === 'attached_photo'
+      brPostVisualMode === 'attached_photo' || !hasOwnOgLink
         ? resolveCampaignVisualImage(activeCampaign.imageUrl, activeCampaign.id)
         : '';
 
@@ -2483,8 +2502,9 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
     const rawCombined = cleanHead ? `${cleanHead}\n\n${cleanCopy}` : cleanCopy;
     const hasAnyUrl = /https?:\/\/[^\s]+/i.test(rawCombined);
     const fullText = hasAnyUrl ? `${rawCombined} ` : `${rawCombined}\n\n👉 Confira os detalhes completos:\n${brLandingUrl} `;
+    const hasOwnOgLink = /(\/\?camp=|\/\?p=|\/z\/|\/api\/og)/i.test(fullText);
     const brImageToSend =
-      brPostVisualMode === 'attached_photo'
+      brPostVisualMode === 'attached_photo' || !hasOwnOgLink
         ? resolveCampaignVisualImage(activeCampaign.imageUrl, activeCampaign.id)
         : '';
 

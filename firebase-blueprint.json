@@ -55,6 +55,8 @@
         "globalTrashAudiences": { "type": "array" },
         "globalGroups": { "type": "array" },
         "globalOffers": { "type": "array" },
+        "kitsByOffer": { "type": "object" },
+        "extraKeys": { "type": "object" },
         "updatedAt": { "type": "string", "maxLength": 100 }
       }
     },

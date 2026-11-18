@@ -1,4 +1,4 @@
-// AutoViral AI Chrome Extension - Content Script V1.5.4
+// AutoViral AI Chrome Extension - Content Script V1.5.5
 // Runs on Facebook, YouTube, Instagram, Pinterest and AutoViral AI Web Platform
 
 (function () {
@@ -1922,7 +1922,7 @@
                   groupUrl: window.location.href,
                   groupName: pending.groupName,
                   approvalStatus: 'composer_stuck',
-                  note: 'Facebook travou o modal automático (Atualize p/ Extensão v1.5.3 ou pause AdBlock). Texto copiado.'
+                  note: 'Facebook travou o modal automático (Atualize p/ Extensão v1.5.5 ou pause AdBlock). Texto copiado.'
                 });
                 if (msgEl) {
                   msgEl.style.color = '#fbbf24';

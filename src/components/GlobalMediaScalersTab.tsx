@@ -1786,7 +1786,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
         join_requested: 'Entrada Solicitada (Cookie Ativo)',
         approved_posting: 'ADMIN ACEITOU! Gatilho disparado → Postando agora!',
         not_member: 'Precisa Participar',
-        composer_stuck: 'Janela Travada no FB (Atualize Extensão v1.5.4)',
+        composer_stuck: 'Janela Travada no FB (Atualize Extensão v1.5.5)',
         rate_limited: 'Limite Temporário FB',
         unavailable: 'Grupo Indisponível',
       };
@@ -3565,7 +3565,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
     } else {
       setBanner({
         message: autoJoinAndPostEnabled
-          ? `Grupo Global "${cleanGroupName}" aberto (${dispatchLimitCount > 0 ? `${nextSentCount}/${dispatchLimitCount}` : `#${nextSentCount}`})! Extensão v1.5.4 vai postar ${imageToSend ? 'imagem + link clicável' : 'card de link clicável'} e fechar a aba.`
+          ? `Grupo Global "${cleanGroupName}" aberto (${dispatchLimitCount > 0 ? `${nextSentCount}/${dispatchLimitCount}` : `#${nextSentCount}`})! Extensão v1.5.5 vai postar ${imageToSend ? 'imagem + link clicável' : 'card de link clicável'} e fechar a aba.`
           : `Grupo Global "${cleanGroupName}" aberto e texto copiado para postagem manual assistida.`,
         tone: 'success',
       });
@@ -3887,25 +3887,26 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
     try {
       const zip = new JSZip();
       const files = ['manifest.json', 'popup.html', 'popup.js', 'content.js', 'background.js', 'README.md'];
+      const cacheBust = `v=1.5.5&t=${Date.now()}`;
       await Promise.all(
         files.map(async (fname) => {
-          const r = await fetch(`/chrome-extension/${fname}`);
+          const r = await fetch(`/chrome-extension/${fname}?${cacheBust}`, { cache: 'no-store' });
           zip.file(fname, await r.text());
         })
       );
       zip.file(
         'COMO-ATUALIZAR.txt',
-        '1. Extraia este ZIP substituindo os arquivos da pasta anterior (ou em uma pasta nova).\n2. Abra chrome://extensions no Google Chrome.\n3. Clique no ícone de Atualizar (↻) da extensão AutoViral AI v1.5.4.\n4. Recarregue (F5) a aba do AutoViral AI.'
+        '1. Extraia este ZIP substituindo os arquivos da pasta anterior (ou em uma pasta nova).\n2. Abra chrome://extensions no Google Chrome.\n3. Clique no ícone de Atualizar (↻) da extensão AutoViral AI v1.5.5.\n4. Recarregue (F5) a aba do AutoViral AI.'
       );
       const blob = await zip.generateAsync({ type: 'blob' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = 'extensao-autoviral-v1.5.4.zip';
+      link.download = 'extensao-autoviral-v1.5.5.zip';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       setBanner({
-        message: 'Extensão v1.5.4 atualizada baixada! Extraia, recarregue (↻) em chrome://extensions e dê F5 nesta página.',
+        message: 'Extensão v1.5.5 atualizada baixada! Extraia, recarregue (↻) em chrome://extensions e dê F5 nesta página.',
         tone: 'success',
       });
     } catch {
@@ -6858,10 +6859,10 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                           onClick={handleDownloadGlobalExtensionZip}
                           disabled={isDownloadingExt}
                           className="px-3 py-1.5 bg-cyan-600/20 hover:bg-cyan-600/35 border border-cyan-500/40 text-cyan-200 text-[11px] font-semibold rounded-md inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
-                          title="Baixar Extensão v1.5.4 (Anexa Imagem ANTES do Link + Remove Caixinha Cinza FB + Públicos Isolados)"
+                          title="Baixar Extensão v1.5.5 (Card de Imagem Clicável + Responder Perguntas Espanhol/PT + Destravar Modal FB)"
                         >
                           <Download className="w-3 h-3" />
-                          <span>{isDownloadingExt ? 'Gerando ZIP...' : 'Atualizar Extensão v1.5.4 (ZIP)'}</span>
+                          <span>{isDownloadingExt ? 'Gerando ZIP...' : 'Atualizar Extensão v1.5.5 (ZIP)'}</span>
                         </button>
                       </div>
                       <div className="flex flex-wrap gap-2">
@@ -7390,7 +7391,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5">
                         <div className="text-xs">
                           <div className="font-semibold text-white">
-                            Sistema Automático: Abrir → Entrar / Cookie Espera → Imagem 1º + Link → Fechar Aba (v1.5.4)
+                            Sistema Automático: Abrir → Entrar / Responder Perguntas → Card Imagem Clicável → Fechar Aba (v1.5.5)
                           </div>
                           <div className="text-[11px] text-slate-400">
                             {autoJoinAndPostEnabled

@@ -132,6 +132,24 @@ class GlobalBackgroundBotRunner {
     return Math.max(0, Math.round((this.nextRunTimestamp - Date.now()) / 1000));
   }
 
+  public getIntervalSeconds(): number {
+    return this.intervalSeconds;
+  }
+
+  public setIntervalSeconds(interval: number, rescheduleNow: boolean = false) {
+    const clean = Math.max(60, Math.round(interval || 300));
+    this.intervalSeconds = clean;
+    try {
+      localStorage.setItem('autoviral_global_bot_interval', clean.toString());
+    } catch {}
+    if (rescheduleNow && this.isRunning) {
+      this.scheduleNextRun();
+      if (this.onTickCallback) {
+        this.onTickCallback(this.getRemainingSeconds(), false);
+      }
+    }
+  }
+
   public getIsRunning(): boolean {
     return this.isRunning;
   }
@@ -147,9 +165,18 @@ class GlobalBackgroundBotRunner {
   }
 
   private scheduleNextRun() {
-    const seconds = this.isRandomJitter
-      ? Math.floor(Math.random() * (400 - 300 + 1)) + 300
-      : this.intervalSeconds;
+    let seconds = this.intervalSeconds;
+    if (this.isRandomJitter) {
+      if (this.intervalSeconds <= 350) {
+        const minSec = Math.max(60, this.intervalSeconds === 350 ? 300 : this.intervalSeconds);
+        const maxSec = this.intervalSeconds === 350 ? 400 : Math.round(minSec * 1.25);
+        seconds = Math.floor(Math.random() * (maxSec - minSec + 1)) + minSec;
+      } else {
+        const minSec = this.intervalSeconds;
+        const maxSec = Math.round(minSec * 1.25);
+        seconds = Math.floor(Math.random() * (maxSec - minSec + 1)) + minSec;
+      }
+    }
 
     this.nextRunTimestamp = Date.now() + seconds * 1000;
     try {

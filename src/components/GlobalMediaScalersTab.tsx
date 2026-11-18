@@ -1414,6 +1414,14 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
   const [botChannel, setBotChannel] = useState<'facebook' | 'youtube' | 'pinterest'>('facebook');
   const [isBotRunning, setIsBotRunning] = useState<boolean>(() => globalEnBotRunner.getIsRunning());
   const [secondsRemaining, setSecondsRemaining] = useState<number>(() => globalEnBotRunner.getRemainingSeconds());
+  const [dispatchIntervalSec, setDispatchIntervalSec] = useState<number>(() => {
+    try {
+      const saved = parseInt(localStorage.getItem('autoviral_global_dispatch_interval_sec') || '350', 10);
+      return Number.isFinite(saved) && saved >= 60 ? saved : 350;
+    } catch {
+      return 350;
+    }
+  });
   const [currentPostIndex, setCurrentPostIndex] = useState<number>(0);
   const [autoJoinAndPostEnabled, setAutoJoinAndPostEnabled] = useState<boolean>(() => {
     try {
@@ -3877,7 +3885,9 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
 
     const now = new Date();
     const logId = `glog-${now.getTime()}`;
-    const waited = Math.floor(Math.random() * 101) + 300;
+    const waitedMin = dispatchIntervalSec <= 350 ? 300 : dispatchIntervalSec;
+    const waitedMax = dispatchIntervalSec <= 350 ? 400 : Math.round(dispatchIntervalSec * 1.25);
+    const waited = Math.floor(Math.random() * (waitedMax - waitedMin + 1)) + waitedMin;
     const newLog: FacebookPostLog = {
       id: logId,
       groupId: group.id,
@@ -4410,6 +4420,15 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
     setIsBotRunning(globalEnBotRunner.getIsRunning());
   });
 
+  const handleChangeGlobalIntervalSec = (nextSec: number) => {
+    const clean = Math.max(60, Math.min(3600, Math.round(nextSec || 350)));
+    setDispatchIntervalSec(clean);
+    try {
+      localStorage.setItem('autoviral_global_dispatch_interval_sec', String(clean));
+    } catch {}
+    globalEnBotRunner.setIntervalSeconds(clean, isBotRunning);
+  };
+
   const handleToggleGlobalBot = () => {
     if (isBotRunning) {
       globalEnBotRunner.stop();
@@ -4419,8 +4438,10 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
         sessionDispatchedRef.current = 0;
         setSessionDispatchedCount(0);
       }
+      const minLabel = dispatchIntervalSec <= 350 ? 300 : dispatchIntervalSec;
+      const maxLabel = dispatchIntervalSec <= 350 ? 400 : Math.round(dispatchIntervalSec * 1.25);
       globalEnBotRunner.start(
-        350,
+        dispatchIntervalSec,
         true,
         () => executeSingleGlobalPost(false),
         (rem) => setSecondsRemaining(rem),
@@ -4436,8 +4457,8 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
       setBanner({
         message:
           dispatchLimitCount > 0
-            ? `Robô Global ativado (300s–400s) com meta de ${dispatchLimitCount} grupo(s) nesta rodada!`
-            : 'Robô Global ativado (300s–400s)! Se o Robô Brasil estivesse rodando, ele foi pausado automaticamente.',
+            ? `Robô Global ativado (${minLabel}s–${maxLabel}s) com meta de ${dispatchLimitCount} grupo(s) nesta rodada!`
+            : `Robô Global ativado (${minLabel}s–${maxLabel}s)! Se o Robô Brasil estivesse rodando, ele foi pausado automaticamente.`,
         tone: 'success',
       });
     }
@@ -7196,6 +7217,58 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                           Zerar contador
                         </button>
                       )}
+                    </div>
+                  </div>
+
+                  {/* Anti-Block Interval Selector */}
+                  <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <Clock className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      <span className="font-semibold text-slate-300">Intervalo Anti-Bloqueio entre disparos:</span>
+                      <span className="text-[11px] font-mono text-emerald-300 font-bold">
+                        {dispatchIntervalSec <= 350
+                          ? '300s–400s (5–6,6 min)'
+                          : `${dispatchIntervalSec}s–${Math.round(dispatchIntervalSec * 1.25)}s (${Math.round(dispatchIntervalSec / 60)}–${Math.round((dispatchIntervalSec * 1.25) / 60)} min)`}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {[
+                        { val: 350, label: '5–6 min (Padrão)' },
+                        { val: 480, label: '8–10 min (Seguro)' },
+                        { val: 600, label: '10–13 min (Anti-Block)' },
+                        { val: 900, label: '15–19 min (Ultra Seguro)' },
+                        { val: 1200, label: '20–25 min' },
+                      ].map((opt) => {
+                        const isSelected =
+                          opt.val === 350 ? dispatchIntervalSec <= 350 : dispatchIntervalSec === opt.val;
+                        return (
+                          <button
+                            key={opt.val}
+                            type="button"
+                            onClick={() => handleChangeGlobalIntervalSec(opt.val)}
+                            className={`px-2.5 py-1 text-[11px] rounded border cursor-pointer transition-colors ${
+                              isSelected
+                                ? 'bg-emerald-600/30 border-emerald-400 text-emerald-200 font-bold'
+                                : 'bg-slate-900 border-slate-700 text-slate-300 hover:text-white'
+                            }`}
+                          >
+                            {opt.label}
+                          </button>
+                        );
+                      })}
+                      <label className="inline-flex items-center gap-1 text-[11px] text-slate-400 ml-1">
+                        <span>Seg:</span>
+                        <input
+                          type="number"
+                          min={60}
+                          max={3600}
+                          step={30}
+                          value={dispatchIntervalSec}
+                          onChange={(e) => handleChangeGlobalIntervalSec(parseInt(e.target.value, 10) || 350)}
+                          className="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs font-bold text-emerald-300 tabular-nums"
+                          title="Tempo mínimo em segundos entre um grupo e outro (o robô adiciona +25% aleatório)"
+                        />
+                      </label>
                     </div>
                   </div>
 

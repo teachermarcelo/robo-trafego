@@ -1,6 +1,28 @@
 {
   "rewrites": [
     {
+      "source": "/",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": ".*(facebookexternalhit|Facebot|meta-externalagent|WhatsApp|Twitterbot|Pinterest|TelegramBot|Slackbot|LinkedInBot|Instagram).*"
+        }
+      ],
+      "destination": "/api/og"
+    },
+    {
+      "source": "/z/:slug",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": ".*(facebookexternalhit|Facebot|meta-externalagent|WhatsApp|Twitterbot|Pinterest|TelegramBot|Slackbot|LinkedInBot|Instagram).*"
+        }
+      ],
+      "destination": "/api/og?slug=:slug"
+    },
+    {
       "source": "/api/(.*)",
       "destination": "/api/$1"
     },

@@ -41,11 +41,19 @@ import {
   RotateCcw,
   History,
   Database,
+  Flame,
 } from 'lucide-react';
 import JSZip from 'jszip';
 import { Campaign, FacebookGroup, FacebookPostLog } from '../types';
 import { globalEnBotRunner } from '../utils/globalEnBotRunner';
 import { getCampaignLandingUrl } from '../utils/campaignSlug';
+import { safeSetLocalStorageJson } from '../utils/safeStorage';
+import {
+  stripRobotMentionsFromPost,
+  buildFirstCommentWithLink,
+  applySpinVariation,
+  getDisplayDomain,
+} from '../utils/facebookPostHelper';
 import {
   generateViralFlyerSync,
   generateViralFlyerAsync,
@@ -417,15 +425,15 @@ function generateOfferPromoImageDataUrl(
 }
 
 function campaignToGlobalOffer(camp: Campaign, existing?: GlobalOffer): GlobalOffer {
-  const sampleText = `${camp.title || ''} ${camp.headline || ''} ${camp.painPointTargeted || ''} ${camp.nicheLabel || ''}`;
+  const sampleText = `${camp.title || ''} ${camp.headline || ''} ${camp.subheadline || ''} ${camp.painPointTargeted || ''} ${camp.nicheLabel || ''}`;
   const looksSpanish =
-    /\b(es un|material exclusivo|toda la|historia|paso|descuento|soluci[oó]n|garant[ií]a|comprar|oferta especial|para ti|descarga)\b/i.test(
+    /\b(es un|material exclusivo|toda la|historia|paso|descuento|soluci[oó]n|garant[ií]a|comprar|oferta especial|para ti|descarga|biblia|dios|divino|bosquejos|ilustraciones|palabra|oraciones|oraci[oó]n|bendiciones|cristian[oa]|iglesia|dise[nñ]adas)\b/i.test(
       sampleText
     ) || /\/es\//i.test(camp.checkoutUrl || '');
   const looksPortuguese =
     !looksSpanish &&
-    (/[ãõçáéíóúâêô]/i.test(sampleText) ||
-      /\b(para|crian[cç]a|atividades|renda|loja|milhas|m[eé]todo|garantia|comunidade|curso|acesso|suporte|sa[uú]de|emagrecer)\b/i.test(
+    (/[ãõç]/i.test(sampleText) ||
+      /\b(para|crian[cç]a|atividades|renda|loja|milhas|m[eé]todo|garantia|comunidade|curso|acesso|suporte|sa[uú]de|emagrecer|voc[eê]|não)\b/i.test(
         sampleText
       ));
 
@@ -970,7 +978,13 @@ function buildStructuredTemplateKit(offer: GlobalOffer): GlobalGeneratedKit {
       ],
     },
     organicSocialKit: {
-      fbGroupQueries: isPortuguese
+      fbGroupQueries: isSpanish
+        ? [
+            `${offer.productName.split(' ').slice(0, 2).join(' ')} ${offer.countryName}`,
+            `Oraciones y fe ${offer.countryName}`,
+            `Comunidad ${offer.nichePain.split(' ').slice(0, 3).join(' ')}`,
+          ]
+        : isPortuguese
         ? [
             `${offer.productName.split(' ').slice(0, 2).join(' ')} ${offer.countryName}`,
             `${offer.nichePain.split(' ').slice(0, 3).join(' ')}`,
@@ -981,7 +995,20 @@ function buildStructuredTemplateKit(offer: GlobalOffer): GlobalGeneratedKit {
             `${offer.nichePain.split(' ').slice(0, 3).join(' ')} ${offer.countryName}`,
             `${offer.countryName} deals & recommendations`,
           ],
-      fbGroupPosts: isPortuguese
+      fbGroupPosts: isSpanish
+        ? [
+            {
+              angle: `🚨 Recomendación Oficial (${offer.countryName})`,
+              headline: `✨ Compartiendo un material increíble: ${offer.productName}`,
+              body: `Hola comunidad 👋 Paso a compartir esto porque varias personas estaban buscando contenido claro y práctico.\n\n✅ ${offer.nichePain}\n✅ ${offer.productName} disponible ahora por ${offer.offerPriceText} (${offer.discountText})\n\n👉 Aquí dejé el acceso directo con todos los detalles:\n[PRESELL_LINK]\n\n¿Alguien más por aquí ya lo conocía?`,
+            },
+            {
+              angle: `❌ vs ✅ Comparativa Directa (${offer.countryName})`,
+              headline: `❌ Buscar sin guía vs. ✅ ${offer.productName} — Acceso completo`,
+              body: `Para quienes quieren aprovechar mejor su tiempo con ${offer.productName}:\n\n❌ Material suelto: Difícil de entender y disperso\n✅ ${offer.productName}: Completo, visual y fácil de aplicar desde el primer día\n\n👉 Mira la página oficial (${offer.offerPriceText}):\n[PRESELL_LINK]`,
+            },
+          ]
+        : isPortuguese
         ? [
             {
               angle: `🚨 Alerta & Comparativo (${offer.countryName})`,
@@ -1010,7 +1037,11 @@ function buildStructuredTemplateKit(offer: GlobalOffer): GlobalGeneratedKit {
         `${offer.productName} review`,
         `${offer.nichePain.split(',')[0]} solution`,
       ],
-      youtubeComments: isPortuguese
+      youtubeComments: isSpanish
+        ? [
+            `¡Excelente video! Para quienes estén buscando ${offer.productName} (${offer.offerPriceText}), dejo aquí el enlace oficial con todos los detalles: [PRESELL_LINK]`,
+          ]
+        : isPortuguese
         ? [
             `Excelente vídeo! Para quem está pesquisando sobre ${offer.productName} (${offer.offerPriceText}), deixei o link com todos os detalhes aqui: [PRESELL_LINK]`,
           ]
@@ -1021,7 +1052,14 @@ function buildStructuredTemplateKit(offer: GlobalOffer): GlobalGeneratedKit {
         `${offer.productName} ${offer.countryCode}`,
         `${offer.nichePain.split(',')[0]} tips`,
       ],
-      pinterestPins: isPortuguese
+      pinterestPins: isSpanish
+        ? [
+            {
+              title: `${offer.productName} (${offer.offerPriceText})`,
+              description: `Recurso completo y práctico: ${offer.nichePain}. Mira los detalles aquí: [PRESELL_LINK]`,
+            },
+          ]
+        : isPortuguese
         ? [
             {
               title: `${offer.productName} (${offer.offerPriceText})`,
@@ -1301,7 +1339,15 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
   const [dispatchLimitCount, setDispatchLimitCount] = useState<number>(20); // 0 = Sem limite (todos)
   const [sessionDispatchedCount, setSessionDispatchedCount] = useState<number>(0);
   const sessionDispatchedRef = useRef<number>(0);
-  const [attachImageInComposer, setAttachImageInComposer] = useState<boolean>(true);
+  // Default FALSE = "Imagem Clicável da Landing" (Facebook gera card grande com a foto que abre a página ao clicar)
+  const [attachImageInComposer, setAttachImageInComposer] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('autoviral_global_visual_mode_v1') === 'attached_photo';
+    } catch {
+      return false;
+    }
+  });
+  const [globalSpinIndex, setGlobalSpinIndex] = useState<number>(0);
   const [flyerTheme, setFlyerTheme] = useState<ViralFlyerThemeId>('purple_gold');
   const [framingFlyerPhoto, setFramingFlyerPhoto] = useState<boolean>(false);
   const [offerSavedToast, setOfferSavedToast] = useState<boolean>(false);
@@ -1347,14 +1393,23 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
 
   const activeKit = useMemo(() => {
     if (!activeOffer) return null;
-    return kitsByOffer[activeOffer.id] || buildStructuredTemplateKit(activeOffer);
+    const cached = kitsByOffer[activeOffer.id];
+    const offerIsSpanishOrPt = /espa|span|portu/i.test(activeOffer.languageName || '');
+    const cachedBody = cached?.organicSocialKit?.fbGroupPosts?.[0]?.body || '';
+    const hasMixedEnglishLeak = offerIsSpanishOrPt && cachedBody.includes('Wanted to share a fast comparison');
+    if (!cached || hasMixedEnglishLeak) {
+      return buildStructuredTemplateKit(activeOffer);
+    }
+    return cached;
   }, [activeOffer, kitsByOffer]);
+
+  const safeWriteGlobalStorage = (key: string, value: any) => {
+    safeSetLocalStorageJson(key, value);
+  };
 
   // Persist localStorage slices (strictly isolated from Brazil keys)
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.OFFERS, JSON.stringify(offers));
-    } catch {}
+    safeWriteGlobalStorage(STORAGE_KEYS.OFFERS, offers);
   }, [offers]);
 
   useEffect(() => {
@@ -1364,33 +1419,12 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
   }, [selectedOfferId]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.INBOX, JSON.stringify(inboxGroups));
-    } catch {}
+    safeWriteGlobalStorage(STORAGE_KEYS.INBOX, inboxGroups);
   }, [inboxGroups]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.GROUPS, JSON.stringify(globalGroups));
-    } catch {}
+    safeWriteGlobalStorage(STORAGE_KEYS.GROUPS, globalGroups);
   }, [globalGroups]);
-
-  const safeWriteGlobalStorage = (key: string, value: any) => {
-    const serialized = JSON.stringify(value);
-    try {
-      localStorage.setItem(key, serialized);
-    } catch {
-      // Free heavy rolling backup snapshots if browser 5MB localStorage quota is tight
-      try {
-        localStorage.removeItem(STORAGE_KEYS.BACKUP_AUDIENCES);
-        localStorage.setItem(key, serialized);
-      } catch {
-        try {
-          sessionStorage.setItem(key, serialized);
-        } catch {}
-      }
-    }
-  };
 
   useEffect(() => {
     try {
@@ -1606,7 +1640,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
     });
   }, [campaigns, hiddenLandingIds]);
 
-  // Sync default headline/body when activeOffer/kit changes
+  // Sync default headline/body when activeOffer/kit changes (cleaning any robot words automatically)
   useEffect(() => {
     if (!activeKit || !activeOffer) return;
     const firstPost = activeKit.organicSocialKit.fbGroupPosts[0];
@@ -1616,10 +1650,10 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
         'utm_source',
         'facebook_groups'
       );
-      setCustomPostHeadline(firstPost.headline);
-      setCustomPostBody(firstPost.body.replace(/\[PRESELL_LINK\]/g, presellLink));
+      setCustomPostHeadline(stripRobotMentionsFromPost(firstPost.headline));
+      setCustomPostBody(stripRobotMentionsFromPost(firstPost.body.replace(/\[PRESELL_LINK\]/g, presellLink)));
     }
-  }, [activeOffer?.id, activeKit?.generatedAt]);
+  }, [activeOffer?.id, activeKit?.generatedAt, activeOffer?.languageName]);
 
   // Extension listeners (routed cleanly into Universal Inbox / Global YT / Global Post Results while this tab is active)
   useEffect(() => {
@@ -3435,12 +3469,13 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
       ? appendTrackingParam(activeOffer.presellUrl || 'https://global-sell-beta.vercel.app/', 'utm_source', 'facebook_groups')
       : 'https://global-sell-beta.vercel.app/';
 
-    const headline = customPostHeadline.trim();
-    const bodyWithLink = customPostBody.replace(/\[PRESELL_LINK\]/g, presellLink).trim();
+    const headline = stripRobotMentionsFromPost(customPostHeadline);
+    const bodyWithLink = stripRobotMentionsFromPost(customPostBody.replace(/\[PRESELL_LINK\]/g, presellLink));
     const rawFullText = headline ? `${headline}\n\n${bodyWithLink}` : bodyWithLink;
     const fullText = ensureClickableUrlsInText(rawFullText);
 
-    // Guarantee visual asset: auto-create promo image if offer has none and composer attach is active
+    // Clickable Image Card mode (default): imageDataUrl = '' so Facebook renders the OG Clickable Card linking to Landing Page.
+    // Direct Photo mode (when attachImageInComposer === true): attach PNG/JPG directly.
     let postImageUrl = activeOffer?.postImageUrl || '';
     if (attachImageInComposer && !postImageUrl && activeOffer) {
       const autoGeneratedImg = generateOfferPromoImageDataUrl(activeOffer, customPostHeadline, flyerTheme);
@@ -3602,14 +3637,82 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
     const presellLink = activeOffer
       ? appendTrackingParam(activeOffer.presellUrl || 'https://global-sell-beta.vercel.app/', 'utm_source', 'facebook_groups')
       : 'https://global-sell-beta.vercel.app/';
-    const headline = customPostHeadline.trim();
-    const bodyWithLink = customPostBody.replace(/\[PRESELL_LINK\]/g, presellLink).trim();
+    const headline = stripRobotMentionsFromPost(customPostHeadline);
+    const bodyWithLink = stripRobotMentionsFromPost(customPostBody.replace(/\[PRESELL_LINK\]/g, presellLink));
     const fullText = ensureClickableUrlsInText(headline ? `${headline}\n\n${bodyWithLink}` : bodyWithLink);
     copyText(fullText, 'full-manual-preview');
     setBanner({
-      message: 'Postagem inteira (Título + Corpo + Link clicável rastreado) copiada! Basta dar Ctrl+V para postar manualmente.',
+      message: 'Postagem limpa (somente produto + Imagem Clicável da Landing, ZERO menção a robô) copiada! Cole no Facebook.',
       tone: 'success',
     });
+  };
+
+  const getGlobalLangCode = (): 'pt' | 'es' | 'en' => {
+    const l = (activeOffer?.languageName || '').toLowerCase();
+    if (l.includes('espa') || l.includes('span')) return 'es';
+    if (l.includes('portu')) return 'pt';
+    return 'en';
+  };
+
+  const handleSpinGlobalHeadline = () => {
+    const nextIdx = globalSpinIndex + 1;
+    setGlobalSpinIndex(nextIdx);
+    const lang = getGlobalLangCode();
+    setCustomPostHeadline((prev) => applySpinVariation(prev, nextIdx, lang));
+    setBanner({
+      message: `🎲 Abertura Anti-Spam variada (#${nextIdx}) no idioma correto! Cada grupo recebe variação única.`,
+      tone: 'success',
+    });
+  };
+
+  const handleCopyGlobalFirstComment = () => {
+    const presellLink = activeOffer
+      ? appendTrackingParam(activeOffer.presellUrl || 'https://global-sell-beta.vercel.app/', 'utm_source', 'facebook_groups')
+      : 'https://global-sell-beta.vercel.app/';
+    const commentText = buildFirstCommentWithLink({
+      landingUrl: presellLink,
+      title: activeOffer?.productName,
+      priceText: activeOffer?.offerPriceText,
+      lang: getGlobalLangCode(),
+    });
+    copyText(commentText, 'first-comment-preview');
+    setBanner({
+      message: '💬 1º Comentário com link oficial copiado! Cole nos comentários logo após publicar.',
+      tone: 'success',
+    });
+  };
+
+  const handleDispatchOnlyAuthorizedNow = () => {
+    setDispatchQueueSource('authorized_only');
+    setCurrentPostIndex(0);
+    if (authorizedAudienceGroups.length === 0) {
+      setBanner({
+        message: 'Nenhum grupo "✅ Autorizado" neste público ainda. Verifique ou use a Etapa 03.',
+        tone: 'warning',
+      });
+      return;
+    }
+    setBanner({
+      message: `✅ Fila filtrada exclusivamente para ${authorizedAudienceGroups.length} grupos ACEITOS! Iniciando envio nos aceitos...`,
+      tone: 'success',
+    });
+    setTimeout(() => executeSingleGlobalPost(true), 80);
+  };
+
+  const handleTurboSpinCopyAndDispatch = () => {
+    const nextIdx = globalSpinIndex + 1;
+    setGlobalSpinIndex(nextIdx);
+    const lang = getGlobalLangCode();
+    const spunHead = applySpinVariation(customPostHeadline, nextIdx, lang);
+    setCustomPostHeadline(spunHead);
+    const presellLink = activeOffer
+      ? appendTrackingParam(activeOffer.presellUrl || 'https://global-sell-beta.vercel.app/', 'utm_source', 'facebook_groups')
+      : 'https://global-sell-beta.vercel.app/';
+    const cleanHead = stripRobotMentionsFromPost(spunHead);
+    const cleanBody = stripRobotMentionsFromPost(customPostBody.replace(/\[PRESELL_LINK\]/g, presellLink));
+    const fullText = ensureClickableUrlsInText(cleanHead ? `${cleanHead}\n\n${cleanBody}` : cleanBody);
+    copyText(fullText, 'turbo-dispatch');
+    setTimeout(() => executeSingleGlobalPost(true), 80);
   };
 
   const handleUploadOfferPostImage = async (file: File | null) => {
@@ -6427,6 +6530,17 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
 
                       <button
                         type="button"
+                        onClick={handleDispatchOnlyAuthorizedNow}
+                        disabled={authorizedCountInAudience === 0}
+                        className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-40 text-xs font-bold text-white rounded-lg inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap shadow-md"
+                        title="Filtra e dispara imediatamente só nos grupos já aceitos"
+                      >
+                        <ShieldCheck className="w-3.5 h-3.5" />
+                        <span>🚀 Disparar Só nos Aceitos ({authorizedCountInAudience})</span>
+                      </button>
+
+                      <button
+                        type="button"
                         onClick={() => executeSingleGlobalPost(true)}
                         disabled={queueLen === 0}
                         className="px-3.5 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-xs font-semibold text-white rounded-lg inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
@@ -6447,6 +6561,44 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                       >
                         {isBotRunning ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
                         <span>{isBotRunning ? 'Pausar Robô Global' : 'Iniciar Robô Global'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 🔥 Acelerador Produtividade Meta 100 Vendas/Dia */}
+                  <div className="bg-gradient-to-r from-amber-950/35 via-slate-950 to-emerald-950/35 border border-amber-500/35 rounded-lg p-3 flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
+                    <div className="flex items-center gap-2 text-xs">
+                      <Flame className="w-4 h-4 text-amber-400 shrink-0" />
+                      <span className="font-bold text-amber-200">Acelerador Meta 100 Vendas/Dia:</span>
+                      <span className="text-[11px] text-slate-300">
+                        Varie a abertura anti-spam + publique com <strong>Imagem Clicável</strong> sem parecer robô.
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={handleSpinGlobalHeadline}
+                        className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-amber-500/40 text-amber-200 text-[11px] font-semibold rounded-md inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        <Shuffle className="w-3 h-3" />
+                        <span>Variar Abertura (Spin)</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCopyGlobalFirstComment}
+                        className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-cyan-500/40 text-cyan-200 text-[11px] font-semibold rounded-md inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        {copiedId === 'first-comment-preview' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                        <span>{copiedId === 'first-comment-preview' ? '1º Comentário Copiado!' : 'Copiar 1º Comentário'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleTurboSpinCopyAndDispatch}
+                        disabled={queueLen === 0}
+                        className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 text-[11px] font-extrabold rounded-md inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        <Flame className="w-3.5 h-3.5" />
+                        <span>⚡ Combo Turbo: Spin + Copiar + Disparar</span>
                       </button>
                     </div>
                   </div>
@@ -7004,15 +7156,46 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                           </div>
                         )}
 
-                        <label className="flex items-center gap-2 text-[11px] text-emerald-300 cursor-pointer select-none">
-                          <input
-                            type="checkbox"
-                            checked={attachImageInComposer}
-                            onChange={(e) => setAttachImageInComposer(e.target.checked)}
-                            className="rounded border-slate-600 bg-slate-900 text-emerald-500"
-                          />
-                          <span>Anexar imagem diretamente no post do Facebook + Link Clicável (chama mais atenção no feed!)</span>
-                        </label>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAttachImageInComposer(false);
+                              try { localStorage.setItem('autoviral_global_visual_mode_v1', 'clickable_card'); } catch {}
+                            }}
+                            className={`p-2.5 rounded-lg border text-left transition cursor-pointer ${
+                              !attachImageInComposer
+                                ? 'bg-emerald-600/20 border-emerald-400 text-white'
+                                : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            <div className="text-xs font-bold flex items-center gap-1.5">
+                              <span>🔗 Imagem Clicável da Landing (Padrão)</span>
+                            </div>
+                            <div className="text-[10px] opacity-80 mt-0.5">
+                              Ao postar, o Facebook incorpora a foto como card clicável: o cliente clica na imagem e abre a Landing Page!
+                            </div>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAttachImageInComposer(true);
+                              try { localStorage.setItem('autoviral_global_visual_mode_v1', 'attached_photo'); } catch {}
+                            }}
+                            className={`p-2.5 rounded-lg border text-left transition cursor-pointer ${
+                              attachImageInComposer
+                                ? 'bg-cyan-600/20 border-cyan-400 text-white'
+                                : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            <div className="text-xs font-bold flex items-center gap-1.5">
+                              <span>📸 Anexar Foto JPG/PNG Direta</span>
+                            </div>
+                            <div className="text-[10px] opacity-80 mt-0.5">
+                              Anexa arquivo de imagem direto no feed junto com o link azul clicável no texto.
+                            </div>
+                          </button>
+                        </div>
 
                         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                           <input
@@ -7063,6 +7246,15 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                               </button>
                               <button
                                 type="button"
+                                onClick={handleSpinGlobalHeadline}
+                                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-amber-300 text-[11px] font-semibold rounded-md inline-flex items-center gap-1 cursor-pointer"
+                                title="Variar abertura anti-spam"
+                              >
+                                <Sparkles className="w-3 h-3" />
+                                <span>Spin Anti-Spam</span>
+                              </button>
+                              <button
+                                type="button"
                                 onClick={handleSavePreviewCopy}
                                 className="px-2.5 py-1 bg-sky-600/25 hover:bg-sky-600/40 border border-sky-500/40 text-sky-200 text-[11px] font-semibold rounded-md inline-flex items-center gap-1 cursor-pointer"
                               >
@@ -7075,7 +7267,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                                 className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold rounded-md inline-flex items-center gap-1 cursor-pointer"
                               >
                                 {copiedId === 'full-manual-preview' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                                <span>{copiedId === 'full-manual-preview' ? 'Copiada!' : 'Copiar Postagem Inteira'}</span>
+                                <span>{copiedId === 'full-manual-preview' ? 'Copiada!' : 'Copiar Post + Card Clicável'}</span>
                               </button>
                             </div>
                           </div>
@@ -7118,68 +7310,77 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                             ) : (
                               <div className="space-y-2 text-xs text-slate-100 leading-relaxed whitespace-pre-line break-words">
                                 {customPostHeadline && (
-                                  <div className="font-bold text-white text-[13px]">{customPostHeadline}</div>
+                                  <div className="font-bold text-white text-[13px]">{stripRobotMentionsFromPost(customPostHeadline)}</div>
                                 )}
-                                <div>{renderRichPostBodyWithClickableLinks(customPostBody)}</div>
+                                <div>{renderRichPostBodyWithClickableLinks(stripRobotMentionsFromPost(customPostBody))}</div>
                               </div>
                             )}
 
-                            {activeOffer.postImageUrl && (
-                              <div className="rounded-lg overflow-hidden border border-slate-800 bg-slate-950">
-                                <img
-                                  src={activeOffer.postImageUrl}
-                                  alt={`Prévia visual ${activeOffer.productName}`}
-                                  className="w-full max-h-[420px] object-contain bg-slate-900"
-                                />
-                                <div className="px-3 py-1.5 bg-slate-950/90 border-t border-slate-800 flex flex-wrap items-center justify-between gap-2 text-[11px]">
-                                  <span className="text-emerald-300 font-medium">
-                                    ✅ Post vai SOMENTE com esta Imagem + Link clicável no texto (sem caixinha cinza!)
-                                  </span>
-                                  <div className="flex items-center gap-3">
-                                    <button
-                                      type="button"
-                                      onClick={handleCopyOfferPostImage}
-                                      className="text-purple-300 hover:text-purple-200 inline-flex items-center gap-1 cursor-pointer font-semibold"
-                                    >
-                                      <ImageIcon className="w-3 h-3" />
-                                      <span>Copiar Imagem</span>
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={handleDownloadOfferPostImage}
-                                      className="text-cyan-300 hover:text-cyan-200 inline-flex items-center gap-1 cursor-pointer"
-                                    >
-                                      <Download className="w-3 h-3" />
-                                      <span>Baixar Imagem</span>
-                                    </button>
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-
-                            {(!activeOffer.postImageUrl || !attachImageInComposer) && (
+                            {/* Modo 1 (Padrão): Card Clicável da Landing Page no estilo exato do Facebook (sem menção a robô) */}
+                            {!attachImageInComposer ? (
                               <a
                                 href={activePresellTrackingUrl}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="border border-slate-800 hover:border-cyan-500/50 bg-slate-950 rounded-lg overflow-hidden block transition-colors group"
+                                className="border border-slate-700 hover:border-emerald-400/70 bg-slate-950 rounded-lg overflow-hidden block transition-colors group"
                               >
-                                <div className="p-2.5 flex items-center justify-between gap-3">
+                                {activeOffer.postImageUrl && (
+                                  <img
+                                    src={activeOffer.postImageUrl}
+                                    alt={stripRobotMentionsFromPost(activeOffer.productName)}
+                                    className="w-full max-h-[360px] object-cover bg-slate-900"
+                                  />
+                                )}
+                                <div className="p-3 bg-slate-900/95 border-t border-slate-800 flex items-center justify-between gap-3">
                                   <div className="min-w-0">
-                                    <div className="text-[10px] text-sky-400 group-hover:text-sky-300 font-mono truncate underline">
-                                      {activePresellTrackingUrl.replace(/^https?:\/\//, '')}
+                                    <div className="text-[10px] text-slate-400 font-mono uppercase tracking-wide truncate">
+                                      {getDisplayDomain(activePresellTrackingUrl)}
                                     </div>
-                                    <div className="text-xs font-semibold text-white truncate">
-                                      {activeOffer.productName} · {activeOffer.offerPriceText}
+                                    <div className="text-sm font-bold text-white truncate mt-0.5">
+                                      {stripRobotMentionsFromPost(activeOffer.productName)}
                                     </div>
-                                    <div className="text-[11px] text-slate-400 truncate">{activeOffer.discountText}</div>
+                                    <div className="text-[11px] text-emerald-300 truncate">
+                                      {activeOffer.offerPriceText} · {stripRobotMentionsFromPost(activeOffer.discountText)}
+                                    </div>
                                   </div>
-                                  <div className="flex items-center gap-1 text-[10px] font-semibold text-sky-400 shrink-0">
-                                    <span>Link Clicável</span>
-                                    <ExternalLink className="w-3.5 h-3.5" />
-                                  </div>
+                                  <span className="px-2.5 py-1 rounded bg-emerald-600/20 border border-emerald-500/40 text-[10px] font-bold text-emerald-300 shrink-0">
+                                    🔗 Imagem Clicável
+                                  </span>
                                 </div>
                               </a>
+                            ) : (
+                              activeOffer.postImageUrl && (
+                                <div className="rounded-lg overflow-hidden border border-slate-800 bg-slate-950">
+                                  <img
+                                    src={activeOffer.postImageUrl}
+                                    alt={`Prévia visual ${stripRobotMentionsFromPost(activeOffer.productName)}`}
+                                    className="w-full max-h-[420px] object-contain bg-slate-900"
+                                  />
+                                  <div className="px-3 py-1.5 bg-slate-950/90 border-t border-slate-800 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                                    <span className="text-emerald-300 font-medium">
+                                      ✅ Foto direta anexada + Link clicável no texto
+                                    </span>
+                                    <div className="flex items-center gap-3">
+                                      <button
+                                        type="button"
+                                        onClick={handleCopyOfferPostImage}
+                                        className="text-purple-300 hover:text-purple-200 inline-flex items-center gap-1 cursor-pointer font-semibold"
+                                      >
+                                        <ImageIcon className="w-3 h-3" />
+                                        <span>Copiar Imagem</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={handleDownloadOfferPostImage}
+                                        className="text-cyan-300 hover:text-cyan-200 inline-flex items-center gap-1 cursor-pointer"
+                                      >
+                                        <Download className="w-3 h-3" />
+                                        <span>Baixar Imagem</span>
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              )
                             )}
                           </div>
                         </div>

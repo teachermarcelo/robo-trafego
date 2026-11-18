@@ -31,6 +31,7 @@ import { ManyChatPreChatPage } from './components/ManyChatPreChatPage';
 import { PWAInstallModal } from './components/PWAInstallModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { getCampaignSlug, getShortFunnelSlug } from './utils/campaignSlug';
+import { safeSetLocalStorageJson, pruneExpendableStorage } from './utils/safeStorage';
 import { INITIAL_CAMPAIGNS } from './data/defaultCampaigns';
 import { Campaign, TrackingEvent, PainPointData, PushNotification, CustomerLead } from './types';
 import {
@@ -210,13 +211,14 @@ export default function App() {
     },
   ]);
 
-  // Save campaigns to localStorage
+  // Clean up redundant legacy duplicate keys once hydrated so 5MB localStorage quota stays free
   useEffect(() => {
-    try {
-      localStorage.setItem('autoviral_campaigns', JSON.stringify(campaigns));
-    } catch (e) {
-      console.error('LocalStorage save error:', e);
-    }
+    pruneExpendableStorage();
+  }, []);
+
+  // Save campaigns to localStorage safely (compacting large base64 images only if browser quota is exceeded)
+  useEffect(() => {
+    safeSetLocalStorageJson('autoviral_campaigns', campaigns);
   }, [campaigns]);
 
   const mergeWorkspaceIntoLocalStorage = React.useCallback((cloud: WorkspaceSyncData) => {
@@ -230,9 +232,7 @@ export default function App() {
       }
     };
     const safeWrite = (k: string, val: any) => {
-      try {
-        localStorage.setItem(k, JSON.stringify(val));
-      } catch {}
+      safeSetLocalStorageJson(k, val);
     };
 
     if (cloud.savedCopiesMap && typeof cloud.savedCopiesMap === 'object') {
@@ -298,9 +298,7 @@ export default function App() {
       }
     };
     const safeWrite = (k: string, val: any) => {
-      try {
-        localStorage.setItem(k, JSON.stringify(val));
-      } catch {}
+      safeSetLocalStorageJson(k, val);
     };
     const mergeArrayByKey = (key: string, incoming: any[] | undefined, idKey: string) => {
       if (!Array.isArray(incoming) || incoming.length === 0) return;
@@ -374,9 +372,7 @@ export default function App() {
             });
           const extraCloud = Array.from(cloudMap.values());
           const merged = [...extraCloud, ...updatedPrev];
-          try {
-            localStorage.setItem('autoviral_campaigns', JSON.stringify(merged));
-          } catch {}
+          safeSetLocalStorageJson('autoviral_campaigns', merged);
           return merged;
         });
       }
@@ -400,10 +396,8 @@ export default function App() {
           const map = new Map<string, TrackingEvent>();
           snap.trackingEvents!.forEach((e) => e?.id && map.set(e.id, e));
           prev.forEach((e) => e?.id && !map.has(e.id) && map.set(e.id, e));
-          const merged = Array.from(map.values()).slice(0, 500);
-          try {
-            localStorage.setItem('autoviral_tracking_events', JSON.stringify(merged));
-          } catch {}
+          const merged = Array.from(map.values()).slice(0, 300);
+          safeSetLocalStorageJson('autoviral_tracking_events', merged);
           return merged;
         });
       }
@@ -486,9 +480,7 @@ export default function App() {
                 }
               });
               const merged = [...valid, ...localUnsynced];
-              try {
-                localStorage.setItem('autoviral_campaigns', JSON.stringify(merged));
-              } catch {}
+              safeSetLocalStorageJson('autoviral_campaigns', merged);
               return merged;
             });
             toPushOnce.forEach((lu) => {
@@ -572,9 +564,7 @@ export default function App() {
             if (cloudProviderRef.current === 'supabase') return;
             if (cloudEvents && cloudEvents.length > 0) {
               setTrackingEvents(cloudEvents);
-              try {
-                localStorage.setItem('autoviral_tracking_events', JSON.stringify(cloudEvents));
-              } catch {}
+              safeSetLocalStorageJson('autoviral_tracking_events', cloudEvents.slice(0, 250));
             }
           });
 
@@ -588,10 +578,8 @@ export default function App() {
               const existingIds = new Set(prev.map((e) => e.id));
               const fresh = data.events.filter((e: TrackingEvent) => !existingIds.has(e.id));
               if (fresh.length === 0) return prev;
-              const merged = [...fresh, ...prev].slice(0, 500);
-              try {
-                localStorage.setItem('autoviral_tracking_events', JSON.stringify(merged));
-              } catch {}
+              const merged = [...fresh, ...prev].slice(0, 300);
+              safeSetLocalStorageJson('autoviral_tracking_events', merged);
               return merged;
             });
           }
@@ -721,10 +709,8 @@ export default function App() {
 
     // 1. Immediately update tracking events locally
     setTrackingEvents((prev) => {
-      const updated = [localEvent, ...prev.slice(0, 499)];
-      try {
-        localStorage.setItem('autoviral_tracking_events', JSON.stringify(updated));
-      } catch {}
+      const updated = [localEvent, ...prev.slice(0, 299)];
+      safeSetLocalStorageJson('autoviral_tracking_events', updated);
       return updated;
     });
 
@@ -744,9 +730,7 @@ export default function App() {
         }
         return c;
       });
-      try {
-        localStorage.setItem('autoviral_campaigns', JSON.stringify(updatedCampaigns));
-      } catch {}
+      safeSetLocalStorageJson('autoviral_campaigns', updatedCampaigns);
       return updatedCampaigns;
     });
 
@@ -1241,8 +1225,10 @@ export default function App() {
       revenue: 0.0,
     }));
     setCampaigns(resetCampaigns);
-    localStorage.setItem('autoviral_real_mode', 'true');
-    localStorage.setItem('autoviral_campaigns', JSON.stringify(resetCampaigns));
+    try {
+      localStorage.setItem('autoviral_real_mode', 'true');
+    } catch {}
+    safeSetLocalStorageJson('autoviral_campaigns', resetCampaigns);
 
     // Reset campaigns in Firebase
     for (const camp of resetCampaigns) {
@@ -1496,9 +1482,7 @@ export default function App() {
           const cloudIds = new Set(validCloud.map((c) => c.id));
           const localExtra = prev.filter((p) => !cloudIds.has(p.id) && !cloudDelSet.has(p.id));
           const merged = [...validCloud, ...localExtra];
-          try {
-            localStorage.setItem('autoviral_campaigns', JSON.stringify(merged));
-          } catch {}
+          safeSetLocalStorageJson('autoviral_campaigns', merged);
           return merged;
         });
       }

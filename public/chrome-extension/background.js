@@ -454,7 +454,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         args: [mode],
         func: (clickMode) => {
           try {
-            // If composer dialog is already open, do not click trigger again
+            // If composer dialog or inline Lexical textbox is already open, do not click trigger again
             const existingDialog = Array.from(document.querySelectorAll('div[role="dialog"]')).find((d) => {
               const r = d.getBoundingClientRect();
               if (r.width < 200 || r.height < 150) return false;
@@ -465,16 +465,27 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 txt.includes('criar post') ||
                 txt.includes('create post') ||
                 txt.includes('criar publicação') ||
+                txt.includes('crear publicación') ||
+                txt.includes('crear publicacion') ||
                 txt.includes('create a public post') ||
                 txt.includes('publicação anônima') ||
+                txt.includes('publicación anónima') ||
                 txt.includes('anonymous post')
               );
             });
             if (existingDialog) {
               return { found: true, alreadyOpen: true, mode: 'already_open' };
             }
+            const inlineTb = document.querySelector('[data-pagelet="GroupInlineComposer"] div[role="textbox"][contenteditable="true"], [data-pagelet="GroupInlineComposer"] div[contenteditable="true"][data-lexical-editor="true"]');
+            if (inlineTb && inlineTb.getBoundingClientRect().height >= 20) {
+              return { found: true, alreadyOpen: true, mode: 'inline_open' };
+            }
 
-            const FORBIDDEN = ['anônim', 'anonim', 'anonym', 'enquete', 'poll', 'sentimento', 'feeling', 'foto', 'photo', 'vídeo', 'video', 'ao vivo', 'live', 'comentar', 'comment', 'responder', 'reply'];
+            if (window.scrollY > 380) {
+              try { window.scrollTo({ top: 0, behavior: 'instant' }); } catch (e) {}
+            }
+
+            const FORBIDDEN = ['anônim', 'anonim', 'anónim', 'anonym', 'enquete', 'poll', 'encuesta', 'sentimento', 'feeling', 'sentimiento', 'foto', 'photo', 'vídeo', 'video', 'ao vivo', 'live', 'en vivo', 'comentar', 'comment', 'responder', 'reply'];
             const hasForbidden = (s) => FORBIDDEN.some((w) => s.includes(w));
 
             const candidates = Array.from(
@@ -486,7 +497,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               if (rect.width < 55 || rect.height < 14 || rect.height > 78) continue;
               if (el.closest('div[role="dialog"]') || el.closest('div[role="article"]') || el.closest('[role="complementary"]') || el.closest('[aria-busy="true"]')) continue;
               const t = (el.innerText || el.getAttribute('aria-label') || '').trim().toLowerCase();
-              if (!t || t.length > 90 || hasForbidden(t)) continue;
+              if (!t || t.length > 95 || hasForbidden(t)) continue;
               const btnAncestor = el.closest('div[role="button"]');
               if (btnAncestor) {
                 const br = btnAncestor.getBoundingClientRect();
@@ -495,21 +506,33 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               }
               const isExact =
                 t === 'escreva algo...' ||
+                t === 'escribe algo...' ||
                 t === 'write something...' ||
                 t === 'no que você está pensando?' ||
+                t === '¿qué estás pensando?' ||
+                t === 'qué estás pensando?' ||
                 t === "what's on your mind?" ||
                 t === 'escreva uma publicação pública...' ||
+                t === 'escribe una publicación pública...' ||
                 t === 'write a public post...';
               const isMatch =
                 isExact ||
                 t.includes('escreva algo') ||
+                t.includes('escribe algo') ||
                 t.includes('no que você está pensando') ||
+                t.includes('qué estás pensando') ||
+                t.includes('que estas pensando') ||
                 t.includes('write something') ||
                 t.includes("what's on your mind") ||
                 t.includes('criar publicação pública') ||
+                t.includes('crear publicación pública') ||
+                t.includes('crear publicacion publica') ||
                 t.includes('create a public post') ||
                 t.includes('write a public post') ||
-                t.includes('escreva uma publicação');
+                t.includes('escreva uma publicação') ||
+                t.includes('escribe una publicación') ||
+                t.includes('escribe una publicacion') ||
+                t.includes('haz una publicación');
               if (!isMatch) continue;
               const inInline = el.closest('[data-pagelet="GroupInlineComposer"]') ? -50000 : 0;
               const exactRank = isExact ? 0 : 100000;
@@ -657,25 +680,31 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 txt.includes('criar post') ||
                 txt.includes('create post') ||
                 txt.includes('criar publicação') ||
+                txt.includes('crear publicación') ||
+                txt.includes('crear publicacion') ||
                 txt.includes('create a public post') ||
                 txt.includes('publicação anônima') ||
+                txt.includes('publicación anónima') ||
                 txt.includes('anonymous post') ||
                 aria.includes('criar post') ||
-                aria.includes('create post')
+                aria.includes('create post') ||
+                aria.includes('crear publicación')
               );
             }) || dialogs[dialogs.length - 1];
-            if (!dlg) return { ok: false, reason: 'no_dialog' };
+            const scope = dlg || document.querySelector('[data-pagelet="GroupInlineComposer"]') || document.querySelector('[role="main"]');
+            if (!scope) return { ok: false, reason: 'no_dialog' };
 
             const boxes = Array.from(
-              dlg.querySelectorAll(
+              scope.querySelectorAll(
                 'div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"], div[contenteditable="true"][aria-placeholder], div[contenteditable="true"][aria-label]'
               )
             );
             const tb = boxes.find((el) => {
+              if (!dlg && (el.closest('div[role="article"]') || el.closest('[role="complementary"]'))) return false;
               const rect = el.getBoundingClientRect();
               if (rect.width < 40 || rect.height < 20) return false;
               const lbl = ((el.getAttribute('aria-label') || el.getAttribute('aria-placeholder') || el.getAttribute('placeholder') || '') + '').toLowerCase();
-              return !lbl.includes('coment') && !lbl.includes('comment') && !lbl.includes('responder') && !lbl.includes('reply') && !lbl.includes('pesquis') && !lbl.includes('search');
+              return !lbl.includes('coment') && !lbl.includes('comment') && !lbl.includes('responder') && !lbl.includes('reply') && !lbl.includes('pesquis') && !lbl.includes('search') && !lbl.includes('buscar');
             });
             if (!tb) return { ok: false, reason: 'no_textbox' };
 
@@ -749,16 +778,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 txt.includes('criar post') ||
                 txt.includes('create post') ||
                 txt.includes('criar publicação') ||
+                txt.includes('crear publicación') ||
+                txt.includes('crear publicacion') ||
                 txt.includes('create a public post') ||
                 txt.includes('publicação anônima') ||
+                txt.includes('publicación anónima') ||
                 txt.includes('anonymous post') ||
                 aria.includes('criar post') ||
-                aria.includes('create post')
+                aria.includes('create post') ||
+                aria.includes('crear publicación')
               );
             }) || dialogs[dialogs.length - 1];
-            if (!dlg) return { clicked: false, reason: 'no_dialog' };
+            const scope = dlg || document.querySelector('[data-pagelet="GroupInlineComposer"]') || document.querySelector('[role="main"]');
+            if (!scope) return { clicked: false, reason: 'no_dialog' };
 
-            const candidates = Array.from(dlg.querySelectorAll('div[role="button"], button'));
+            const candidates = Array.from(scope.querySelectorAll('div[role="button"], button'));
             const pubBtn = candidates.find((el) => {
               const rect = el.getBoundingClientRect();
               if (rect.width === 0 || rect.height === 0) return false;
@@ -831,8 +865,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     return r.width > 200 && r.height > 150 && Boolean(d.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]'));
                   });
                   if (existingDialog) return { found: true, alreadyOpen: true };
+                  const inlineTb = document.querySelector('[data-pagelet="GroupInlineComposer"] div[role="textbox"][contenteditable="true"], [data-pagelet="GroupInlineComposer"] div[contenteditable="true"][data-lexical-editor="true"]');
+                  if (inlineTb && inlineTb.getBoundingClientRect().height >= 20) return { found: true, alreadyOpen: true };
 
-                  const FORBIDDEN = ['anônim', 'anonim', 'anonym', 'enquete', 'poll', 'sentimento', 'feeling', 'foto', 'photo', 'vídeo', 'video', 'ao vivo', 'live', 'comentar', 'comment', 'responder', 'reply'];
+                  if (window.scrollY > 380) {
+                    try { window.scrollTo({ top: 0, behavior: 'instant' }); } catch (e) {}
+                  }
+
+                  const FORBIDDEN = ['anônim', 'anonim', 'anónim', 'anonym', 'enquete', 'poll', 'encuesta', 'sentimento', 'feeling', 'sentimiento', 'foto', 'photo', 'vídeo', 'video', 'ao vivo', 'live', 'en vivo', 'comentar', 'comment', 'responder', 'reply'];
                   const hasForbidden = (s) => FORBIDDEN.some((w) => s.includes(w));
 
                   const candidates = Array.from(
@@ -844,7 +884,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     if (rect.width < 55 || rect.height < 14 || rect.height > 78) continue;
                     if (el.closest('div[role="dialog"]') || el.closest('div[role="article"]') || el.closest('[role="complementary"]') || el.closest('[aria-busy="true"]')) continue;
                     const t = (el.innerText || el.getAttribute('aria-label') || '').trim().toLowerCase();
-                    if (!t || t.length > 90 || hasForbidden(t)) continue;
+                    if (!t || t.length > 95 || hasForbidden(t)) continue;
                     const btnAncestor = el.closest('div[role="button"]');
                     if (btnAncestor) {
                       const br = btnAncestor.getBoundingClientRect();
@@ -853,21 +893,33 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     }
                     const isExact =
                       t === 'escreva algo...' ||
+                      t === 'escribe algo...' ||
                       t === 'write something...' ||
                       t === 'no que você está pensando?' ||
+                      t === '¿qué estás pensando?' ||
+                      t === 'qué estás pensando?' ||
                       t === "what's on your mind?" ||
                       t === 'escreva uma publicação pública...' ||
+                      t === 'escribe una publicación pública...' ||
                       t === 'write a public post...';
                     const isMatch =
                       isExact ||
                       t.includes('escreva algo') ||
+                      t.includes('escribe algo') ||
                       t.includes('no que você está pensando') ||
+                      t.includes('qué estás pensando') ||
+                      t.includes('que estas pensando') ||
                       t.includes('write something') ||
                       t.includes("what's on your mind") ||
                       t.includes('criar publicação pública') ||
+                      t.includes('crear publicación pública') ||
+                      t.includes('crear publicacion publica') ||
                       t.includes('create a public post') ||
                       t.includes('write a public post') ||
-                      t.includes('escreva uma publicação');
+                      t.includes('escreva uma publicação') ||
+                      t.includes('escribe una publicación') ||
+                      t.includes('escribe una publicacion') ||
+                      t.includes('haz una publicación');
                     if (!isMatch) continue;
                     const inInline = el.closest('[data-pagelet="GroupInlineComposer"]') ? -50000 : 0;
                     const exactRank = isExact ? 0 : 100000;
@@ -922,7 +974,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               target: { tabId },
               world: 'MAIN',
               func: () => {
-                const FORBIDDEN = ['anônim', 'anonim', 'anonym', 'enquete', 'poll', 'sentimento', 'feeling', 'foto', 'photo', 'vídeo', 'video', 'ao vivo', 'live', 'comentar', 'comment', 'responder', 'reply'];
+                const FORBIDDEN = ['anônim', 'anonim', 'anónim', 'anonym', 'enquete', 'poll', 'encuesta', 'sentimento', 'feeling', 'sentimiento', 'foto', 'photo', 'vídeo', 'video', 'ao vivo', 'live', 'en vivo', 'comentar', 'comment', 'responder', 'reply'];
                 const hasForbidden = (s) => FORBIDDEN.some((w) => s.includes(w));
                 const candidates = Array.from(
                   document.querySelectorAll('[data-pagelet="GroupInlineComposer"] div[role="button"], [data-pagelet="GroupInlineComposer"] span, [role="main"] div[role="button"], [role="main"] span, div[role="button"], span')
@@ -933,15 +985,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                   if (rect.width < 55 || rect.height < 14 || rect.height > 78) continue;
                   if (el.closest('div[role="dialog"]') || el.closest('div[role="article"]') || el.closest('[role="complementary"]') || el.closest('[aria-busy="true"]')) continue;
                   const t = (el.innerText || el.getAttribute('aria-label') || '').trim().toLowerCase();
-                  if (!t || t.length > 90 || hasForbidden(t)) continue;
-                  const isExact = t === 'escreva algo...' || t === 'write something...';
+                  if (!t || t.length > 95 || hasForbidden(t)) continue;
+                  const isExact = t === 'escreva algo...' || t === 'escribe algo...' || t === 'write something...' || t === '¿qué estás pensando?';
                   const isMatch =
                     isExact ||
                     t.includes('escreva algo') ||
+                    t.includes('escribe algo') ||
                     t.includes('no que você está pensando') ||
+                    t.includes('qué estás pensando') ||
+                    t.includes('que estas pensando') ||
                     t.includes('write something') ||
                     t.includes("what's on your mind") ||
                     t.includes('criar publicação pública') ||
+                    t.includes('crear publicación pública') ||
+                    t.includes('escribe una publicación') ||
+                    t.includes('haz una publicación') ||
                     t.includes('create a public post');
                   if (!isMatch) continue;
                   scored.push({ el, score: (isExact ? 0 : 100000) + rect.width * rect.height });
@@ -1002,24 +1060,30 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                       txt.includes('criar post') ||
                       txt.includes('create post') ||
                       txt.includes('criar publicação') ||
+                      txt.includes('crear publicación') ||
+                      txt.includes('crear publicacion') ||
                       txt.includes('create a public post') ||
                       txt.includes('publicação anônima') ||
+                      txt.includes('publicación anónima') ||
                       txt.includes('anonymous post') ||
                       aria.includes('criar post') ||
-                      aria.includes('create post')
+                      aria.includes('create post') ||
+                      aria.includes('crear publicación')
                     );
                   }) || dialogs[dialogs.length - 1];
-                  if (!dlg) return { ok: false };
+                  const scope = dlg || document.querySelector('[data-pagelet="GroupInlineComposer"]') || document.querySelector('[role="main"]');
+                  if (!scope) return { ok: false };
                   const boxes = Array.from(
-                    dlg.querySelectorAll(
+                    scope.querySelectorAll(
                       'div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"], div[contenteditable="true"][aria-placeholder], div[contenteditable="true"][aria-label]'
                     )
                   );
                   const tb = boxes.find((el) => {
+                    if (!dlg && (el.closest('div[role="article"]') || el.closest('[role="complementary"]'))) return false;
                     const rect = el.getBoundingClientRect();
                     if (rect.width < 40 || rect.height < 20) return false;
                     const lbl = ((el.getAttribute('aria-label') || el.getAttribute('aria-placeholder') || el.getAttribute('placeholder') || '') + '').toLowerCase();
-                    return !lbl.includes('coment') && !lbl.includes('comment') && !lbl.includes('responder') && !lbl.includes('reply') && !lbl.includes('pesquis') && !lbl.includes('search');
+                    return !lbl.includes('coment') && !lbl.includes('comment') && !lbl.includes('responder') && !lbl.includes('reply') && !lbl.includes('pesquis') && !lbl.includes('search') && !lbl.includes('buscar');
                   });
                   if (!tb) return { ok: false };
                   const existing = (tb.innerText || tb.textContent || '').trim();
@@ -1330,15 +1394,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                       txt.includes('criar post') ||
                       txt.includes('create post') ||
                       txt.includes('criar publicação') ||
+                      txt.includes('crear publicación') ||
+                      txt.includes('crear publicacion') ||
                       txt.includes('create a public post') ||
                       txt.includes('publicação anônima') ||
+                      txt.includes('publicación anónima') ||
                       txt.includes('anonymous post') ||
                       aria.includes('criar post') ||
-                      aria.includes('create post')
+                      aria.includes('create post') ||
+                      aria.includes('crear publicación')
                     );
                   }) || dialogs[dialogs.length - 1];
-                  if (!dlg) return { ok: false };
-                  const candidates = Array.from(dlg.querySelectorAll('div[role="button"], button'));
+                  const scope = dlg || document.querySelector('[data-pagelet="GroupInlineComposer"]') || document.querySelector('[role="main"]');
+                  if (!scope) return { ok: false };
+                  const candidates = Array.from(scope.querySelectorAll('div[role="button"], button'));
                   const pubBtn = candidates.find((el) => {
                     const rect = el.getBoundingClientRect();
                     if (rect.width === 0 || rect.height === 0) return false;

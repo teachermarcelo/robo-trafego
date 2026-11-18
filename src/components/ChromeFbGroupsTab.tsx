@@ -50,7 +50,8 @@ import {
   Shuffle,
   Square,
   CheckSquare,
-  Send
+  Send,
+  Image as ImageIcon
 } from 'lucide-react';
 import JSZip from 'jszip';
 import { PWAInstallModal } from './PWAInstallModal';
@@ -58,6 +59,16 @@ import { InstagramRobotTab } from './InstagramRobotTab';
 import { VisualLayoutStudio } from './VisualLayoutStudio';
 import { SecurityDefenseModal } from './SecurityDefenseModal';
 import { LogisticsAnalyticsDashboard } from './LogisticsAnalyticsDashboard';
+import { safeSetLocalStorageJson } from '../utils/safeStorage';
+import { getCampaignLandingUrl } from '../utils/campaignSlug';
+import {
+  stripRobotMentionsFromPost,
+  buildFirstCommentWithLink,
+  applySpinVariation,
+  copyImageToClipboardOrDownload,
+  getDisplayDomain,
+  resolveCampaignVisualImage
+} from '../utils/facebookPostHelper';
 import {
   Campaign,
   NicheType,
@@ -560,6 +571,15 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       return false;
     }
   });
+  const [brPostVisualMode, setBrPostVisualMode] = useState<'clickable_card' | 'attached_photo'>(() => {
+    try {
+      return localStorage.getItem('autoviral_br_visual_mode') === 'attached_photo' ? 'attached_photo' : 'clickable_card';
+    } catch {
+      return 'clickable_card';
+    }
+  });
+  const [brSpinIndex, setBrSpinIndex] = useState<number>(0);
+  const [copiedBrHelperId, setCopiedBrHelperId] = useState<string | null>(null);
   const [mergeAudienceIds, setMergeAudienceIds] = useState<string[]>([]);
   const [mergeNewName, setMergeNewName] = useState<string>('');
   const [mergeNewDesc, setMergeNewDesc] = useState<string>('');
@@ -1755,18 +1775,16 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
   const [newPinUrl, setNewPinUrl] = useState<string>('https://pay.kiwify.com.br/HE5xbnp');
   const [newPinPrice, setNewPinPrice] = useState<number>(9.90);
 
-  // Persist State consistently to LocalStorage (all active keys synced) + Firebase Cloud Workspace Sync
+  // Persist State consistently to LocalStorage (without redundant duplicate v3 keys)
   useEffect(() => {
+    safeSetLocalStorageJson('autoviral_fb_mapped_groups_v5_real', mappedGroups);
+    safeSetLocalStorageJson('autoviral_fb_audiences_v4', audiences);
+    safeSetLocalStorageJson('autoviral_fb_bot_logs_v3', Array.isArray(botLogs) ? botLogs.slice(0, 60) : botLogs);
     try {
-      localStorage.setItem('autoviral_fb_mapped_groups_v5_real', JSON.stringify(mappedGroups));
-      localStorage.setItem('autoviral_fb_mapped_groups_v3', JSON.stringify(mappedGroups));
-      localStorage.setItem('autoviral_fb_audiences_v4', JSON.stringify(audiences));
-      localStorage.setItem('autoviral_fb_audiences_v3', JSON.stringify(audiences));
-      localStorage.setItem('autoviral_fb_bot_logs_v3', JSON.stringify(botLogs));
       localStorage.setItem('autoviral_fb_daily_completed_v3', dailyDispatchesCompleted.toString());
-      localStorage.setItem('autoviral_yt_videos_v2', JSON.stringify(youtubeVideos));
-      localStorage.setItem('autoviral_pinterest_pins_v1', JSON.stringify(pinterestPins));
     } catch {}
+    safeSetLocalStorageJson('autoviral_yt_videos_v2', youtubeVideos);
+    safeSetLocalStorageJson('autoviral_pinterest_pins_v1', pinterestPins);
   }, [mappedGroups, audiences, botLogs, dailyDispatchesCompleted, youtubeVideos, pinterestPins]);
 
   // Real-time Firebase Workspace Sync (receives and merges non-destructively across domains/browsers)
@@ -2382,7 +2400,17 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       ? Math.floor(Math.random() * (400 - 300 + 1)) + 300
       : intervalSeconds;
 
-    const fullText = `${postHeadline}\n\n${postCopy}`.trim();
+    const brLandingUrl = getCampaignLandingUrl(activeCampaign);
+    const cleanHead = stripRobotMentionsFromPost(postHeadline);
+    const cleanCopy = stripRobotMentionsFromPost(postCopy);
+    const rawCombined = cleanHead ? `${cleanHead}\n\n${cleanCopy}` : cleanCopy;
+    const hasAnyUrl = /https?:\/\/[^\s]+/i.test(rawCombined);
+    const fullText = hasAnyUrl ? `${rawCombined} ` : `${rawCombined}\n\n👉 Confira os detalhes completos:\n${brLandingUrl} `;
+    const brImageToSend =
+      brPostVisualMode === 'attached_photo'
+        ? resolveCampaignVisualImage(activeCampaign.imageUrl, activeCampaign.id)
+        : '';
+
     try {
       navigator.clipboard?.writeText(fullText);
     } catch {}
@@ -2395,7 +2423,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       groupName: `${currentGroup.name} (${currentGroup.membersCount.toLocaleString('pt-BR')} membros)`,
       groupUrl: currentGroup.url,
       postedAt: `${now.toLocaleDateString('pt-BR')} ${now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`,
-      headline: postHeadline.slice(0, 55) + '...',
+      headline: cleanHead.slice(0, 55) + '...',
       status: 'success',
       approvalStatus: 'pending_verification',
       isVerifiedReal: false,
@@ -2429,6 +2457,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
           groupUrl: currentGroup.url,
           groupName: currentGroup.name,
           fullText,
+          imageDataUrl: brImageToSend,
           autoJoinAndPost: autoJoinAndPostEnabled,
           silentMode: silentBackgroundMode
         },
@@ -2438,8 +2467,8 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
 
     setExtensionSyncBanner({
       message: autoJoinAndPostEnabled
-        ? `🤖 Grupo "${currentGroup.name}" aberto${silentBackgroundMode ? ' silenciosamente em 2º plano' : ''}! A Extensão v1.5.4 vai solicitar entrada (se precisar) e postar automaticamente.`
-        : `📋 Texto copiado! Grupo "${currentGroup.name}" aberto para postagem manual assistida.`,
+        ? `🤖 Grupo "${currentGroup.name}" aberto${silentBackgroundMode ? ' em 2º plano' : ''}! Postando ${brPostVisualMode === 'clickable_card' ? 'com Card de Imagem Clicável' : 'com Foto Direta anexada'}.`
+        : `📋 Texto limpo copiado! Grupo "${currentGroup.name}" aberto para postagem manual assistida.`,
       tone: 'success'
     });
 
@@ -2448,7 +2477,17 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
 
   // Re-run auto-join check & auto-post on a previously join-requested/not_member group
   const handleRetryJoinOrPost = (log: FacebookPostLog) => {
-    const fullText = `${postHeadline}\n\n${postCopy}`.trim();
+    const brLandingUrl = getCampaignLandingUrl(activeCampaign);
+    const cleanHead = stripRobotMentionsFromPost(postHeadline);
+    const cleanCopy = stripRobotMentionsFromPost(postCopy);
+    const rawCombined = cleanHead ? `${cleanHead}\n\n${cleanCopy}` : cleanCopy;
+    const hasAnyUrl = /https?:\/\/[^\s]+/i.test(rawCombined);
+    const fullText = hasAnyUrl ? `${rawCombined} ` : `${rawCombined}\n\n👉 Confira os detalhes completos:\n${brLandingUrl} `;
+    const brImageToSend =
+      brPostVisualMode === 'attached_photo'
+        ? resolveCampaignVisualImage(activeCampaign.imageUrl, activeCampaign.id)
+        : '';
+
     try {
       navigator.clipboard?.writeText(fullText);
     } catch {}
@@ -2475,6 +2514,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
           groupUrl: log.groupUrl,
           groupName: log.groupName,
           fullText,
+          imageDataUrl: brImageToSend,
           autoJoinAndPost: true,
           silentMode: silentBackgroundMode
         },
@@ -2990,10 +3030,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
 
     const updated = [...newGroupsToAdd, ...mappedGroups];
     setMappedGroups(updated);
-    try {
-      localStorage.setItem('autoviral_fb_mapped_groups_v5_real', JSON.stringify(updated));
-      localStorage.setItem('autoviral_fb_mapped_groups_v3', JSON.stringify(updated));
-    } catch {}
+    safeSetLocalStorageJson('autoviral_fb_mapped_groups_v5_real', updated);
 
     setBulkImportText('');
     setIsBulkImportModalOpen(false);
@@ -3020,10 +3057,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
 
     setMappedGroups(cleaned);
     setSelectedGroupIds(prev => prev.filter(id => cleaned.some(c => c.id === id)));
-    try {
-      localStorage.setItem('autoviral_fb_mapped_groups_v5_real', JSON.stringify(cleaned));
-      localStorage.setItem('autoviral_fb_mapped_groups_v3', JSON.stringify(cleaned));
-    } catch {}
+    safeSetLocalStorageJson('autoviral_fb_mapped_groups_v5_real', cleaned);
 
     setExtensionSyncBanner({
       message: `🧹 Limpeza concluída! Removidos links de exemplo/indisponíveis e mantidos ${cleaned.length} grupos reais mapeados.`,
@@ -6095,8 +6129,40 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                 {/* Post body */}
                 <div>
                   <div className="flex items-center justify-between text-[11px] text-slate-400 mb-1 flex-wrap gap-2">
-                    <span>Corpo do Post (Com link oficial do produto):</span>
-                    <div className="flex items-center gap-2">
+                    <span>Corpo do Post (Somente Produto · ZERO menção a robô):</span>
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextSpin = brSpinIndex + 1;
+                          setBrSpinIndex(nextSpin);
+                          setPostHeadline(prev => applySpinVariation(prev, nextSpin, 'pt'));
+                          setCopySaveNotice(`🎲 Abertura Anti-Spam variada (#${nextSpin}) para proteger sua conta!`);
+                          setTimeout(() => setCopySaveNotice(null), 2500);
+                        }}
+                        className="text-amber-400 hover:text-amber-300 flex items-center gap-1 text-[10px] font-bold cursor-pointer"
+                        title="Alternar abertura anti-spam mantendo a copy"
+                      >
+                        <Shuffle className="w-3 h-3" /> Variar Abertura (Spin)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const landingUrl = getCampaignLandingUrl(activeCampaign);
+                          setPostCopy(prev => {
+                            const stripped = prev.replace(/https?:\/\/[^\s<>"']+/gi, landingUrl);
+                            return stripped.includes(landingUrl)
+                              ? stripped
+                              : `${stripped.trim()}\n\n👉 Confira a página completa aqui: ${landingUrl} `;
+                          });
+                          setCopySaveNotice('🔗 Link da Landing Page inserido! O Facebook vai incorporar a Foto Clicável do produto.');
+                          setTimeout(() => setCopySaveNotice(null), 3500);
+                        }}
+                        className="text-emerald-400 hover:text-emerald-300 flex items-center gap-1 text-[10px] font-bold cursor-pointer"
+                        title="Substitui/insere o link oficial da Landing Page com imagem og:image clicável"
+                      >
+                        <Link2 className="w-3 h-3" /> Usar Link Landing (Imagem Clicável)
+                      </button>
                       <button
                         type="button"
                         onClick={() => {
@@ -6109,18 +6175,24 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                         className="text-cyan-400 hover:text-cyan-300 flex items-center gap-1 text-[10px] font-bold cursor-pointer"
                         title="Insere um link que registra cliques reais no Radar de Rastreio antes de abrir o checkout"
                       >
-                        <Link2 className="w-3 h-3" /> + Link Rastreado (Cliques Reais)
+                        <Link2 className="w-3 h-3" /> + Link Rastreado
                       </button>
                       <button
                         type="button"
                         onClick={() => {
-                          navigator.clipboard.writeText(`${postHeadline}\n\n${postCopy}`);
-                          setCopySaveNotice('📋 Texto completo copiado para a área de transferência!');
-                          setTimeout(() => setCopySaveNotice(null), 2500);
+                          const cleanH = stripRobotMentionsFromPost(postHeadline);
+                          const cleanC = stripRobotMentionsFromPost(postCopy);
+                          const txt = cleanH ? `${cleanH}\n\n${cleanC}` : cleanC;
+                          navigator.clipboard.writeText(`${txt.trim()} `);
+                          setCopiedBrHelperId('copy-post');
+                          setTimeout(() => setCopiedBrHelperId(null), 2200);
+                          setCopySaveNotice('📋 Post limpo (sem robô + com link p/ Card Clicável) copiado! Aperte Ctrl+V no Facebook.');
+                          setTimeout(() => setCopySaveNotice(null), 3000);
                         }}
-                        className="text-emerald-400 hover:text-emerald-300 flex items-center gap-1 text-[10px] cursor-pointer"
+                        className="text-emerald-300 hover:text-emerald-200 flex items-center gap-1 text-[10px] font-bold cursor-pointer"
                       >
-                        <Copy className="w-3 h-3" /> Copiar Texto
+                        {copiedBrHelperId === 'copy-post' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                        <span>{copiedBrHelperId === 'copy-post' ? 'Post Copiado!' : 'Copiar Post + Card Clicável'}</span>
                       </button>
                     </div>
                   </div>
@@ -6172,63 +6244,159 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                   </div>
                 )}
 
-                {/* 📸 FOTO / IMAGEM DO PRODUTO ANEXADA (User requested: "preciso que a imagem do produto vá junto aqui", image_d046d610.png) */}
+                {/* 🔗 IMAGEM CLICÁVEL DA LANDING + PRÉVIA REAL FACEBOOK */}
                 <div className="bg-slate-900/95 border border-emerald-500/40 rounded-xl p-3.5 space-y-3 shadow-md">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="text-xs font-bold text-white flex items-center gap-2">
-                      <span className="p-1 bg-emerald-500/20 text-emerald-400 rounded-lg text-sm">📸</span>
-                      Imagem do Produto Anexada na Postagem:
+                      <span className="p-1 bg-emerald-500/20 text-emerald-400 rounded-lg text-sm">🖼️</span>
+                      Como a Imagem vai no Facebook (Zero Menção a Robô):
                     </span>
-                    <span className="text-[10px] font-bold text-emerald-300 bg-emerald-950 px-2.5 py-0.5 rounded-full border border-emerald-800 flex items-center gap-1">
-                      <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                      Anexo com Foto Ativo (3x Mais Vendas)
-                    </span>
-                  </div>
-
-                  <div className="flex flex-col sm:flex-row items-center gap-3.5 bg-slate-950 p-3 rounded-xl border border-slate-800">
-                    <div className="relative group w-24 h-24 sm:w-20 sm:h-20 flex-shrink-0 rounded-xl overflow-hidden border-2 border-emerald-500/70 shadow-lg">
-                      <img
-                        src={activeCampaign.imageUrl || '/assets/aistudio/image_5456885b.png'}
-                        alt={activeCampaign.title}
-                        className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
-                      />
-                      <span className="absolute bottom-0 inset-x-0 bg-black/80 text-[9px] text-center text-emerald-300 py-0.5 font-bold">
-                        Foto Oficial
-                      </span>
-                    </div>
-
-                    <div className="flex-1 min-w-0 space-y-1.5 text-xs text-left w-full">
-                      <div className="flex items-center justify-between gap-2">
-                        <strong className="text-white text-xs truncate block font-bold" title={activeCampaign.title}>
-                          {activeCampaign.title}
-                        </strong>
-                        <span className="text-[10px] text-emerald-400 font-extrabold bg-emerald-950/90 px-2 py-0.5 rounded border border-emerald-800/80 flex-shrink-0">
-                          R$ {(activeCampaign.price || 9.90).toFixed(2).replace('.', ',')}
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-slate-300 leading-snug">
-                        Esta foto do produto será enviada automaticamente pelo robô junto ao texto em cada grupo e postagem, garantindo destaque visual no feed e atraindo cliques diretos para o checkout Kiwify.
-                      </p>
-                      <div className="flex items-center gap-3 pt-1 flex-wrap">
-                        <a
-                          href={activeCampaign.imageUrl || '/assets/aistudio/image_5456885b.png'}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-1 font-semibold hover:underline"
-                        >
-                          <ExternalLink className="w-3 h-3" /> Ver Foto em Tamanho Real ↗
-                        </a>
-                        <span className="text-slate-600">•</span>
-                        <button
-                          type="button"
-                          onClick={() => handleOpenEditCampaign(activeCampaign)}
-                          className="text-[10px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1 font-semibold hover:underline cursor-pointer"
-                        >
-                          <Edit2 className="w-3 h-3" /> Trocar Foto da Campanha
-                        </button>
-                      </div>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const imgUrl = resolveCampaignVisualImage(activeCampaign.imageUrl, activeCampaign.id);
+                          const mode = await copyImageToClipboardOrDownload(imgUrl, `produto-${activeCampaign.id}`);
+                          setCopiedBrHelperId('copy-img');
+                          setTimeout(() => setCopiedBrHelperId(null), 2200);
+                          setCopySaveNotice(
+                            mode === 'clipboard'
+                              ? '🖼️ Imagem copiada! Cole com Ctrl+V dentro do post no Facebook.'
+                              : '⬇️ Imagem baixada para anexar manualmente no post.'
+                          );
+                          setTimeout(() => setCopySaveNotice(null), 3000);
+                        }}
+                        className="px-2 py-1 bg-purple-600/25 hover:bg-purple-600/40 border border-purple-500/40 text-purple-200 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        <ImageIcon className="w-3 h-3" />
+                        <span>{copiedBrHelperId === 'copy-img' ? 'Imagem Copiada!' : 'Copiar Foto (Ctrl+V)'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const landingUrl = getCampaignLandingUrl(activeCampaign);
+                          const txt = buildFirstCommentWithLink({
+                            landingUrl,
+                            title: activeCampaign.title,
+                            priceText: `R$ ${(activeCampaign.price || 9.9).toFixed(2).replace('.', ',')}`,
+                            lang: 'pt'
+                          });
+                          navigator.clipboard?.writeText(txt);
+                          setCopiedBrHelperId('copy-comment');
+                          setTimeout(() => setCopiedBrHelperId(null), 2200);
+                          setCopySaveNotice('💬 1º Comentário com link oficial copiado!');
+                          setTimeout(() => setCopySaveNotice(null), 2500);
+                        }}
+                        className="px-2 py-1 bg-cyan-600/25 hover:bg-cyan-600/40 border border-cyan-500/40 text-cyan-200 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        <MessageSquare className="w-3 h-3" />
+                        <span>{copiedBrHelperId === 'copy-comment' ? 'Comentário Copiado!' : 'Copiar 1º Comentário'}</span>
+                      </button>
                     </div>
                   </div>
+
+                  {/* Mode Switcher */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBrPostVisualMode('clickable_card');
+                        try { localStorage.setItem('autoviral_br_visual_mode', 'clickable_card'); } catch {}
+                      }}
+                      className={`p-2.5 rounded-lg border text-left transition cursor-pointer ${
+                        brPostVisualMode === 'clickable_card'
+                          ? 'bg-emerald-600/20 border-emerald-400 text-white'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <div className="text-[11px] font-bold">🔗 Imagem Clicável da Landing (Padrão)</div>
+                      <div className="text-[10px] opacity-80 mt-0.5">
+                        Cliente clica na foto grande do card no Facebook e abre direto sua Landing / Oferta!
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBrPostVisualMode('attached_photo');
+                        try { localStorage.setItem('autoviral_br_visual_mode', 'attached_photo'); } catch {}
+                      }}
+                      className={`p-2.5 rounded-lg border text-left transition cursor-pointer ${
+                        brPostVisualMode === 'attached_photo'
+                          ? 'bg-cyan-600/20 border-cyan-400 text-white'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <div className="text-[11px] font-bold">📸 Foto Direta Anexada + Link no Texto</div>
+                      <div className="text-[10px] opacity-80 mt-0.5">
+                        Anexa a imagem como foto comum no grupo + link azul clicável no corpo da mensagem.
+                      </div>
+                    </button>
+                  </div>
+
+                  {/* Live Facebook Card Preview */}
+                  {(() => {
+                    const previewLandingUrl = getCampaignLandingUrl(activeCampaign);
+                    const previewImg = resolveCampaignVisualImage(activeCampaign.imageUrl, activeCampaign.id);
+                    const urlMatch = postCopy.match(/https?:\/\/[^\s<>"']+/i);
+                    const activeCardUrl = urlMatch ? urlMatch[0] : previewLandingUrl;
+                    return (
+                      <div className="bg-slate-950 rounded-xl border border-slate-800 p-3 space-y-2.5">
+                        <div className="flex items-center justify-between text-[10px] text-slate-400">
+                          <span className="font-bold text-emerald-300 uppercase">Prévia Exata no Facebook (Somente Produto):</span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditCampaign(activeCampaign)}
+                              className="text-emerald-400 hover:text-emerald-300 flex items-center gap-1 font-semibold hover:underline cursor-pointer"
+                            >
+                              <Edit2 className="w-3 h-3" /> Trocar Foto
+                            </button>
+                          </div>
+                        </div>
+                        <div className="text-[11px] text-slate-200 whitespace-pre-line line-clamp-3">
+                          {stripRobotMentionsFromPost(`${postHeadline}\n\n${postCopy}`)}
+                        </div>
+                        {brPostVisualMode === 'clickable_card' ? (
+                          <a
+                            href={activeCardUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="block rounded-lg overflow-hidden border border-slate-700 hover:border-emerald-400/70 transition bg-slate-900"
+                          >
+                            <img
+                              src={previewImg}
+                              alt={stripRobotMentionsFromPost(activeCampaign.title)}
+                              className="w-full max-h-60 object-cover bg-slate-950"
+                            />
+                            <div className="px-3 py-2 bg-slate-900 border-t border-slate-800 flex items-center justify-between gap-2">
+                              <div className="min-w-0">
+                                <div className="text-[10px] text-slate-400 font-mono truncate">
+                                  {getDisplayDomain(activeCardUrl)}
+                                </div>
+                                <div className="text-xs font-bold text-white truncate">
+                                  {stripRobotMentionsFromPost(activeCampaign.title)}
+                                </div>
+                                <div className="text-[10px] text-emerald-300">
+                                  Apenas R$ {(activeCampaign.price || 9.9).toFixed(2).replace('.', ',')} · Garantia {activeCampaign.guaranteeDays || 7} dias
+                                </div>
+                              </div>
+                              <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold shrink-0">
+                                🔗 Card Clicável
+                              </span>
+                            </div>
+                          </a>
+                        ) : (
+                          <div className="rounded-lg overflow-hidden border border-slate-800">
+                            <img
+                              src={previewImg}
+                              alt={stripRobotMentionsFromPost(activeCampaign.title)}
+                              className="w-full max-h-60 object-cover"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
 
@@ -6360,6 +6528,56 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                 )}
               </div>
 
+              {/* 🔥 Acelerador Produtividade Meta 100 Vendas/Dia + Disparo Só nos Aceitos */}
+              <div className="bg-gradient-to-r from-amber-950/35 via-slate-950 to-emerald-950/35 border border-amber-500/35 rounded-xl p-3 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 text-xs">
+                    <Flame className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span className="font-bold text-amber-200">Acelerador Meta 100 Vendas/Dia (Agilidade Brasil):</span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDispatchQueueOnlyAuthorized(true);
+                        try { localStorage.setItem('autoviral_br_only_authorized', 'true'); } catch {}
+                        const acceptedGroups = mappedGroups.filter(
+                          (g) => selectedGroupIds.includes(g.id) && g.membershipStatus === 'authorized'
+                        );
+                        if (acceptedGroups.length === 0) {
+                          setExtensionSyncBanner({
+                            message: '⚠️ Nenhum grupo selecionado marcado como "✅ Aceito" ainda. Use "Públicos Salvos" para verificar aceites.',
+                            tone: 'warning'
+                          });
+                          return;
+                        }
+                        setTimeout(() => handleExecuteGroupPost(), 80);
+                      }}
+                      className="px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-[11px] font-extrabold rounded-lg inline-flex items-center gap-1.5 cursor-pointer shadow"
+                    >
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      <span>
+                        🚀 Disparar Agora Só nos Aceitos (
+                        {mappedGroups.filter((g) => selectedGroupIds.includes(g.id) && g.membershipStatus === 'authorized').length})
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const nextSpin = brSpinIndex + 1;
+                        setBrSpinIndex(nextSpin);
+                        setPostHeadline(prev => applySpinVariation(prev, nextSpin, 'pt'));
+                        setTimeout(() => handleExecuteGroupPost(), 90);
+                      }}
+                      className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-[11px] font-extrabold rounded-lg inline-flex items-center gap-1 cursor-pointer shadow"
+                    >
+                      <Flame className="w-3.5 h-3.5" />
+                      <span>⚡ Combo Turbo: Spin + Copiar + Abrir Próx.</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
               <div className="pt-1 flex flex-wrap items-center gap-3">
                 <button
                   onClick={handleToggleBot}
@@ -6385,10 +6603,10 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                 <button
                   onClick={handleExecuteGroupPost}
                   className="px-4 py-3.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
-                  title="Copiar texto e abrir próximo grupo selecionado no Facebook"
+                  title="Copiar texto limpo e abrir próximo grupo selecionado no Facebook"
                 >
                   <Zap className="w-4 h-4 text-amber-400" />
-                  Abrir Grupo + Copiar Texto
+                  Abrir Grupo + Copiar Post
                 </button>
               </div>
             </div>

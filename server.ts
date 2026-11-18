@@ -1009,27 +1009,43 @@ function escapeHtmlAttr(str: string): string {
     .replace(/>/g, '&gt;');
 }
 
+function sanitizePublicOgText(str: string): string {
+  return String(str || '')
+    .replace(/AutoViral\s*AI(\s*-\s*)?/gi, '')
+    .replace(/Rob[ôo]\s+de\s+Vendas\s*&?\s*Tr[áa]fego\s+Org[âa]nico\s+Aut[ôo]nomo/gi, '')
+    .replace(/\b(rob[ôo]|autoviral|bot\s+de\s+vendas|tr[áa]fego\s+org[âa]nico\s+aut[ôo]nomo)\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function injectOpenGraphMeta(rawHtml: string, req: express.Request): string {
   const campQuery = typeof req.query.camp === 'string' ? req.query.camp : '';
   const pQuery = typeof req.query.p === 'string' ? req.query.p : '';
   const zMatch = req.path.match(/^\/z\/([^/?#]+)/i);
   const zSlug = zMatch ? zMatch[1] : '';
+  const ua = String(req.headers['user-agent'] || '');
+  const isCrawler = /facebookexternalhit|Facebot|meta-externalagent|WhatsApp|Twitterbot|Pinterest|TelegramBot|Slackbot|LinkedInBot|Instagram/i.test(ua);
 
-  const matched = findCampaignForRequest(campQuery, zSlug || pQuery);
-  if (!matched) return rawHtml;
+  const matched = findCampaignForRequest(campQuery, zSlug || pQuery) || (isCrawler ? serverCampaigns[0] || null : null);
+  if (!matched && !isCrawler) return rawHtml;
 
   const baseUrl = getRequestBaseUrl(req);
-  const ogTitle = (matched.headline || matched.title || 'AutoViral AI').trim();
-  const ogDesc = (
-    matched.subheadline ||
-    matched.painPointTargeted ||
-    `${matched.title} — Oferta especial e acesso imediato.`
-  ).trim();
+  const slugLabel = (zSlug || pQuery || '')
+    .replace(/[-_]+/g, ' ')
+    .replace(/\b\w/g, (l) => l.toUpperCase())
+    .trim();
+  const ogTitle =
+    sanitizePublicOgText(matched?.headline || matched?.title || '') ||
+    slugLabel ||
+    'Material Oficial — Acesso Imediato';
+  const ogDesc =
+    sanitizePublicOgText(matched?.subheadline || matched?.painPointTargeted || '') ||
+    `${ogTitle} — Confira os detalhes e acesse o material completo.`;
   const pageUrl = `${baseUrl}${req.originalUrl}`;
   const ogImageUrl =
-    matched.imageUrl && /^https?:\/\//i.test(matched.imageUrl) && !matched.imageUrl.startsWith('data:')
+    matched?.imageUrl && /^https?:\/\//i.test(matched.imageUrl) && !matched.imageUrl.startsWith('data:')
       ? matched.imageUrl
-      : `${baseUrl}/api/og-image/${encodeURIComponent(matched.id)}?v=${Date.now().toString(36).slice(-4)}`;
+      : `${baseUrl}/api/og-image/${encodeURIComponent(matched?.id || 'camp-tarefinhas-autismo')}?v=${Date.now().toString(36).slice(-4)}`;
 
   let html = rawHtml;
   html = html.replace(/<title>[\s\S]*?<\/title>/i, `<title>${escapeHtmlAttr(ogTitle)}</title>`);
@@ -1062,9 +1078,9 @@ function injectOpenGraphMeta(rawHtml: string, req: express.Request): string {
   return html;
 }
 
-app.get('/api/og-image/:id', async (req, res) => {
+async function serveOgImageById(rawIdInput: string, res: express.Response) {
   try {
-    const rawId = decodeURIComponent(req.params.id || '');
+    const rawId = decodeURIComponent(rawIdInput || '');
     const camp = findCampaignForRequest(rawId, rawId);
     const imgRef = (camp?.imageUrl || '').trim();
 
@@ -1112,6 +1128,15 @@ app.get('/api/og-image/:id', async (req, res) => {
   } catch (err) {
     return res.status(500).end();
   }
+}
+
+app.get('/api/og-image', async (req, res) => {
+  const id = typeof req.query.id === 'string' ? req.query.id : '';
+  return serveOgImageById(id, res);
+});
+
+app.get('/api/og-image/:id', async (req, res) => {
+  return serveOgImageById(req.params.id || '', res);
 });
 
 app.get('/api/og-preview-check', (req, res) => {
@@ -2823,9 +2848,11 @@ async function startServer() {
       appType: 'spa',
     });
 
-    // Inject dynamic OpenGraph tags (og:image, og:title, og:description) for Landing URLs (?camp=, ?p=, /z/:slug)
+    // Inject dynamic OpenGraph tags (og:image, og:title, og:description) for Landing URLs (?camp=, ?p=, /z/:slug) & social crawlers
     app.get(['/', '/z/:slug'], async (req, res, next) => {
-      const hasCampaignSignal = Boolean(req.query.camp || req.query.p || req.path.startsWith('/z/'));
+      const ua = String(req.headers['user-agent'] || '');
+      const isCrawler = /facebookexternalhit|Facebot|meta-externalagent|WhatsApp|Twitterbot|Pinterest|TelegramBot|Slackbot|LinkedInBot|Instagram/i.test(ua);
+      const hasCampaignSignal = Boolean(req.query.camp || req.query.p || req.path.startsWith('/z/') || isCrawler);
       if (!hasCampaignSignal) return next();
       try {
         const templatePath = path.resolve(process.cwd(), 'index.html');
@@ -2847,7 +2874,9 @@ async function startServer() {
         const indexPath = path.resolve(distPath, 'index.html');
         try {
           const rawHtml = fs.readFileSync(indexPath, 'utf-8');
-          const hasCampaignSignal = Boolean(req.query.camp || req.query.p || req.path.startsWith('/z/'));
+          const ua = String(req.headers['user-agent'] || '');
+          const isCrawler = /facebookexternalhit|Facebot|meta-externalagent|WhatsApp|Twitterbot|Pinterest|TelegramBot|Slackbot|LinkedInBot|Instagram/i.test(ua);
+          const hasCampaignSignal = Boolean(req.query.camp || req.query.p || req.path.startsWith('/z/') || isCrawler);
           if (hasCampaignSignal) {
             return res.status(200).set({ 'Content-Type': 'text/html' }).send(injectOpenGraphMeta(rawHtml, req));
           }

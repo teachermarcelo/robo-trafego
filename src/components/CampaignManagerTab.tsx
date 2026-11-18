@@ -22,6 +22,11 @@ import {
 import { Campaign, NicheType } from '../types';
 import { getCampaignLandingUrl } from '../utils/campaignSlug';
 import { saveLandingPageSettingsToFirebase } from '../lib/firebase';
+import {
+  copyImageToClipboardOrDownload,
+  ensureLandingUrlInPost,
+  resolveCampaignVisualImage,
+} from '../utils/facebookPostHelper';
 
 interface CampaignManagerTabProps {
   campaigns: Campaign[];
@@ -56,6 +61,31 @@ export const CampaignManagerTab: React.FC<CampaignManagerTabProps> = ({
 }) => {
   const [isCreating, setIsCreating] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copiedPostCardId, setCopiedPostCardId] = useState<string | null>(null);
+  const [copiedImgCardId, setCopiedImgCardId] = useState<string | null>(null);
+
+  const handleCopyPostWithLandingImage = (camp: Campaign) => {
+    const landingUrl = getCampaignLandingUrl(camp);
+    const fullPost = ensureLandingUrlInPost({
+      headline: camp.headline || camp.title,
+      body: camp.subheadline || camp.painPointTargeted || '',
+      landingUrl,
+      ctaLabel: camp.ctaText || 'Ver detalhes completos e acessar agora',
+      priceText: `R$ ${Number(camp.price || 0).toFixed(2).replace('.', ',')}`,
+    });
+    navigator.clipboard.writeText(fullPost);
+    setCopiedPostCardId(camp.id);
+    setTimeout(() => setCopiedPostCardId(null), 2200);
+  };
+
+  const handleCopyCampaignImagePng = async (camp: Campaign) => {
+    const imgUrl = resolveCampaignVisualImage(camp.imageUrl, camp.id);
+    const res = await copyImageToClipboardOrDownload(imgUrl, camp.id);
+    if (res !== 'none') {
+      setCopiedImgCardId(camp.id);
+      setTimeout(() => setCopiedImgCardId(null), 2200);
+    }
+  };
 
   // Editing state for modal
   const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null);
@@ -502,13 +532,34 @@ export const CampaignManagerTab: React.FC<CampaignManagerTabProps> = ({
                 <button
                   onClick={() => copySmartLink(camp.id)}
                   className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
-                  title="Copiar Link para Bio do TikTok/Pinterest"
+                  title="Copiar Link da Landing Page"
                 >
                   {copiedId === camp.id ? (
                     <Check className="w-4 h-4 text-emerald-400" />
                   ) : (
                     <Copy className="w-4 h-4" />
                   )}
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => handleCopyPostWithLandingImage(camp)}
+                  className="py-1.5 px-2.5 rounded-lg bg-cyan-950/70 hover:bg-cyan-900/70 border border-cyan-600/40 text-[11px] text-cyan-200 font-bold flex items-center justify-center gap-1 cursor-pointer transition"
+                  title="Copia postagem com Link da Landing Page (incorpora a imagem automaticamente no Facebook)"
+                >
+                  {copiedPostCardId === camp.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                  <span className="truncate">{copiedPostCardId === camp.id ? 'Post + Card Copiado!' : 'Copiar Post c/ Card'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleCopyCampaignImagePng(camp)}
+                  className="py-1.5 px-2.5 rounded-lg bg-purple-950/70 hover:bg-purple-900/70 border border-purple-600/40 text-[11px] text-purple-200 font-bold flex items-center justify-center gap-1 cursor-pointer transition"
+                  title="Copia a foto da Landing Page em PNG para colar com Ctrl+V no Facebook"
+                >
+                  {copiedImgCardId === camp.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                  <span className="truncate">{copiedImgCardId === camp.id ? 'Foto Copiada!' : 'Copiar Foto (Ctrl+V)'}</span>
                 </button>
               </div>
 

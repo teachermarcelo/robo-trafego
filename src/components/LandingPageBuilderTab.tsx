@@ -42,6 +42,13 @@ import {
   formatCurrencyPrice,
   getCurrencySymbol,
 } from '../utils/currency';
+import {
+  buildFirstCommentWithLink,
+  copyImageToClipboardOrDownload,
+  ensureLandingUrlInPost,
+  getDisplayDomain,
+  resolveCampaignVisualImage,
+} from '../utils/facebookPostHelper';
 
 interface LandingPageBuilderTabProps {
   campaigns: Campaign[];
@@ -132,6 +139,8 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
     activeCamp?.oldPrice != null ? activeCamp.oldPrice.toString() : '47.00'
   );
   const [copiedManualPost, setCopiedManualPost] = useState(false);
+  const [copiedImageMode, setCopiedImageMode] = useState<'clipboard' | 'downloaded' | null>(null);
+  const [copiedComment, setCopiedComment] = useState(false);
   const [checkoutUrl, setCheckoutUrl] = useState(activeCamp?.checkoutUrl || '');
   const [whatsappNumber, setWhatsappNumber] = useState(
     activeCamp?.whatsappNumber || '5541998778348'
@@ -446,15 +455,50 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
   const parsedCurrentPrice = parseFloat(price.replace(',', '.')) || 9.9;
   const formattedCurrentPrice = formatCurrencyPrice(parsedCurrentPrice, currency);
   const currencySymbol = getCurrencySymbol(currency);
+  const activePreviewImage = resolveCampaignVisualImage(imageUrl, activeCamp?.id);
 
   const copyManualPostFull = () => {
     const postHeadline = (headline || title || activeCamp?.title || '').trim();
     const postSub = (subheadline || activeCamp?.painPointTargeted || '').trim();
-    const fullPost = `${postHeadline}\n\n${postSub}\n\n✅ ${ctaText || 'Ver detalhes agora'} (${formattedCurrentPrice}):\n👉 ${publicLandingUrl}`;
+    const fullPost = ensureLandingUrlInPost({
+      headline: postHeadline,
+      body: postSub,
+      landingUrl: publicLandingUrl,
+      ctaLabel: ctaText || 'Ver detalhes completos e garantir agora',
+      priceText: formattedCurrentPrice,
+    });
     navigator.clipboard.writeText(fullPost);
     setCopiedManualPost(true);
-    setTimeout(() => setCopiedManualPost(false), 2500);
+    setGlobalSyncNotice(
+      `Postagem + Card da Landing copiados! Ao colar no Facebook, a imagem de "${title || activeCamp?.title}" é incorporada automaticamente no card abaixo do texto.`
+    );
+    setTimeout(() => setCopiedManualPost(false), 2800);
   };
+
+  const copyLandingImagePng = async () => {
+    const res = await copyImageToClipboardOrDownload(activePreviewImage, currentSlug || 'landing-imagem');
+    if (res !== 'none') {
+      setCopiedImageMode(res);
+      setGlobalSyncNotice(
+        res === 'clipboard'
+          ? 'Imagem da Landing copiada! Clique no post do Facebook e aperte Ctrl+V para anexar a foto direto.'
+          : 'Imagem da Landing baixada em .jpg! Arraste ou selecione ela na caixa de postagem do Facebook.'
+      );
+      setTimeout(() => setCopiedImageMode(null), 2800);
+    }
+  };
+
+  const copyFirstCommentLink = () => {
+    const commentText = buildFirstCommentWithLink({
+      landingUrl: publicLandingUrl,
+      title: headline || title || activeCamp?.title,
+      priceText: formattedCurrentPrice,
+    });
+    navigator.clipboard.writeText(commentText);
+    setCopiedComment(true);
+    setTimeout(() => setCopiedComment(false), 2500);
+  };
+
   const isTarefinhas =
     activeCamp?.id === 'camp-tarefinhas-autismo' ||
     title.toLowerCase().includes('tarefinha');
@@ -640,10 +684,25 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
                   type="button"
                   onClick={copyManualPostFull}
                   className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs rounded-lg transition flex items-center gap-1 cursor-pointer shrink-0"
-                  title="Copia Título + Texto + Preço + Link pronto para colar manualmente no Facebook ou WhatsApp"
+                  title="Copia Título + Texto + Link da Landing que incorpora a imagem automaticamente no Facebook"
                 >
                   {copiedManualPost ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copiedManualPost ? 'Post Copiado!' : 'Copiar Postagem Manual'}</span>
+                  <span>{copiedManualPost ? 'Post + Card Copiados!' : 'Copiar Post + Card c/ Foto'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={copyLandingImagePng}
+                  className="px-3 py-1.5 bg-purple-600/30 hover:bg-purple-600/50 border border-purple-500/50 text-purple-200 font-bold text-xs rounded-lg transition flex items-center gap-1 cursor-pointer shrink-0"
+                  title="Copia a imagem da Landing Page em PNG para colar direto com Ctrl+V no Facebook"
+                >
+                  {copiedImageMode ? <Check className="w-3.5 h-3.5 text-emerald-300" /> : <ImageIcon className="w-3.5 h-3.5" />}
+                  <span>
+                    {copiedImageMode === 'clipboard'
+                      ? 'Imagem Copiada!'
+                      : copiedImageMode === 'downloaded'
+                      ? 'Baixada (.jpg)!'
+                      : 'Copiar Imagem (Ctrl+V)'}
+                  </span>
                 </button>
                 <a
                   href={publicLandingUrl}
@@ -657,61 +716,121 @@ export const LandingPageBuilderTab: React.FC<LandingPageBuilderTabProps> = ({
                 </a>
               </div>
               <p className="text-[11px] text-slate-400">
-                🚀 Cada criação tem seu próprio link exclusivo. Quem abrir esse link verá exatamente <strong>{title || activeCamp?.title}</strong>, a capa do produto e o preço de <strong>{formattedCurrentPrice}</strong>!
+                🚀 Cada Landing tem sua própria imagem OG incorporada no link. Ao colar o post no Facebook, aparece o <strong>Card Grande Clicável</strong> abaixo do texto (ou cole a foto com <strong>Ctrl+V</strong> + link no 1º comentário).
               </p>
 
-              {/* Live Facebook / WhatsApp Clickable Link Card Preview (og:image) */}
-              <div className="mt-2 pt-2.5 border-t border-slate-800 space-y-2">
+              {/* Live Facebook Post Preview (Exact match to user screenshot) */}
+              <div className="mt-2 pt-3 border-t border-slate-800 space-y-2.5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-[11px] font-bold text-cyan-300 flex items-center gap-1.5">
                     <ImageIcon className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>Prévia da Imagem no Link (Card Clicável no Facebook):</span>
+                    <span>Prévia Real no Grupo do Facebook (Texto + Imagem da Landing Incorporada):</span>
                   </span>
-                  {imageUrl ? (
-                    <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-600/40 text-emerald-300 font-semibold">
-                      og:image Ativa no Link
-                    </span>
-                  ) : (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {imageUrl ? (
+                      <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-600/40 text-emerald-300 font-semibold">
+                        ✓ Foto da Landing Incorporada
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleGenerateCoverImage(true)}
+                        className="text-[10px] px-2.5 py-1 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-black cursor-pointer inline-flex items-center gap-1"
+                      >
+                        <Sparkles className="w-3 h-3" />
+                        <span>Gerar &amp; Fixar Imagem da Landing Agora</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Facebook Light/Card Style Preview */}
+                <div className="rounded-xl overflow-hidden border border-slate-700 bg-white text-slate-900 shadow-lg">
+                  <div className="p-3 space-y-1.5 text-left">
+                    <div className="flex items-center justify-between text-[11px] text-slate-500 font-semibold border-b border-slate-100 pb-1.5">
+                      <span>📣 Sua Postagem no Grupo do Facebook</span>
+                      <span className="text-[10px] text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full font-bold">
+                        Card c/ Foto Ativo
+                      </span>
+                    </div>
+                    <p className="text-xs font-bold text-slate-900 leading-snug pt-1">
+                      {headline || title || activeCamp?.title}
+                    </p>
+                    <p className="text-[11px] text-slate-700 leading-relaxed line-clamp-3">
+                      {subheadline || activeCamp?.painPointTargeted}
+                    </p>
+                    <p className="text-[11px] font-semibold text-blue-700 truncate">
+                      👉 {ctaText || 'Ver conteúdo completo'} ({formattedCurrentPrice}): {publicLandingUrl}
+                    </p>
+                  </div>
+
+                  <a
+                    href={publicLandingUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block border-t border-slate-200 bg-slate-100 hover:bg-slate-200/70 transition-colors"
+                  >
+                    <img
+                      src={activePreviewImage}
+                      alt={`Prévia Card Facebook ${headline || title}`}
+                      className="w-full h-48 object-contain bg-slate-950"
+                    />
+                    <div className="px-3 py-2 text-left bg-slate-100 border-t border-slate-200">
+                      <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 truncate">
+                        {getDisplayDomain(publicLandingUrl)}
+                      </div>
+                      <div className="text-xs font-extrabold text-slate-900 truncate">
+                        {headline || title || activeCamp?.title}
+                      </div>
+                      <div className="text-[11px] text-slate-600 truncate">
+                        {subheadline || `${formattedCurrentPrice} • Acesso imediato`}
+                      </div>
+                    </div>
+                  </a>
+                </div>
+
+                {/* Quick Productivity Copy Bar for this Landing */}
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={copyManualPostFull}
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] rounded-lg inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    {copiedManualPost ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedManualPost ? 'Post + Card Copiados!' : '1. Copiar Postagem + Link (Card c/ Foto)'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={copyLandingImagePng}
+                    className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white font-bold text-[11px] rounded-lg inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <ImageIcon className="w-3.5 h-3.5" />
+                    <span>{copiedImageMode ? 'Imagem Pronta (Ctrl+V)!' : '2. Copiar Foto PNG (Ctrl+V no FB)'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={copyFirstCommentLink}
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-cyan-300 font-bold text-[11px] rounded-lg inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    {copiedComment ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <MessageSquare className="w-3.5 h-3.5" />}
+                    <span>{copiedComment ? 'Comentário Copiado!' : '3. Copiar 1º Comentário (Anti-Ban)'}</span>
+                  </button>
+                  {onNavigateTab && activeCamp && (
                     <button
                       type="button"
-                      onClick={() => handleGenerateCoverImage(true)}
-                      className="text-[10px] px-2.5 py-1 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-black cursor-pointer inline-flex items-center gap-1"
+                      onClick={() => {
+                        try {
+                          localStorage.setItem('autoviral_selected_product_id', activeCamp.id);
+                          localStorage.setItem('autoviral_selected_landing_id', activeCamp.id);
+                        } catch {}
+                        onNavigateTab('chrome_groups');
+                      }}
+                      className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-[11px] rounded-lg inline-flex items-center gap-1 cursor-pointer ml-auto"
                     >
-                      <Sparkles className="w-3 h-3" />
-                      <span>Gerar &amp; Salvar Imagem no Link Agora</span>
+                      <span>🚀 Disparar nos Aceitos c/ Esta Landing →</span>
                     </button>
                   )}
                 </div>
-
-                <a
-                  href={publicLandingUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block rounded-xl overflow-hidden border border-slate-800 hover:border-cyan-500/50 bg-slate-900 transition-colors"
-                >
-                  {imageUrl ? (
-                    <img
-                      src={imageUrl}
-                      alt={`Prévia OG ${headline || title}`}
-                      className="w-full h-44 object-contain bg-slate-950"
-                    />
-                  ) : (
-                    <div className="w-full h-24 bg-slate-950 flex flex-col items-center justify-center text-[11px] text-amber-300 gap-1 px-3 text-center">
-                      <span>Sem imagem configurada — clique no botão acima ou salve abaixo para gerar a capa automática no link!</span>
-                    </div>
-                  )}
-                  <div className="p-2.5 space-y-0.5 bg-slate-900">
-                    <div className="text-[10px] font-mono uppercase text-emerald-400 truncate">
-                      {publicLandingUrl.replace(/^https?:\/\//, '')}
-                    </div>
-                    <div className="text-xs font-bold text-white truncate">
-                      {headline || title || activeCamp?.title}
-                    </div>
-                    <div className="text-[11px] text-slate-400 truncate">
-                      {subheadline}
-                    </div>
-                  </div>
-                </a>
               </div>
             </div>
           </div>

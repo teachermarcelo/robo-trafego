@@ -644,7 +644,7 @@
       return false;
     }
 
-    function hasMembershipQuestionsModalOpen() {
+    function findMembershipQuestionsDialog() {
       try {
         const dialogs = Array.from(document.querySelectorAll('div[role="dialog"]'));
         for (const dlg of dialogs) {
@@ -654,15 +654,177 @@
             txt.includes('perguntas de participação') ||
             txt.includes('regras do grupo') ||
             txt.includes('responder preguntas') ||
+            txt.includes('preguntas de membresía') ||
+            txt.includes('preguntas de ingreso') ||
             txt.includes('reglas del grupo') ||
             txt.includes('answer questions') ||
-            txt.includes('membership questions')
+            txt.includes('membership questions') ||
+            txt.includes('group rules')
           ) {
-            return true;
+            return dlg;
           }
         }
       } catch (e) {}
-      return false;
+      return null;
+    }
+
+    function hasMembershipQuestionsModalOpen() {
+      return Boolean(findMembershipQuestionsDialog());
+    }
+
+    function detectGroupLanguageFromContext(dlg) {
+      const text = `${document.title || ''} ${(dlg && dlg.innerText) || ''}`.toLowerCase();
+      if (/\b(oración|oraciones|petición|preguntas|reglas|enviar|estoy de acuerdo|acepto|biblia|fe|bendiciones|ayuda|dios|gracias)\b/i.test(text)) {
+        return 'es';
+      }
+      if (/\b(perguntas|regras|participar|concordo|aceito|oração|orações|ajuda|grupo|obrigado|brasil)\b/i.test(text) || /[ãõç]/i.test(text)) {
+        return 'pt';
+      }
+      return 'en';
+    }
+
+    function setNativeInputValue(el, val) {
+      try {
+        const proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+        const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
+        if (descriptor && descriptor.set) {
+          descriptor.set.call(el, val);
+        } else {
+          el.value = val;
+        }
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      } catch (e) {
+        try {
+          el.value = val;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+        } catch (err) {}
+      }
+    }
+
+    function tryAutoAnswerMembershipQuestionsAndSubmit(msgEl, onFinished) {
+      const dlg = findMembershipQuestionsDialog();
+      if (!dlg) {
+        if (onFinished) onFinished(false);
+        return;
+      }
+      if (msgEl) {
+        msgEl.textContent = '📝 Perguntas/Regras do grupo detectadas — respondendo automaticamente como humano...';
+        msgEl.style.color = '#38bdf8';
+      }
+
+      const lang = detectGroupLanguageFromContext(dlg);
+      const groupTitleClean = (document.title || '').replace(/\s*\|\s*Facebook.*$/i, '').trim() || 'este grupo';
+
+      // 1. Check agreement / group rules checkboxes
+      const checkboxes = Array.from(dlg.querySelectorAll('input[type="checkbox"], [role="checkbox"]'));
+      checkboxes.forEach((cb) => {
+        try {
+          const isChecked = cb.tagName === 'INPUT' ? Boolean(cb.checked) : cb.getAttribute('aria-checked') === 'true';
+          if (!isChecked) {
+            cb.scrollIntoView({ behavior: 'instant', block: 'center' });
+            cb.click();
+          }
+        } catch (e) {}
+      });
+
+      // 2. Pick affirmative options in any radio groups
+      const radioGroups = Array.from(dlg.querySelectorAll('[role="radiogroup"]'));
+      radioGroups.forEach((rg) => {
+        try {
+          const radios = Array.from(rg.querySelectorAll('input[type="radio"], [role="radio"]'));
+          if (radios.length === 0) return;
+          const alreadyChecked = radios.some((r) => (r.tagName === 'INPUT' ? r.checked : r.getAttribute('aria-checked') === 'true'));
+          if (alreadyChecked) return;
+          const preferred =
+            radios.find((r) => {
+              const lbl = ((r.closest('label') && r.closest('label').innerText) || r.getAttribute('aria-label') || '').toLowerCase();
+              return /\b(sim|sí|si|yes|aceito|acepto|concordo|de acuerdo|agree|claro)\b/i.test(lbl);
+            }) || radios[0];
+          preferred.click();
+        } catch (e) {}
+      });
+
+      // 3. Fill textareas and text inputs with contextual human responses
+      const textFields = Array.from(dlg.querySelectorAll('textarea, input[type="text"]')).filter((el) => {
+        const r = el.getBoundingClientRect();
+        return r.width > 40 && r.height > 15 && !el.disabled && !el.readOnly;
+      });
+
+      textFields.forEach((field, idx) => {
+        try {
+          if ((field.value || '').trim().length > 2) return;
+          const containerText = ((field.closest('div') && field.closest('div').parentElement && field.closest('div').parentElement.innerText) || '').toLowerCase();
+          let answer = '';
+          if (lang === 'es') {
+            if (/regla|norma|respet|acuerdo|acepta/i.test(containerText)) {
+              answer = 'Sí, acepto y me comprometo a respetar todas las reglas de la comunidad.';
+            } else if (/por qu[eé]|motivo|raz[oó]n|inter[eé]s|unirte|orar|oraci[oó]n|fe/i.test(containerText)) {
+              answer = `Quiero participar para compartir apoyo, aprendizaje y aportar contenido útil con respeto en ${groupTitleClean}.`;
+            } else if (/de d[oó]nde|pa[ií]s|ciudad/i.test(containerText)) {
+              answer = 'América Latina / España, con muchas ganas de participar.';
+            } else {
+              answer = idx === 0
+                ? 'Con mucho respeto deseo unirme para aprender y compartir recursos útiles con la comunidad.'
+                : 'Sí, acepto las normas del grupo y agradezco la oportunidad de participar.';
+            }
+          } else if (lang === 'pt') {
+            if (/regra|norma|respeit|acordo|aceita|concordo/i.test(containerText)) {
+              answer = 'Sim, concordo com todas as regras do grupo e vou respeitar a comunidade.';
+            } else if (/por que|motivo|objetivo|interesse|entrar/i.test(containerText)) {
+              answer = `Quero participar para trocar experiências, aprender e compartilhar conteúdos úteis em ${groupTitleClean}.`;
+            } else {
+              answer = idx === 0
+                ? 'Tenho muito interesse no tema do grupo e quero contribuir com respeito.'
+                : 'Sim, aceito as regras da comunidade e agradeço pela aprovação!';
+            }
+          } else {
+            if (/rule|agree|respect/i.test(containerText)) {
+              answer = 'Yes, I agree to follow all group rules and contribute respectfully.';
+            } else {
+              answer = idx === 0
+                ? `Looking forward to learning, connecting, and sharing helpful resources in ${groupTitleClean}.`
+                : 'Yes, I understand and accept the community guidelines. Thank you!';
+            }
+          }
+          field.focus();
+          setNativeInputValue(field, answer);
+        } catch (e) {}
+      });
+
+      // 4. Wait briefly for React validation and click Enviar / Submit
+      setTimeout(() => {
+        const freshDlg = findMembershipQuestionsDialog();
+        if (!freshDlg) {
+          if (onFinished) onFinished(true);
+          return;
+        }
+        const btns = Array.from(freshDlg.querySelectorAll('div[role="button"], button'));
+        const submitBtn = btns.find((b) => {
+          const r = b.getBoundingClientRect();
+          if (r.width === 0 || r.height === 0) return false;
+          const disabled = b.getAttribute('aria-disabled') === 'true' || b.disabled;
+          if (disabled) return false;
+          const t = ((b.innerText || b.getAttribute('aria-label') || '') + '').trim().toLowerCase();
+          return (
+            t === 'enviar' ||
+            t === 'enviar respuestas' ||
+            t === 'enviar respostas' ||
+            t === 'submit' ||
+            t === 'continuar' ||
+            t === 'continue'
+          );
+        });
+        if (submitBtn) {
+          submitBtn.scrollIntoView({ behavior: 'instant', block: 'center' });
+          try { submitBtn.focus(); } catch (e) {}
+          try { submitBtn.click(); } catch (e) {}
+        }
+        setTimeout(() => {
+          const stillOpen = Boolean(findMembershipQuestionsDialog());
+          if (onFinished) onFinished(!stillOpen || isMembershipPendingApproval() || isAlreadyGroupMember());
+        }, 1800);
+      }, 950);
     }
 
     function isFacebookRateLimited() {
@@ -715,7 +877,7 @@
     }
 
     function findComposerTrigger() {
-      const FORBIDDEN = ['anônim', 'anonim', 'anonym', 'enquete', 'poll', 'sentimento', 'feeling', 'foto', 'photo', 'vídeo', 'video', 'ao vivo', 'live', 'comentar', 'comment', 'responder', 'reply'];
+      const FORBIDDEN = ['anônim', 'anonim', 'anónim', 'anonym', 'enquete', 'poll', 'encuesta', 'sentimento', 'feeling', 'sentimiento', 'foto', 'photo', 'vídeo', 'video', 'ao vivo', 'live', 'en vivo', 'comentar', 'comment', 'responder', 'reply'];
       const hasForbidden = (s) => FORBIDDEN.some((w) => s.includes(w));
 
       const composerTriggers = Array.from(
@@ -729,7 +891,7 @@
         if (rect.top < 0 || rect.top > window.innerHeight * 1.4) continue;
         if (el.closest('div[role="dialog"]') || el.closest('div[role="article"]') || el.closest('[role="complementary"]') || el.closest('[aria-busy="true"]')) continue;
         const t = (el.innerText || el.getAttribute('aria-label') || '').trim().toLowerCase();
-        if (!t || t.length > 90 || hasForbidden(t)) continue;
+        if (!t || t.length > 95 || hasForbidden(t)) continue;
         const btnAncestor = el.closest('div[role="button"]');
         if (btnAncestor) {
           const br = btnAncestor.getBoundingClientRect();
@@ -738,21 +900,33 @@
         }
         const isExact =
           t === 'escreva algo...' ||
+          t === 'escribe algo...' ||
           t === 'write something...' ||
           t === 'no que você está pensando?' ||
+          t === '¿qué estás pensando?' ||
+          t === 'qué estás pensando?' ||
           t === "what's on your mind?" ||
           t === 'escreva uma publicação pública...' ||
+          t === 'escribe una publicación pública...' ||
           t === 'write a public post...';
         const isMatch =
           isExact ||
           t.includes('escreva algo') ||
+          t.includes('escribe algo') ||
           t.includes('no que você está pensando') ||
+          t.includes('qué estás pensando') ||
+          t.includes('que estas pensando') ||
           t.includes('write something') ||
           t.includes("what's on your mind") ||
           t.includes('criar publicação pública') ||
+          t.includes('crear publicación pública') ||
+          t.includes('crear publicacion publica') ||
           t.includes('create a public post') ||
           t.includes('write a public post') ||
-          t.includes('escreva uma publicação');
+          t.includes('escreva uma publicação') ||
+          t.includes('escribe una publicación') ||
+          t.includes('escribe una publicacion') ||
+          t.includes('haz una publicación');
         if (!isMatch) continue;
         const inInline = el.closest('[data-pagelet="GroupInlineComposer"]') ? 25000 : 0;
         const isSpanBoost = el.tagName === 'SPAN' ? 8000 : 0;
@@ -994,11 +1168,15 @@
           txt.includes('criar post') ||
           txt.includes('create post') ||
           txt.includes('criar publicação') ||
+          txt.includes('crear publicación') ||
+          txt.includes('crear publicacion') ||
           txt.includes('create a public post') ||
           txt.includes('publicação anônima') ||
+          txt.includes('publicación anónima') ||
           txt.includes('anonymous post') ||
           aria.includes('criar post') ||
-          aria.includes('create post');
+          aria.includes('create post') ||
+          aria.includes('crear publicación');
         const hasPublishBtn = Array.from(d.querySelectorAll('div[role="button"], button')).some((b) => {
           const bt = ((b.innerText || b.getAttribute('aria-label') || '') + '').trim().toLowerCase();
           return bt === 'postar' || bt === 'publicar' || bt === 'post';
@@ -1008,18 +1186,20 @@
     }
 
     function findCreatePostTextbox(dlg) {
-      const scope = dlg || findCreatePostDialog();
+      const scope = dlg || findCreatePostDialog() || document.querySelector('[data-pagelet="GroupInlineComposer"]');
       if (!scope) return null;
+      const isDialog = Boolean(dlg || findCreatePostDialog());
       const boxes = Array.from(
         scope.querySelectorAll(
           'div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"], div[contenteditable="true"][aria-placeholder], div[contenteditable="true"][aria-label]'
         )
       );
       return boxes.find((tb) => {
+        if (!isDialog && (tb.closest('div[role="article"]') || tb.closest('[role="complementary"]'))) return false;
         const rect = tb.getBoundingClientRect();
         if (rect.width < 40 || rect.height < 20) return false;
         const label = ((tb.getAttribute('aria-label') || tb.getAttribute('aria-placeholder') || tb.getAttribute('placeholder') || '') + '').toLowerCase();
-        if (label.includes('coment') || label.includes('comment') || label.includes('responder') || label.includes('reply') || label.includes('pesquis') || label.includes('search')) {
+        if (label.includes('coment') || label.includes('comment') || label.includes('responder') || label.includes('reply') || label.includes('pesquis') || label.includes('search') || label.includes('buscar')) {
           return false;
         }
         return true;
@@ -1073,9 +1253,13 @@
         return (
           txt.includes('post anônimo') ||
           txt.includes('post anonimo') ||
+          txt.includes('publicação anônima') ||
+          txt.includes('publicación anónima') ||
+          txt.includes('publicacion anonima') ||
           txt.includes('anonymous post') ||
           txt.includes('criar post anônimo') ||
           txt.includes('criar post anonimo') ||
+          txt.includes('crear publicación anónima') ||
           txt.includes('create anonymous post')
         );
       }) || null;
@@ -1168,8 +1352,9 @@
     }
 
     function findPublishButtonInDialog(dlg) {
-      if (!dlg) return null;
-      const candidates = Array.from(dlg.querySelectorAll('div[role="button"], button'));
+      const scope = dlg || findCreatePostDialog() || document.querySelector('[data-pagelet="GroupInlineComposer"]');
+      if (!scope) return null;
+      const candidates = Array.from(scope.querySelectorAll('div[role="button"], button'));
       return candidates.find((el) => {
         const rect = el.getBoundingClientRect();
         if (rect.width === 0 || rect.height === 0) return false;
@@ -1277,6 +1462,9 @@
           bodyTxt.includes('pendente de aprovação do administrador') ||
           bodyTxt.includes('enviada para aprovação do administrador') ||
           bodyTxt.includes('sua publicação foi enviada') ||
+          bodyTxt.includes('pendiente de aprobación del administrador') ||
+          bodyTxt.includes('tu publicación fue enviada') ||
+          bodyTxt.includes('en espera de aprobación') ||
           bodyTxt.includes('pending admin approval') ||
           bodyTxt.includes('sent for admin approval') ||
           bodyTxt.includes('waiting for admin approval') ||
@@ -1415,9 +1603,18 @@
         msgEl.style.color = '#38bdf8';
       }
 
+      try {
+        if (window.scrollY > 250) window.scrollTo({ top: 0, behavior: 'smooth' });
+      } catch (e) {}
+
       let triggerTries = 0;
       const waitTrigger = setInterval(() => {
         triggerTries++;
+        if (triggerTries === 3) {
+          try { window.scrollTo({ top: 140, behavior: 'smooth' }); } catch (e) {}
+        } else if (triggerTries === 6) {
+          try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) {}
+        }
         if (isFacebookGroupUnavailable()) {
           clearInterval(waitTrigger);
           sendRealPostResultToPlatform({
@@ -1437,7 +1634,7 @@
           return;
         }
         const trigger = findComposerTrigger();
-        if (trigger || triggerTries >= 15) {
+        if (trigger || triggerTries >= 18) {
           clearInterval(waitTrigger);
           if (!trigger) {
             if (isFacebookGroupUnavailable()) {
@@ -1517,6 +1714,9 @@
                   const clickedAnonCreate = clickButtonInDialogByTexts(anonDlg, [
                     'criar post anônimo',
                     'criar post anonimo',
+                    'crear publicación anónima',
+                    'crear publicacion anonima',
+                    'hacer publicación anónima',
                     'create anonymous post'
                   ]);
                   if (!clickedAnonCreate) {
@@ -1539,7 +1739,7 @@
                 if (msgEl) {
                   msgEl.textContent = pending.imageDataUrl
                     ? '🖼️ Etapa 2/4: Anexando imagem da oferta antes do texto/link...'
-                    : '✍️ Etapa 2/4: Caixa carregada! Inserindo texto da postagem...';
+                    : '🔗 Etapa 2/4: Caixa carregada! Inserindo copy e gerando Card com Imagem Clicável...';
                   msgEl.style.color = '#38bdf8';
                 }
                 setTimeout(() => {
@@ -1551,101 +1751,117 @@
                       freshBox.focus();
                     } catch (e) {}
                     if (msgEl) {
-                      msgEl.textContent = '✍️ Etapa 2/4: Inserindo copy + link clicável junto à imagem...';
+                      msgEl.textContent = pending.imageDataUrl
+                        ? '✍️ Etapa 2/4: Inserindo texto + link clicável junto à imagem...'
+                        : '✍️ Etapa 2/4: Inserindo copy + link da Landing (gerando card clicável)...';
                       msgEl.style.color = '#38bdf8';
                     }
                     insertTextIntoFacebookComposer(freshBox, pending.fullText);
 
-                    const continueAfterInsert = () => {
-                      dismissFacebookLinkPreviewCardIfPhotoPresent(() => {
-                        if (!autoSubmit) {
-                          if (msgEl) {
-                            msgEl.textContent = '✅ Imagem + Texto & link inseridos! Revise e clique em Publicar.';
-                            msgEl.style.color = '#34d399';
-                          }
+                    const proceedToPublish = () => {
+                      if (!autoSubmit) {
+                        if (msgEl) {
+                          msgEl.textContent = pending.imageDataUrl
+                            ? '✅ Imagem + Texto & link inseridos! Revise e clique em Publicar.'
+                            : '✅ Texto + Card com Imagem Clicável carregados! Revise e clique em Publicar.';
+                          msgEl.style.color = '#34d399';
+                        }
+                        startSubmissionMonitor(pending, currentSlug, msgEl, false, cancelAutoBtn);
+                        return;
+                      }
+
+                      if (msgEl) {
+                        msgEl.textContent = pending.imageDataUrl
+                          ? '⏳ Etapa 3/4: Confirmando imagem, link clicável & botão Postar...'
+                          : '⏳ Etapa 3/4: Confirmando Card Clicável da Landing & botão Publicar...';
+                        msgEl.style.color = '#34d399';
+                      }
+
+                      const waitMsBeforePublish = pending.imageDataUrl ? 1800 : 3200;
+                      setTimeout(() => {
+                        if (cancelled) {
                           startSubmissionMonitor(pending, currentSlug, msgEl, false, cancelAutoBtn);
                           return;
                         }
-
-                        if (msgEl) {
-                          msgEl.textContent = '⏳ Etapa 3/4: Confirmando imagem, link clicável & botão Postar...';
-                          msgEl.style.color = '#34d399';
+                        if (pending.imageDataUrl) {
+                          dismissFacebookLinkPreviewCardIfPhotoPresent();
                         }
-
-                        setTimeout(() => {
+                        let pubTries = 0;
+                        const waitPubBtn = setInterval(() => {
+                          pubTries++;
                           if (cancelled) {
+                            clearInterval(waitPubBtn);
+                            return;
+                          }
+                          const activeDlg = findCreatePostDialog() || freshBox.closest('div[role="dialog"]');
+                          const freshTb = findCreatePostTextbox(activeDlg) || freshBox;
+                          const currentContent = (freshTb.innerText || freshTb.textContent || '').trim();
+                          if (currentContent.length < 5) {
+                            if (pubTries === 1 || pubTries === 3 || pubTries === 6) {
+                              insertTextIntoFacebookComposer(freshTb, pending.fullText);
+                            }
+                            if (pubTries < 10) return;
+                            clearInterval(waitPubBtn);
+                            if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
+                            copyTextReliably(pending.fullText);
+                            if (msgEl) {
+                              msgEl.textContent = '📋 Caixa não aceitou auto-colagem! Texto já copiado: aperte Ctrl+V acima e clique em Postar.';
+                              msgEl.style.color = '#fbbf24';
+                            }
                             startSubmissionMonitor(pending, currentSlug, msgEl, false, cancelAutoBtn);
                             return;
                           }
-                          dismissFacebookLinkPreviewCardIfPhotoPresent();
-                          let pubTries = 0;
-                          const waitPubBtn = setInterval(() => {
-                            pubTries++;
-                            if (cancelled) {
-                              clearInterval(waitPubBtn);
-                              return;
+                          const pubBtn = findPublishButtonInDialog(activeDlg);
+                          if (pubBtn) {
+                            clearInterval(waitPubBtn);
+                            if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
+                            if (msgEl) {
+                              msgEl.textContent = '🚀 Etapa 4/4: Clicando em Publicar e confirmando no Facebook...';
+                              msgEl.style.color = '#34d399';
                             }
-                            const activeDlg = findCreatePostDialog() || freshBox.closest('div[role="dialog"]');
-                            const freshTb = findCreatePostTextbox(activeDlg) || freshBox;
-                            const currentContent = (freshTb.innerText || freshTb.textContent || '').trim();
-                            if (currentContent.length < 5) {
-                              if (pubTries === 1 || pubTries === 3 || pubTries === 6) {
-                                insertTextIntoFacebookComposer(freshTb, pending.fullText);
-                              }
-                              if (pubTries < 10) return;
-                              clearInterval(waitPubBtn);
-                              if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
-                              copyTextReliably(pending.fullText);
-                              if (msgEl) {
-                                msgEl.textContent = '📋 Caixa não aceitou auto-colagem! Texto já copiado: aperte Ctrl+V acima e clique em Postar.';
-                                msgEl.style.color = '#fbbf24';
-                              }
-                              startSubmissionMonitor(pending, currentSlug, msgEl, false, cancelAutoBtn);
-                              return;
-                            }
-                            const pubBtn = findPublishButtonInDialog(activeDlg);
-                            if (pubBtn) {
-                              clearInterval(waitPubBtn);
-                              if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
-                              if (msgEl) {
-                                msgEl.textContent = '🚀 Etapa 4/4: Clicando em Postar e confirmando no Facebook...';
-                                msgEl.style.color = '#34d399';
-                              }
-                              if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
-                                chrome.runtime.sendMessage({ action: 'AUTOVIRAL_MAIN_CLICK_PUBLISH' }, (pubRes) => {
-                                  if (!chrome.runtime.lastError && pubRes && pubRes.ok && pubRes.result && pubRes.result.clicked) {
-                                    startSubmissionMonitor(pending, currentSlug, msgEl, true, cancelAutoBtn);
-                                    return;
+                            if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
+                              chrome.runtime.sendMessage({ action: 'AUTOVIRAL_MAIN_CLICK_PUBLISH' }, (pubRes) => {
+                                if (!chrome.runtime.lastError && pubRes && pubRes.ok && pubRes.result && pubRes.result.clicked) {
+                                  startSubmissionMonitor(pending, currentSlug, msgEl, true, cancelAutoBtn);
+                                  return;
+                                }
+                                chrome.runtime.sendMessage({ action: 'AUTOVIRAL_REAL_CLICK_PUBLISH' }, (realPubRes) => {
+                                  if (chrome.runtime.lastError || !realPubRes || !realPubRes.ok || !realPubRes.result || !realPubRes.result.clicked) {
+                                    try {
+                                      pubBtn.focus();
+                                      pubBtn.click();
+                                    } catch (e) {}
                                   }
-                                  chrome.runtime.sendMessage({ action: 'AUTOVIRAL_REAL_CLICK_PUBLISH' }, (realPubRes) => {
-                                    if (chrome.runtime.lastError || !realPubRes || !realPubRes.ok || !realPubRes.result || !realPubRes.result.clicked) {
-                                      try {
-                                        pubBtn.focus();
-                                        pubBtn.click();
-                                      } catch (e) {}
-                                    }
-                                    startSubmissionMonitor(pending, currentSlug, msgEl, true, cancelAutoBtn);
-                                  });
+                                  startSubmissionMonitor(pending, currentSlug, msgEl, true, cancelAutoBtn);
                                 });
-                              } else {
-                                try {
-                                  pubBtn.focus();
-                                  pubBtn.click();
-                                } catch (e) {}
-                                startSubmissionMonitor(pending, currentSlug, msgEl, true, cancelAutoBtn);
-                              }
-                            } else if (pubTries >= 24) {
-                              clearInterval(waitPubBtn);
-                              if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
-                              if (msgEl) {
-                                msgEl.textContent = '✅ Conteúdo pronto em "Criar post"! Clique no botão azul "Postar / Publicar" acima para finalizar.';
-                                msgEl.style.color = '#38bdf8';
-                              }
-                              startSubmissionMonitor(pending, currentSlug, msgEl, false, cancelAutoBtn);
+                              });
+                            } else {
+                              try {
+                                pubBtn.focus();
+                                pubBtn.click();
+                              } catch (e) {}
+                              startSubmissionMonitor(pending, currentSlug, msgEl, true, cancelAutoBtn);
                             }
-                          }, 450);
-                        }, 1800);
-                      });
+                          } else if (pubTries >= 24) {
+                            clearInterval(waitPubBtn);
+                            if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
+                            if (msgEl) {
+                              msgEl.textContent = '✅ Conteúdo pronto! Clique no botão azul "Postar / Publicar" acima para finalizar.';
+                              msgEl.style.color = '#38bdf8';
+                            }
+                            startSubmissionMonitor(pending, currentSlug, msgEl, false, cancelAutoBtn);
+                          }
+                        }, 450);
+                      }, waitMsBeforePublish);
+                    };
+
+                    const continueAfterInsert = () => {
+                      if (pending.imageDataUrl) {
+                        dismissFacebookLinkPreviewCardIfPhotoPresent(proceedToPublish);
+                      } else {
+                        // Clickable Image Card mode: DO NOT dismiss OG preview; let Facebook fetch the Landing Page og:image card!
+                        proceedToPublish();
+                      }
                     };
 
                     setTimeout(continueAfterInsert, 700);
@@ -1921,33 +2137,84 @@
               }
 
               if (hasMembershipQuestionsModalOpen()) {
-                if (pending) {
-                  if (isJoinOnly) {
-                    sendGroupMembershipResultToPlatform({
-                      groupId: pending.groupId,
-                      groupUrl: window.location.href,
-                      groupName: pending.groupName,
-                      membershipStatus: 'questions_pending',
-                      note: 'Grupo exige responder perguntas de entrada'
-                    });
-                  } else {
-                    saveWaitingApprovalEntry(pending, currentSlug);
-                    sendRealPostResultToPlatform({
-                      logId: pending.logId,
-                      groupId: pending.groupId,
-                      groupUrl: window.location.href,
-                      groupName: pending.groupName,
-                      approvalStatus: 'join_requested'
-                    });
+                tryAutoAnswerMembershipQuestionsAndSubmit(msgEl, (answeredOk) => {
+                  if (answeredOk && !hasMembershipQuestionsModalOpen()) {
+                    if (isAlreadyGroupMember()) {
+                      if (isJoinOnly) {
+                        if (pending) {
+                          sendGroupMembershipResultToPlatform({
+                            groupId: pending.groupId,
+                            groupUrl: window.location.href,
+                            groupName: pending.groupName,
+                            membershipStatus: 'authorized',
+                            note: 'Perguntas respondidas automaticamente → Já aceito no grupo!'
+                          });
+                          clearStoredPendingGroupPost(currentSlug);
+                        }
+                        scheduleAutoCloseTab(msgEl, cancelAutoBtn, '✅ Perguntas enviadas & aceito no grupo!', 2);
+                      } else {
+                        executeAutoPostFlow(pending, currentSlug, msgEl, cancelAutoBtn, autoSubmitPost);
+                      }
+                      return;
+                    }
+                    if (pending) {
+                      if (isJoinOnly) {
+                        sendGroupMembershipResultToPlatform({
+                          groupId: pending.groupId,
+                          groupUrl: window.location.href,
+                          groupName: pending.groupName,
+                          membershipStatus: 'awaiting_admin',
+                          note: 'Perguntas & regras respondidas automaticamente — aguardando admin!'
+                        });
+                      } else {
+                        saveWaitingApprovalEntry(pending, currentSlug);
+                        sendRealPostResultToPlatform({
+                          logId: pending.logId,
+                          groupId: pending.groupId,
+                          groupUrl: window.location.href,
+                          groupName: pending.groupName,
+                          approvalStatus: 'join_requested'
+                        });
+                      }
+                      clearStoredPendingGroupPost(currentSlug);
+                    }
+                    scheduleAutoCloseTab(
+                      msgEl,
+                      cancelAutoBtn,
+                      '✅ Perguntas & regras enviadas automaticamente! Aguardando aprovação do admin.',
+                      3
+                    );
+                    return;
                   }
-                  clearStoredPendingGroupPost(currentSlug);
-                }
-                if (msgEl) {
-                  msgEl.textContent = isJoinOnly
-                    ? '📝 Grupo abriu perguntas de entrada! Responda acima para enviar sua solicitação.'
-                    : '📝 Perguntas de entrada abertas! Cookie & gatilho ativados — responda acima e postamos assim que admin aceitar.';
-                  msgEl.style.color = '#fbbf24';
-                }
+
+                  if (pending) {
+                    if (isJoinOnly) {
+                      sendGroupMembershipResultToPlatform({
+                        groupId: pending.groupId,
+                        groupUrl: window.location.href,
+                        groupName: pending.groupName,
+                        membershipStatus: 'questions_pending',
+                        note: 'Grupo exige resposta manual complementar nas perguntas de entrada'
+                      });
+                    } else {
+                      saveWaitingApprovalEntry(pending, currentSlug);
+                      sendRealPostResultToPlatform({
+                        logId: pending.logId,
+                        groupId: pending.groupId,
+                        groupUrl: window.location.href,
+                        groupName: pending.groupName,
+                        approvalStatus: 'join_requested'
+                      });
+                    }
+                    clearStoredPendingGroupPost(currentSlug);
+                  }
+                  if (msgEl) {
+                    msgEl.textContent = isJoinOnly
+                      ? '📝 Respostas preenchidas — finalize o clique em Enviar acima se houver campo extra.'
+                      : '📝 Respostas preenchidas — finalize acima se necessário; gatilho ativo p/ postar ao aceitar.';
+                    msgEl.style.color = '#fbbf24';
+                  }
+                });
                 return;
               }
 

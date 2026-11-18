@@ -12,9 +12,12 @@ import {
   ArrowRight,
   Flame,
   Sparkles,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { Campaign, TrackingEvent } from '../types';
 import { getCampaignLandingUrl } from '../utils/campaignSlug';
+import { ensureLandingUrlInPost } from '../utils/facebookPostHelper';
 
 interface BridgePageModalProps {
   campaign: Campaign;
@@ -29,6 +32,22 @@ export const BridgePageModal: React.FC<BridgePageModalProps> = ({
 }) => {
   const [leadName, setLeadName] = useState('');
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
+  const [copiedPost, setCopiedPost] = useState(false);
+
+  const handleCopyPostWithCard = () => {
+    const landingUrl = getCampaignLandingUrl(campaign);
+    const fullPost = ensureLandingUrlInPost({
+      headline: campaign.headline || campaign.title,
+      body: campaign.subheadline || campaign.painPointTargeted || '',
+      landingUrl,
+      ctaLabel: campaign.ctaText || 'Ver conteúdo completo e garantir agora',
+      priceText: `R$ ${Number(campaign.price || 0).toFixed(2).replace('.', ',')}`,
+    });
+    navigator.clipboard.writeText(fullPost);
+    setCopiedPost(true);
+    setFeedbackMsg('✅ Post + Link da Landing Page copiados! Cole no Facebook e o Card com a Imagem será incorporado abaixo do texto.');
+    setTimeout(() => setCopiedPost(false), 2500);
+  };
 
   const handleWhatsAppClick = () => {
     onTrackAction('whatsapp_click');
@@ -70,6 +89,15 @@ export const BridgePageModal: React.FC<BridgePageModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleCopyPostWithCard}
+              className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs rounded-xl flex items-center gap-1 transition cursor-pointer"
+              title="Copiar Postagem completa com Link da Landing Page (incorpora a imagem no Facebook)"
+            >
+              {copiedPost ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+              <span>{copiedPost ? 'Post Copiado!' : 'Copiar Post c/ Foto'}</span>
+            </button>
             <a
               href={getCampaignLandingUrl(campaign)}
               target="_blank"

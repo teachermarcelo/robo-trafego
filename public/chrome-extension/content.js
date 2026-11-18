@@ -1766,7 +1766,7 @@
                   msgEl.style.color = '#38bdf8';
                 }
                 setTimeout(() => {
-                  const runTextAndPublish = () => {
+                  const runTextAndPublish = (photoAttachedOk) => {
                     const currentDlg = findCreatePostDialog() || dlg;
                     const freshBox = findCreatePostTextbox(currentDlg) || textbox;
                     try {
@@ -1775,13 +1775,25 @@
                     } catch (e) {}
                     if (msgEl) {
                       msgEl.textContent = pending.imageDataUrl
-                        ? '✍️ Etapa 2/4: Inserindo texto + link clicável junto à imagem...'
+                        ? photoAttachedOk
+                          ? '✍️ Etapa 2/4: Foto confirmada! Inserindo texto + link clicável...'
+                          : '⚠️ Foto não entrou automático — inserindo texto + link e pausando p/ Ctrl+V...'
                         : '✍️ Etapa 2/4: Inserindo copy + link da Landing (gerando card clicável)...';
-                      msgEl.style.color = '#38bdf8';
+                      msgEl.style.color = pending.imageDataUrl && !photoAttachedOk ? '#fbbf24' : '#38bdf8';
                     }
                     insertTextIntoFacebookComposer(freshBox, pending.fullText);
 
                     const proceedToPublish = () => {
+                      if (pending.imageDataUrl && !photoAttachedOk && !hasAttachedPhotoInComposerDialog(findCreatePostDialog() || dlg)) {
+                        if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
+                        if (msgEl) {
+                          msgEl.textContent = '⚠️ A foto não anexou sozinha nesta janela — cole a foto (Ctrl+V) aqui antes de clicar em Postar!';
+                          msgEl.style.color = '#fbbf24';
+                        }
+                        startSubmissionMonitor(pending, currentSlug, msgEl, false, cancelAutoBtn);
+                        return;
+                      }
+
                       if (!autoSubmit) {
                         if (msgEl) {
                           msgEl.textContent = pending.imageDataUrl
@@ -1800,7 +1812,7 @@
                         msgEl.style.color = '#34d399';
                       }
 
-                      const waitMsBeforePublish = pending.imageDataUrl ? 1800 : 3200;
+                      const waitMsBeforePublish = pending.imageDataUrl ? 1900 : 3200;
                       setTimeout(() => {
                         if (cancelled) {
                           startSubmissionMonitor(pending, currentSlug, msgEl, false, cancelAutoBtn);
@@ -1829,6 +1841,16 @@
                             copyTextReliably(pending.fullText);
                             if (msgEl) {
                               msgEl.textContent = '📋 Caixa não aceitou auto-colagem! Texto já copiado: aperte Ctrl+V acima e clique em Postar.';
+                              msgEl.style.color = '#fbbf24';
+                            }
+                            startSubmissionMonitor(pending, currentSlug, msgEl, false, cancelAutoBtn);
+                            return;
+                          }
+                          if (pending.imageDataUrl && !hasAttachedPhotoInComposerDialog(activeDlg)) {
+                            clearInterval(waitPubBtn);
+                            if (cancelAutoBtn) cancelAutoBtn.style.display = 'none';
+                            if (msgEl) {
+                              msgEl.textContent = '⚠️ Foto não detectada na janela — cole a imagem (Ctrl+V) antes de clicar em Postar para não enviar sem foto!';
                               msgEl.style.color = '#fbbf24';
                             }
                             startSubmissionMonitor(pending, currentSlug, msgEl, false, cancelAutoBtn);
@@ -1880,7 +1902,9 @@
 
                     const continueAfterInsert = () => {
                       if (pending.imageDataUrl) {
-                        dismissFacebookLinkPreviewCardIfPhotoPresent(proceedToPublish);
+                        dismissFacebookLinkPreviewCardIfPhotoPresent(() => {
+                          setTimeout(() => dismissFacebookLinkPreviewCardIfPhotoPresent(proceedToPublish), 850);
+                        });
                       } else {
                         // Clickable Image Card mode: DO NOT dismiss OG preview; let Facebook fetch the Landing Page og:image card!
                         proceedToPublish();
@@ -1891,11 +1915,11 @@
                   };
 
                   if (pending.imageDataUrl) {
-                    attachImageToFacebookComposer(pending.imageDataUrl, msgEl, () => {
-                      setTimeout(runTextAndPublish, 450);
+                    attachImageToFacebookComposer(pending.imageDataUrl, msgEl, (attachedOk) => {
+                      setTimeout(() => runTextAndPublish(Boolean(attachedOk)), 450);
                     });
                   } else {
-                    runTextAndPublish();
+                    runTextAndPublish(true);
                   }
                 }, 480);
               } else if (boxTries === 11 && !retriedDebuggerClick) {

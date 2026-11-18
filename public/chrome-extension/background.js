@@ -1275,7 +1275,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             };
 
             const findComposerFileInputs = () => {
-              const roots = [dlg, dlg.parentElement].filter(Boolean);
+              const roots = [
+                dlg,
+                dlg.parentElement,
+                dlg.parentElement && dlg.parentElement.parentElement
+              ].filter(Boolean);
               const collected = [];
               for (const root of roots) {
                 const inps = Array.from(root.querySelectorAll('input[type="file"]')).filter(
@@ -1292,20 +1296,31 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               });
             };
 
-            const triggerReactFileInput = (inp) => {
+            const setFilesNatively = (inp) => {
               try {
-                inp.files = dt.files;
-              } catch (e) {}
+                const desc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'files');
+                if (desc && desc.set) {
+                  desc.set.call(inp, dt.files);
+                } else {
+                  inp.files = dt.files;
+                }
+              } catch (e) {
+                try { inp.files = dt.files; } catch (err) {}
+              }
               try {
                 inp.dispatchEvent(new Event('input', { bubbles: true }));
                 inp.dispatchEvent(new Event('change', { bubbles: true }));
               } catch (e) {}
+            };
+
+            const triggerReactPropsFallback = (inp) => {
               try {
                 const propsKey = Object.keys(inp).find((k) => k.startsWith('__reactProps$'));
                 if (propsKey && inp[propsKey] && typeof inp[propsKey].onChange === 'function') {
                   inp[propsKey].onChange({
                     target: inp,
                     currentTarget: inp,
+                    nativeEvent: new Event('change', { bubbles: true }),
                     preventDefault: () => {},
                     stopPropagation: () => {}
                   });
@@ -1315,43 +1330,71 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
             let inputs = findComposerFileInputs();
 
-            // If Facebook hasn't mounted the photo dropzone <input type="file"> yet inside Criar Post,
-            // toggle the "Foto/vídeo" toolbar icon inside dlg (which opens the dropzone WITHOUT an OS file picker!).
-            if (inputs.length === 0) {
-              const photoBtn = Array.from(
-                dlg.querySelectorAll('div[role="button"], button')
-              ).find((el) => {
-                const r = el.getBoundingClientRect();
-                if (r.width === 0 || r.height === 0) return false;
-                const lbl = ((el.getAttribute('aria-label') || el.innerText || '') + '').trim().toLowerCase();
-                return (
-                  lbl.includes('foto/vídeo') ||
-                  lbl.includes('foto/video') ||
-                  lbl.includes('photo/video') ||
-                  lbl.includes('fotos/vídeos') ||
-                  lbl.includes('photos/videos') ||
-                  lbl.includes('adicionar fotos') ||
-                  lbl.includes('add photos')
-                );
-              });
-              if (photoBtn) {
-                try {
-                  photoBtn.click();
-                } catch (e) {}
-                await wait(450);
-                inputs = findComposerFileInputs();
-              }
-            }
-
+            // Try existing inputs first
             for (const inp of inputs.slice(0, 2)) {
-              triggerReactFileInput(inp);
-              await wait(550);
+              setFilesNatively(inp);
+              await wait(650);
               if (hasPhotoPreviewNow()) {
                 return { attached: true, method: 'file_input_verified', previewDetected: true };
               }
             }
 
-            // Fallback: dispatch paste + drop directly onto dropzone and Lexical textbox
+            // If no preview yet, click "Foto/vídeo" inside dlg while trapping HTMLInputElement.prototype.click
+            // so Facebook mounts/reveals its exact <input type="file"> WITHOUT ever opening the OS Windows picker!
+            const photoBtn = Array.from(
+              dlg.querySelectorAll('div[role="button"], button')
+            ).find((el) => {
+              const r = el.getBoundingClientRect();
+              if (r.width === 0 || r.height === 0) return false;
+              const lbl = ((el.getAttribute('aria-label') || el.innerText || '') + '').trim().toLowerCase();
+              return (
+                lbl.includes('foto/vídeo') ||
+                lbl.includes('foto/video') ||
+                lbl.includes('photo/video') ||
+                lbl.includes('fotos/vídeos') ||
+                lbl.includes('photos/videos') ||
+                lbl.includes('adicionar fotos') ||
+                lbl.includes('add photos')
+              );
+            });
+
+            if (photoBtn) {
+              let capturedInp = null;
+              const origClick = HTMLInputElement.prototype.click;
+              HTMLInputElement.prototype.click = function () {
+                if (this && this.type === 'file') {
+                  capturedInp = this;
+                  return;
+                }
+                return origClick.apply(this, arguments);
+              };
+              try {
+                photoBtn.click();
+              } catch (e) {}
+              await wait(600);
+              HTMLInputElement.prototype.click = origClick;
+
+              if (capturedInp && !inputs.includes(capturedInp)) {
+                inputs = [capturedInp, ...inputs];
+              } else {
+                inputs = findComposerFileInputs();
+              }
+
+              for (const inp of inputs.slice(0, 2)) {
+                setFilesNatively(inp);
+                await wait(700);
+                if (hasPhotoPreviewNow()) {
+                  return { attached: true, method: 'trapped_photo_btn_verified', previewDetected: true };
+                }
+                triggerReactPropsFallback(inp);
+                await wait(450);
+                if (hasPhotoPreviewNow()) {
+                  return { attached: true, method: 'react_props_verified', previewDetected: true };
+                }
+              }
+            }
+
+            // Final fallback: dispatch paste + drop directly onto dropzone and Lexical textbox
             const tb = dlg.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]');
             const dropTargets = [
               dlg.querySelector('[aria-label*="arraste" i], [aria-label*="drag" i], [aria-label*="Adicionar fotos" i], [aria-label*="Add photos" i]'),
@@ -1367,15 +1410,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 target.dispatchEvent(new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true }));
                 target.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
               } catch (e) {}
-              await wait(350);
+              await wait(450);
               if (hasPhotoPreviewNow()) {
                 return { attached: true, method: 'clipboard_drop_verified', previewDetected: true };
               }
             }
 
             return {
-              attached: inputs.length > 0 || Boolean(tb),
-              method: inputs.length > 0 ? 'file_input_unconfirmed' : 'clipboard_drop_unconfirmed',
+              attached: hasPhotoPreviewNow(),
+              method: inputs.length > 0 ? 'file_input_no_preview' : 'no_input_no_preview',
               previewDetected: hasPhotoPreviewNow()
             };
           } catch (err) {

@@ -1386,12 +1386,12 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
   const [dispatchLimitCount, setDispatchLimitCount] = useState<number>(20); // 0 = Sem limite (todos)
   const [sessionDispatchedCount, setSessionDispatchedCount] = useState<number>(0);
   const sessionDispatchedRef = useRef<number>(0);
-  // Default FALSE = "Imagem Clicável da Landing" (Facebook gera card grande com a foto que abre a página ao clicar)
+  // Default TRUE = "Foto Anexada + Link Clicável" (garante foto real em qualquer link, inclusive presells externas sem og:image)
   const [attachImageInComposer, setAttachImageInComposer] = useState<boolean>(() => {
     try {
-      return localStorage.getItem('autoviral_global_visual_mode_v1') === 'attached_photo';
+      return localStorage.getItem('autoviral_global_visual_mode_v1') !== 'clickable_card';
     } catch {
-      return false;
+      return true;
     }
   });
   const [globalSpinIndex, setGlobalSpinIndex] = useState<number>(0);
@@ -3600,11 +3600,11 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
     const rawFullText = headline ? `${headline}\n\n${bodyWithLink}` : bodyWithLink;
     const fullText = ensureClickableUrlsInText(rawFullText);
 
-    // If presellLink is our own OG-enabled Landing Page (?camp=, ?p=, /z/, /api/og) AND user chose Clickable Card,
-    // send imageDataUrl = '' so Facebook renders the Clickable Image Card linking to the Landing Page.
-    // Otherwise (e.g. external global-sell-beta.vercel.app which lacks og:image), ALWAYS attach the real image
-    // (auto-generating one if needed) so Facebook NEVER renders an empty gray box without photo!
-    const isOwnOgLanding = /(\/\?camp=|\/\?p=|\/z\/|\/api\/og)/i.test(presellLink);
+    // Somente links próprios do painel com og:image dinâmico podem usar Card Clicável sem foto anexa;
+    // links externos (ex: global-sell-beta.vercel.app) SEMPRE anexam a foto real do produto.
+    const isOwnOgLanding =
+      /(\/api\/og)/i.test(presellLink) ||
+      (/(robo-trafego\.vercel\.app|run\.app|localhost)/i.test(presellLink) && /(\/\?camp=|\/\?p=|\/z\/)/i.test(presellLink));
     const shouldAttachRealPhoto = attachImageInComposer || !isOwnOgLanding;
     let postImageUrl = activeOffer?.postImageUrl || '';
     if (shouldAttachRealPhoto && !postImageUrl && activeOffer) {
@@ -4082,7 +4082,9 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
     const headline = stripRobotMentionsFromPost(customPostHeadline.trim());
     const bodyWithLink = stripRobotMentionsFromPost(customPostBody.replace(/\[PRESELL_LINK\]/g, presellLink).trim());
     const fullText = ensureClickableUrlsInText(headline ? `${headline}\n\n${bodyWithLink}` : bodyWithLink);
-    const isOwnOgLanding = /(\/\?camp=|\/\?p=|\/z\/|\/api\/og)/i.test(presellLink);
+    const isOwnOgLanding =
+      /(\/api\/og)/i.test(presellLink) ||
+      (/(robo-trafego\.vercel\.app|run\.app|localhost)/i.test(presellLink) && /(\/\?camp=|\/\?p=|\/z\/)/i.test(presellLink));
     const shouldAttachRealPhoto = attachImageInComposer || !isOwnOgLanding;
     let postImageUrl = activeOffer?.postImageUrl || '';
     if (shouldAttachRealPhoto && !postImageUrl && activeOffer) {
@@ -7317,54 +7319,82 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                           </div>
                         )}
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setAttachImageInComposer(false);
-                              try { localStorage.setItem('autoviral_global_visual_mode_v1', 'clickable_card'); } catch {}
-                            }}
-                            className={`p-2.5 rounded-lg border text-left transition cursor-pointer ${
-                              !attachImageInComposer
-                                ? 'bg-emerald-600/20 border-emerald-400 text-white'
-                                : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
-                            }`}
-                          >
-                            <div className="text-xs font-bold flex items-center gap-1.5">
-                              <span>🔗 Imagem Clicável da Landing (Padrão)</span>
-                            </div>
-                            <div className="text-[10px] opacity-80 mt-0.5">
-                              Ao postar, o Facebook incorpora a foto como card clicável: o cliente clica na imagem e abre a Landing Page!
-                            </div>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setAttachImageInComposer(true);
-                              try { localStorage.setItem('autoviral_global_visual_mode_v1', 'attached_photo'); } catch {}
-                            }}
-                            className={`p-2.5 rounded-lg border text-left transition cursor-pointer ${
-                              attachImageInComposer
-                                ? 'bg-cyan-600/20 border-cyan-400 text-white'
-                                : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
-                            }`}
-                          >
-                            <div className="text-xs font-bold flex items-center gap-1.5">
-                              <span>📸 Anexar Foto JPG/PNG Direta</span>
-                            </div>
-                            <div className="text-[10px] opacity-80 mt-0.5">
-                              Anexa arquivo de imagem direto no feed junto com o link azul clicável no texto.
-                            </div>
-                          </button>
-                        </div>
+                        {(() => {
+                          const previewUrl = activePresellTrackingUrl || activeOffer.presellUrl || '';
+                          const isOwnOgPreviewUrl =
+                            /(\/api\/og)/i.test(previewUrl) ||
+                            (/(robo-trafego\.vercel\.app|run\.app|localhost)/i.test(previewUrl) && /(\/\?camp=|\/\?p=|\/z\/)/i.test(previewUrl));
+                          const photoModeActive = attachImageInComposer || !isOwnOgPreviewUrl;
+                          return (
+                            <>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setAttachImageInComposer(true);
+                                    try { localStorage.setItem('autoviral_global_visual_mode_v1', 'attached_photo'); } catch {}
+                                  }}
+                                  className={`p-2.5 rounded-lg border text-left transition cursor-pointer ${
+                                    photoModeActive
+                                      ? 'bg-emerald-600/20 border-emerald-400 text-white'
+                                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                                  }`}
+                                >
+                                  <div className="text-xs font-bold flex items-center gap-1.5">
+                                    <span>📸 Foto do Produto + Link Clicável (Padrão)</span>
+                                  </div>
+                                  <div className="text-[10px] opacity-80 mt-0.5">
+                                    Anexa a foto direto no post junto com o link azul clicável e remove a caixa cinza vazia (igual ao post manual).
+                                  </div>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (!isOwnOgPreviewUrl) {
+                                      setAttachImageInComposer(true);
+                                      try { localStorage.setItem('autoviral_global_visual_mode_v1', 'attached_photo'); } catch {}
+                                      setBanner({
+                                        message: `O link "${getDisplayDomain(previewUrl)}" é externo e não tem capa própria no Facebook — mantido em "Foto do Produto + Link Clicável" para nunca postar caixa cinza vazia.`,
+                                        tone: 'info',
+                                      });
+                                      return;
+                                    }
+                                    setAttachImageInComposer(false);
+                                    try { localStorage.setItem('autoviral_global_visual_mode_v1', 'clickable_card'); } catch {}
+                                  }}
+                                  className={`p-2.5 rounded-lg border text-left transition cursor-pointer ${
+                                    !photoModeActive
+                                      ? 'bg-cyan-600/20 border-cyan-400 text-white'
+                                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                                  }`}
+                                >
+                                  <div className="text-xs font-bold flex items-center gap-1.5">
+                                    <span>🔗 Card Clicável (Landing Própria)</span>
+                                  </div>
+                                  <div className="text-[10px] opacity-80 mt-0.5">
+                                    Usa a capa automática apenas quando o link for uma Landing Page gerada aqui no painel.
+                                  </div>
+                                </button>
+                              </div>
 
-                        {!/(\/\?camp=|\/\?p=|\/z\/|\/api\/og)/i.test(activePresellTrackingUrl || activeOffer.presellUrl || '') && (
-                          <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/35 text-[11px] text-amber-200 leading-relaxed">
-                            <span className="font-bold text-amber-300">🛡️ Proteção Anti-Caixa Cinza Ativada:</span>{' '}
-                            Seu link atual (<span className="font-mono text-amber-100">{getDisplayDomain(activePresellTrackingUrl || activeOffer.presellUrl)}</span>) é externo e não gera capa automática no Facebook.
-                            Para a postagem nunca ir sem foto, o disparador <strong className="text-white">anexa automaticamente a foto do produto/arte</strong> junto com o link azul clicável e remove a caixinha cinza vazia!
-                          </div>
-                        )}
+                              {!isOwnOgPreviewUrl && (
+                                <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/35 text-[11px] text-amber-200 leading-relaxed flex items-center gap-3">
+                                  {activeOffer.postImageUrl && (
+                                    <img
+                                      src={activeOffer.postImageUrl}
+                                      alt={activeOffer.productName}
+                                      className="w-12 h-12 rounded-md object-cover border border-amber-400/50 shrink-0 bg-slate-900"
+                                    />
+                                  )}
+                                  <div className="min-w-0">
+                                    <span className="font-bold text-amber-300">🛡️ Proteção Anti-Caixa Cinza Ativada:</span>{' '}
+                                    Como <span className="font-mono text-amber-100">{getDisplayDomain(previewUrl)}</span> é externo e não gera capa automática, o formato está travado em <strong className="text-white">Foto do Produto + Link Clicável</strong> (baixe/atualize a extensão v1.5.5 para o robô anexar a foto ao lado automaticamente).
+                                  </div>
+                                </div>
+                              )}
+                            </>
+                          );
+                        })()}
 
                         <div
                           className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2"
@@ -7440,7 +7470,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                                 className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold rounded-md inline-flex items-center gap-1 cursor-pointer"
                               >
                                 {copiedId === 'full-manual-preview' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                                <span>{copiedId === 'full-manual-preview' ? 'Copiada!' : 'Copiar Post + Card Clicável'}</span>
+                                <span>{copiedId === 'full-manual-preview' ? 'Copiada!' : 'Copiar Texto + Link'}</span>
                               </button>
                             </div>
                           </div>
@@ -7489,8 +7519,11 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                               </div>
                             )}
 
-                            {/* Modo 1 (Padrão em links próprios com OG): Card Clicável; em links externos sem og:image, força foto anexa anti-caixa-cinza */}
-                            {!attachImageInComposer && /(\/\?camp=|\/\?p=|\/z\/|\/api\/og)/i.test(activePresellTrackingUrl || '') ? (
+                            {/* Modo 1 (Apenas links próprios do painel): Card Clicável; demais links mostram foto anexa direta + link clicável */}
+                            {!attachImageInComposer &&
+                            (/(\/api\/og)/i.test(activePresellTrackingUrl || '') ||
+                              (/(robo-trafego\.vercel\.app|run\.app|localhost)/i.test(activePresellTrackingUrl || '') &&
+                                /(\/\?camp=|\/\?p=|\/z\/)/i.test(activePresellTrackingUrl || ''))) ? (
                               <a
                                 href={activePresellTrackingUrl}
                                 target="_blank"

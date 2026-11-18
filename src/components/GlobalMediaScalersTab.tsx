@@ -361,7 +361,113 @@ function renderRichPostBodyWithClickableLinks(text: string): React.ReactNode {
   });
 }
 
-function resizeImageFileToDataUrl(file: File, maxDim = 1080): Promise<string> {
+const OFFER_IMG_DB_NAME = 'autoviral_offer_images_db_v1';
+const OFFER_IMG_STORE = 'offer_images';
+const OFFER_IMG_LS_PREFIX = 'autoviral_offer_img_';
+
+function readCompactOfferImgLocal(offerId: string): string {
+  try {
+    return localStorage.getItem(`${OFFER_IMG_LS_PREFIX}${offerId}`) || '';
+  } catch {
+    return '';
+  }
+}
+
+function saveCompactOfferImgLocal(offerId: string, dataUrl: string): void {
+  try {
+    const key = `${OFFER_IMG_LS_PREFIX}${offerId}`;
+    if (!dataUrl) {
+      localStorage.removeItem(key);
+      return;
+    }
+    if (dataUrl.length <= 320000) {
+      localStorage.setItem(key, dataUrl);
+    }
+  } catch {}
+}
+
+function openOfferImgDb(): Promise<IDBDatabase | null> {
+  return new Promise((resolve) => {
+    try {
+      if (typeof indexedDB === 'undefined') {
+        resolve(null);
+        return;
+      }
+      const req = indexedDB.open(OFFER_IMG_DB_NAME, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(OFFER_IMG_STORE)) {
+          db.createObjectStore(OFFER_IMG_STORE, { keyPath: 'offerId' });
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+async function saveOfferImageIdb(offerId: string, imageUrl: string): Promise<void> {
+  if (!offerId) return;
+  saveCompactOfferImgLocal(offerId, imageUrl);
+  try {
+    const db = await openOfferImgDb();
+    if (!db) return;
+    await new Promise<void>((resolve) => {
+      const tx = db.transaction(OFFER_IMG_STORE, 'readwrite');
+      const store = tx.objectStore(OFFER_IMG_STORE);
+      if (!imageUrl) {
+        store.delete(offerId);
+      } else {
+        store.put({ offerId, imageUrl, updatedAt: Date.now() });
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+      tx.onabort = () => resolve();
+    });
+  } catch {}
+}
+
+async function deleteOfferImageIdb(offerId: string): Promise<void> {
+  await saveOfferImageIdb(offerId, '');
+}
+
+async function loadAllOfferImagesIdb(): Promise<Record<string, string>> {
+  const result: Record<string, string> = {};
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(OFFER_IMG_LS_PREFIX)) {
+        const offerId = k.slice(OFFER_IMG_LS_PREFIX.length);
+        const val = localStorage.getItem(k);
+        if (offerId && val) result[offerId] = val;
+      }
+    }
+  } catch {}
+  try {
+    const db = await openOfferImgDb();
+    if (!db) return result;
+    await new Promise<void>((resolve) => {
+      const tx = db.transaction(OFFER_IMG_STORE, 'readonly');
+      const store = tx.objectStore(OFFER_IMG_STORE);
+      const req = store.getAll();
+      req.onsuccess = () => {
+        const rows = Array.isArray(req.result) ? req.result : [];
+        rows.forEach((row: any) => {
+          if (row?.offerId && typeof row?.imageUrl === 'string' && row.imageUrl.trim()) {
+            result[row.offerId] = row.imageUrl;
+          }
+        });
+        resolve();
+      };
+      req.onerror = () => resolve();
+    });
+  } catch {}
+  return result;
+}
+
+function resizeImageFileToDataUrl(file: File, maxDim = 800): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error('Falha ao ler arquivo de imagem.'));
@@ -369,23 +475,32 @@ function resizeImageFileToDataUrl(file: File, maxDim = 1080): Promise<string> {
       const img = new window.Image();
       img.onerror = () => reject(new Error('Arquivo não reconhecido como imagem válida.'));
       img.onload = () => {
-        let width = img.naturalWidth || img.width || 800;
-        let height = img.naturalHeight || img.height || 600;
-        if (width > maxDim || height > maxDim) {
-          const ratio = Math.min(maxDim / width, maxDim / height);
-          width = Math.max(1, Math.round(width * ratio));
-          height = Math.max(1, Math.round(height * ratio));
-        }
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
+        const encodeAt = (dimLimit: number, quality: number): string => {
+          let width = img.naturalWidth || img.width || 800;
+          let height = img.naturalHeight || img.height || 600;
+          if (width > dimLimit || height > dimLimit) {
+            const ratio = Math.min(dimLimit / width, dimLimit / height);
+            width = Math.max(1, Math.round(width * ratio));
+            height = Math.max(1, Math.round(height * ratio));
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return '';
+          ctx.drawImage(img, 0, 0, width, height);
+          return canvas.toDataURL('image/jpeg', quality);
+        };
+        let out = encodeAt(maxDim, 0.78);
+        if (!out) {
           reject(new Error('Canvas indisponível.'));
           return;
         }
-        ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', 0.85));
+        if (out.length > 125000) {
+          const compact = encodeAt(Math.min(maxDim, 720), 0.62);
+          if (compact) out = compact;
+        }
+        resolve(out);
       };
       img.src = String(reader.result || '');
     };
@@ -556,7 +671,7 @@ function campaignToGlobalOffer(camp: Campaign, existing?: GlobalOffer): GlobalOf
     affiliateUrl: resolvedAffiliate,
     trackingParamName: existing?.trackingParamName || 'utm_source',
     presellUrl: resolvedPresell,
-    postImageUrl: (camp.imageUrl || '').trim() || existing?.postImageUrl || '',
+    postImageUrl: existing?.postImageUrl || (camp.imageUrl || '').trim() || '',
     createdAt: camp.createdAt || existing?.createdAt || new Date().toISOString(),
   };
 }
@@ -1143,16 +1258,20 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
     }
   });
 
-  // Offers state
+  // Offers state (overlaying per-offer saved image backup so 5MB localStorage quota never loses custom photos)
   const [offers, setOffers] = useState<GlobalOffer[]>(() => {
+    let base: GlobalOffer[] = INITIAL_OFFERS;
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.OFFERS);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) base = parsed;
       }
     } catch {}
-    return INITIAL_OFFERS;
+    return base.map((o) => {
+      const localImg = o?.id ? readCompactOfferImgLocal(o.id) : '';
+      return localImg ? { ...o, postImageUrl: localImg } : o;
+    });
   });
 
   const [selectedOfferId, setSelectedOfferId] = useState<string>(() => {
@@ -1338,6 +1457,8 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
   const [chamativaStyle, setChamativaStyle] = useState<ChamativaStyle>('alerta');
   const [showFeedPreview, setShowFeedPreview] = useState<boolean>(true);
   const [isEditingInPreview, setIsEditingInPreview] = useState<boolean>(false);
+  const [isEditingManualCopyCard, setIsEditingManualCopyCard] = useState<boolean>(false);
+  const [idbImagesHydrated, setIdbImagesHydrated] = useState<boolean>(false);
   const [copySavedToast, setCopySavedToast] = useState<boolean>(false);
   const [copyAngleIndex, setCopyAngleIndex] = useState<number>(0);
   const [waitingApprovals, setWaitingApprovals] = useState<WaitingApprovalEntry[]>(() => {
@@ -1454,6 +1575,36 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
     safeSetLocalStorageJson(key, value);
   };
 
+  // Rehydrate custom offer images from IndexedDB on mount BEFORE any auto-flyer fallback runs
+  useEffect(() => {
+    let active = true;
+    loadAllOfferImagesIdb()
+      .then((imgMap) => {
+        if (!active) return;
+        const entries = Object.entries(imgMap);
+        if (entries.length > 0) {
+          setOffers((prev) => {
+            let changed = false;
+            const next = prev.map((o) => {
+              const idbImg = imgMap[o.id];
+              if (idbImg && o.postImageUrl !== idbImg) {
+                changed = true;
+                return { ...o, postImageUrl: idbImg };
+              }
+              return o;
+            });
+            return changed ? next : prev;
+          });
+        }
+      })
+      .finally(() => {
+        if (active) setIdbImagesHydrated(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   // Persist localStorage slices (strictly isolated from Brazil keys)
   useEffect(() => {
     safeWriteGlobalStorage(STORAGE_KEYS.OFFERS, offers);
@@ -1554,9 +1705,26 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
       }
       if (Array.isArray(cloud.globalOffers) && cloud.globalOffers.length > 0) {
         setOffers((prev) => {
-          const existingIds = new Set(prev.map((o) => o.id));
+          const cloudMap = new Map<string, any>();
+          cloud.globalOffers!.forEach((o: any) => {
+            if (o?.id) {
+              cloudMap.set(o.id, o);
+              if (o.postImageUrl) saveOfferImageIdb(o.id, o.postImageUrl);
+            }
+          });
+          let changed = false;
+          const updatedPrev = prev.map((o) => {
+            const c = cloudMap.get(o.id);
+            if (c && !o.postImageUrl && c.postImageUrl) {
+              changed = true;
+              return { ...o, postImageUrl: c.postImageUrl };
+            }
+            return o;
+          });
+          const existingIds = new Set(updatedPrev.map((o) => o.id));
           const fresh = cloud.globalOffers!.filter((o: any) => o?.id && !existingIds.has(o.id));
-          return fresh.length > 0 ? [...prev, ...fresh] : prev;
+          if (fresh.length > 0) return [...updatedPrev, ...fresh];
+          return changed ? updatedPrev : prev;
         });
       }
       if (Array.isArray(cloud.globalGroups) && cloud.globalGroups.length > 0) {
@@ -1676,9 +1844,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
   }, [selectedAudienceId]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.KITS_BY_OFFER, JSON.stringify(kitsByOffer));
-    } catch {}
+    safeSetLocalStorageJson(STORAGE_KEYS.KITS_BY_OFFER, kitsByOffer);
   }, [kitsByOffer]);
 
   useEffect(() => {
@@ -1752,7 +1918,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
           existing.discountText !== converted.discountText ||
           existing.affiliateUrl !== converted.affiliateUrl ||
           existing.presellUrl !== converted.presellUrl ||
-          (camp.imageUrl && existing.postImageUrl !== converted.postImageUrl)
+          (!existing.postImageUrl && Boolean(converted.postImageUrl))
         ) {
           const idx = next.findIndex((o) => o.id === offerId);
           if (idx >= 0) {
@@ -2219,7 +2385,10 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
       createdAt: new Date().toISOString(),
     };
     const autoImg = generateOfferPromoImageDataUrl(created, undefined, flyerTheme);
-    if (autoImg) created.postImageUrl = autoImg;
+    if (autoImg) {
+      created.postImageUrl = autoImg;
+      saveOfferImageIdb(created.id, autoImg);
+    }
     setOffers((prev) => [created, ...prev]);
     setSelectedOfferId(created.id);
     setIsNewOfferOpen(false);
@@ -2233,22 +2402,30 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
   };
 
   const syncLandingCampaignImageOnServer = (offer: GlobalOffer, nextImageUrl: string) => {
-    if (!offer.sourceCampaignId) return;
-    const match = campaigns.find((c) => c.id === offer.sourceCampaignId);
+    const linkedId =
+      offer.sourceCampaignId ||
+      (offer.id.startsWith('landing-') ? offer.id.replace(/^landing-/, '') : undefined);
+    if (!linkedId) return;
+    const match = campaigns.find((c) => c.id === linkedId);
     if (!match) return;
+    const updatedCampaign = { ...match, imageUrl: nextImageUrl };
+    if (onUpdateCampaign) {
+      onUpdateCampaign(updatedCampaign);
+    }
     try {
       fetch('/api/campaigns', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...match, imageUrl: nextImageUrl }),
+        body: JSON.stringify(updatedCampaign),
       }).catch(() => {});
     } catch {}
   };
 
   const handleUpdateOfferField = (field: keyof GlobalOffer, value: string) => {
     if (!activeOffer) return;
-    setOffers((prev) =>
-      prev.map((o) => {
+    let computedNextOffers: GlobalOffer[] | null = null;
+    setOffers((prev) => {
+      const next = prev.map((o) => {
         if (o.id !== activeOffer.id) return o;
         if (field === 'currencyCode') {
           const nextCode = String(value || 'USD').toUpperCase();
@@ -2260,25 +2437,44 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
           };
         }
         return { ...o, [field]: value };
-      })
-    );
+      });
+      computedNextOffers = next;
+      safeSetLocalStorageJson(STORAGE_KEYS.OFFERS, next);
+      return next;
+    });
     if (field === 'postImageUrl') {
+      if (value) {
+        saveOfferImageIdb(activeOffer.id, value);
+      } else {
+        deleteOfferImageIdb(activeOffer.id);
+      }
       syncLandingCampaignImageOnServer(activeOffer, value);
+      if (computedNextOffers) {
+        saveGlobalWorkspaceSyncToFirebase({ globalOffers: computedNextOffers }, { force: true }).catch(() => {});
+      }
     }
   };
 
   const handleSaveOfferChanges = () => {
     if (!activeOffer) return;
-    try {
-      localStorage.setItem(STORAGE_KEYS.OFFERS, JSON.stringify(offers));
-    } catch {}
+    safeSetLocalStorageJson(STORAGE_KEYS.OFFERS, offers);
+    if (activeOffer.postImageUrl) {
+      saveOfferImageIdb(activeOffer.id, activeOffer.postImageUrl);
+    } else {
+      deleteOfferImageIdb(activeOffer.id);
+    }
+    saveGlobalWorkspaceSyncToFirebase({ globalOffers: offers }, { force: true }).catch(() => {});
 
     // Rebuild structured template kit for this offer so copy reflects updated currency, language and price
     const updatedTpl = buildStructuredTemplateKit(activeOffer);
-    setKitsByOffer((prev) => ({
-      ...prev,
-      [activeOffer.id]: updatedTpl,
-    }));
+    setKitsByOffer((prev) => {
+      const nextKits = {
+        ...prev,
+        [activeOffer.id]: updatedTpl,
+      };
+      safeSetLocalStorageJson(STORAGE_KEYS.KITS_BY_OFFER, nextKits);
+      return nextKits;
+    });
 
     // Sync changes back to linked Landing Page campaign if linked
     const linkedId =
@@ -2296,7 +2492,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
           currency: activeOffer.currencyCode || match.currency || 'BRL',
           price: Number.isFinite(parsedPrice) && parsedPrice > 0 ? parsedPrice : match.price,
           checkoutUrl: activeOffer.affiliateUrl.trim() || match.checkoutUrl,
-          imageUrl: activeOffer.postImageUrl || match.imageUrl,
+          imageUrl: activeOffer.postImageUrl ?? match.imageUrl,
         };
         if (onUpdateCampaign) {
           onUpdateCampaign(updatedCampaign);
@@ -2314,7 +2510,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
     setOfferSavedToast(true);
     setTimeout(() => setOfferSavedToast(false), 2600);
     setBanner({
-      message: `Alterações em "${activeOffer.productName}" (${activeOffer.currencyCode} · ${activeOffer.offerPriceText}) salvas e sincronizadas!`,
+      message: `Alterações em "${activeOffer.productName}" (${activeOffer.currencyCode} · ${activeOffer.offerPriceText}) e imagem salvas no navegador e na nuvem!`,
       tone: 'success',
     });
   };
@@ -3738,7 +3934,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                 : p
             )
           : [{ angle: 'Personalizada Salva', headline: customPostHeadline.trim(), body: normalizedBody }];
-      return {
+      const nextKits = {
         ...prev,
         [activeOffer.id]: {
           ...existing,
@@ -3748,6 +3944,8 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
           },
         },
       };
+      safeSetLocalStorageJson(STORAGE_KEYS.KITS_BY_OFFER, nextKits);
+      return nextKits;
     });
     setCopySavedToast(true);
     setTimeout(() => setCopySavedToast(false), 2000);
@@ -3975,13 +4173,14 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
     }
   };
 
-  // Guarantee every selected offer always has a ready visual flyer image (no empty gray Global Presell cards!)
+  // Guarantee every selected offer always has a ready visual flyer image AFTER IndexedDB restores saved images
   useEffect(() => {
-    if (!activeOffer || activeOffer.postImageUrl) return;
+    if (!idbImagesHydrated || !activeOffer || activeOffer.postImageUrl) return;
     const autoImg = generateOfferPromoImageDataUrl(activeOffer, customPostHeadline, flyerTheme);
     if (!autoImg) return;
+    saveOfferImageIdb(activeOffer.id, autoImg);
     setOffers((prev) => prev.map((o) => (o.id === activeOffer.id && !o.postImageUrl ? { ...o, postImageUrl: autoImg } : o)));
-  }, [activeOffer?.id]);
+  }, [idbImagesHydrated, activeOffer?.id]);
 
   const handleCheckWaitingApprovalsNow = () => {
     setCheckingApprovals(true);
@@ -4659,7 +4858,10 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                 </label>
 
                 {/* Post Image Configuration for this Offer */}
-                <div className="md:col-span-2 bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-3">
+                <div
+                  onPaste={handlePasteOfferPostImage}
+                  className="md:col-span-2 bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-3"
+                >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <div className="text-xs font-semibold text-white flex items-center gap-1.5">
@@ -4667,7 +4869,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                         <span>Imagem da Postagem (Anexada automaticamente no Facebook + Prévia)</span>
                       </div>
                       <p className="text-[11px] text-slate-400">
-                        Envie uma foto do PC, cole um link HTTPS ou gere um card visual promocional em 1 clique.
+                        Envie uma foto do PC, cole (Ctrl+V), cole um link HTTPS ou gere um card visual promocional. Fica salva automaticamente!
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
@@ -4730,34 +4932,48 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                   <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
                     <input
                       type="url"
+                      onPaste={handlePasteOfferPostImage}
                       value={activeOffer.postImageUrl?.startsWith('data:') ? '' : activeOffer.postImageUrl || ''}
                       onChange={(e) => handleUpdateOfferField('postImageUrl', e.target.value)}
                       placeholder={
                         activeOffer.postImageUrl?.startsWith('data:')
-                          ? 'Imagem local/gerada ativa (ou cole aqui uma URL https://... para substituir)'
-                          : 'Opcional: cole a URL direta da imagem (https://...)'
+                          ? 'Imagem local/gerada ativa e salva (cole uma URL https://... ou Ctrl+V uma foto para substituir)'
+                          : 'Opcional: cole aqui uma foto (Ctrl+V) ou URL direta da imagem (https://...)'
                       }
                       className="flex-1 w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-cyan-500"
                     />
                   </div>
 
                   {activeOffer.postImageUrl && (
-                    <div className="flex items-center gap-3 pt-1">
+                    <div className="flex flex-wrap items-center gap-3 pt-1">
                       <img
                         src={activeOffer.postImageUrl}
                         alt={`Imagem da oferta ${activeOffer.productName}`}
                         className="w-28 h-28 object-contain rounded-lg border border-slate-700 bg-slate-900 shrink-0"
                       />
-                      <div className="text-[11px] text-emerald-300 space-y-1">
-                        <div className="font-semibold">Imagem pronta para anexar no Facebook</div>
-                        <button
-                          type="button"
-                          onClick={handleDownloadOfferPostImage}
-                          className="text-cyan-300 hover:text-cyan-200 underline inline-flex items-center gap-1 cursor-pointer"
-                        >
-                          <Download className="w-3 h-3" />
-                          <span>Baixar imagem (.jpg)</span>
-                        </button>
+                      <div className="text-[11px] text-emerald-300 space-y-1.5">
+                        <div className="font-semibold flex items-center gap-1.5">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>Imagem salva nesta oferta (Navegador + IndexedDB + Nuvem)</span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={handleCopyOfferPostImage}
+                            className="px-2 py-1 bg-purple-600/25 hover:bg-purple-600/40 border border-purple-500/40 text-purple-200 rounded inline-flex items-center gap-1 cursor-pointer"
+                          >
+                            {copiedId === 'copy-image-clipboard' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                            <span>{copiedId === 'copy-image-clipboard' ? 'Imagem Copiada!' : 'Copiar Imagem (Ctrl+V)'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleDownloadOfferPostImage}
+                            className="text-cyan-300 hover:text-cyan-200 underline inline-flex items-center gap-1 cursor-pointer"
+                          >
+                            <Download className="w-3 h-3" />
+                            <span>Baixar imagem (.jpg)</span>
+                          </button>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -4767,7 +4983,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
               {/* Save Bar + Quick Copy Full Manual Post Box */}
               <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-950/90 border border-cyan-500/30 rounded-xl p-3.5">
                 <div className="text-xs text-slate-300">
-                  Atualizou país, moeda, preço, dor ou links? Clique em salvar para gravar tudo e atualizar os textos.
+                  Atualizou país, moeda, preço, dor, imagem ou links? Clique em salvar para gravar tudo na nuvem e atualizar os textos.
                 </div>
                 <button
                   type="button"
@@ -4787,10 +5003,35 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                       <span>Copiar Postagem Pronta para Postagem Manual (Opcional)</span>
                     </h4>
                     <p className="text-[11px] text-slate-400">
-                      Copie título + texto persuasivo + link clicável rastreado e baixe a imagem para colar manualmente onde quiser.
+                      Edite se quiser, copie título + texto persuasivo + link clicável rastreado e baixe a imagem para colar manualmente onde quiser.
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingManualCopyCard((v) => !v)}
+                      className={`px-2.5 py-1.5 text-[11px] font-bold rounded-lg inline-flex items-center gap-1 cursor-pointer border ${
+                        isEditingManualCopyCard
+                          ? 'bg-amber-500/25 border-amber-400/60 text-amber-200'
+                          : 'bg-amber-600/20 hover:bg-amber-600/35 border-amber-500/45 text-amber-200'
+                      }`}
+                    >
+                      <Pencil className="w-3 h-3" />
+                      <span>{isEditingManualCopyCard ? 'Concluir Edição' : 'Editar'}</span>
+                    </button>
+                    {isEditingManualCopyCard && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleSavePreviewCopy();
+                          setIsEditingManualCopyCard(false);
+                        }}
+                        className="px-2.5 py-1.5 bg-sky-600 hover:bg-sky-500 text-white text-[11px] font-bold rounded-lg inline-flex items-center gap-1 cursor-pointer shadow"
+                      >
+                        {copySavedToast ? <Check className="w-3 h-3" /> : <Save className="w-3 h-3" />}
+                        <span>{copySavedToast ? 'Salvo!' : 'Salvar Edição'}</span>
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={handleCycleCopyAngle}
@@ -4829,10 +5070,64 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                     </button>
                   </div>
                 </div>
-                <div className="bg-slate-900 border border-slate-800 rounded-lg p-3 text-[11px] text-slate-200 space-y-1.5 max-h-40 overflow-y-auto whitespace-pre-line">
-                  {customPostHeadline && <div className="font-bold text-white">{customPostHeadline}</div>}
-                  <div>{customPostBody}</div>
-                </div>
+                {isEditingManualCopyCard ? (
+                  <div className="bg-slate-900 border border-amber-500/45 rounded-lg p-3 space-y-2.5">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-semibold uppercase tracking-wide text-amber-300">
+                        Título / Gancho da Postagem
+                      </label>
+                      <input
+                        type="text"
+                        value={customPostHeadline}
+                        onChange={(e) => setCustomPostHeadline(e.target.value)}
+                        placeholder="Título / Gancho da postagem..."
+                        className="w-full bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-lg px-3 py-2 text-xs font-bold text-white focus:outline-none"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-semibold uppercase tracking-wide text-amber-300">
+                        Texto Completo da Postagem (com Link Clicável)
+                      </label>
+                      <textarea
+                        rows={7}
+                        value={customPostBody}
+                        onChange={(e) => setCustomPostBody(e.target.value)}
+                        placeholder="Corpo da postagem com link..."
+                        className="w-full bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-lg p-3 text-xs text-slate-100 leading-relaxed focus:outline-none"
+                      />
+                    </div>
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+                      <span className="text-[10px] text-slate-400 font-mono tabular-nums">
+                        {(customPostHeadline.length + customPostBody.length)} caracteres · Sincronizado com a Prévia e Disparos
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setIsEditingManualCopyCard(false)}
+                          className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] rounded-md cursor-pointer"
+                        >
+                          Fechar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handleSavePreviewCopy();
+                            setIsEditingManualCopyCard(false);
+                          }}
+                          className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold rounded-md inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          <Save className="w-3 h-3" />
+                          <span>Salvar Texto Editado</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-slate-900 border border-slate-800 rounded-lg p-3 text-[11px] text-slate-200 space-y-1.5 max-h-40 overflow-y-auto whitespace-pre-line">
+                    {customPostHeadline && <div className="font-bold text-white">{customPostHeadline}</div>}
+                    <div>{customPostBody}</div>
+                  </div>
+                )}
                 <div className="text-[11px] text-amber-200/90 bg-amber-950/30 border border-amber-500/25 rounded-lg px-3 py-2">
                   💡 <strong>Dica Facebook (sem caixinha cinza sem foto):</strong> ao colar manualmente, clique em <strong>Copiar Imagem (Ctrl+V)</strong> e cole no Facebook (ou anexe a imagem baixada). Se o Facebook abrir a prévia cinza de link embaixo, clique no <strong>X</strong> dela — assim fica <strong>somente sua imagem chamativa + link clicável no texto</strong>!
                 </div>

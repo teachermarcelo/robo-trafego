@@ -1109,13 +1109,28 @@
       localFallbackInsert();
     }
 
+    function hasAttachedPhotoInComposerDialog(dlg) {
+      if (!dlg) return false;
+      const hasBlobOrDataImg = Array.from(dlg.querySelectorAll('img')).some((img) => {
+        const r = img.getBoundingClientRect();
+        const src = img.getAttribute('src') || '';
+        return (src.startsWith('blob:') || src.startsWith('data:image/')) && r.width > 72 && r.height > 72;
+      });
+      if (hasBlobOrDataImg) return true;
+      return Boolean(
+        dlg.querySelector(
+          '[aria-label="Editar"], [aria-label="Edit"], [aria-label*="Editar tudo" i], [aria-label*="Edit all" i], [aria-label*="Editar foto" i], [aria-label*="Edit photo" i]'
+        )
+      );
+    }
+
     function attachImageToFacebookComposer(imageUrl, msgEl, onDone) {
       if (!imageUrl || !chrome || !chrome.runtime || !chrome.runtime.sendMessage) {
         if (onDone) onDone(false);
         return;
       }
       if (msgEl) {
-        msgEl.textContent = '🖼️ Anexando imagem da oferta primeiro em "Criar post"...';
+        msgEl.textContent = '🖼️ Anexando imagem do produto em "Criar post"...';
         msgEl.style.color = '#38bdf8';
       }
       chrome.runtime.sendMessage({ action: 'AUTOVIRAL_FETCH_IMAGE_DATAURL', imageUrl }, (fetchRes) => {
@@ -1123,23 +1138,31 @@
           if (onDone) onDone(false);
           return;
         }
-        chrome.runtime.sendMessage({ action: 'AUTOVIRAL_MAIN_ATTACH_IMAGE', dataUrl: fetchRes.dataUrl }, (attRes) => {
-          void chrome.runtime.lastError;
-          let tries = 0;
-          const waitPreview = setInterval(() => {
-            tries++;
-            const dlg = findCreatePostDialog();
-            const hasAttachedPreview = dlg && Array.from(dlg.querySelectorAll('img')).some((img) => {
-              const r = img.getBoundingClientRect();
-              const src = img.getAttribute('src') || '';
-              return (src.startsWith('blob:') || src.startsWith('data:image/') || r.height > 72) && r.width > 72;
-            });
-            if (hasAttachedPreview || tries >= 12) {
-              clearInterval(waitPreview);
-              if (onDone) onDone(Boolean(hasAttachedPreview || (attRes && attRes.result && attRes.result.attached)));
-            }
-          }, 350);
-        });
+        const attemptAttach = (attemptNo) => {
+          chrome.runtime.sendMessage({ action: 'AUTOVIRAL_MAIN_ATTACH_IMAGE', dataUrl: fetchRes.dataUrl }, (attRes) => {
+            void chrome.runtime.lastError;
+            let tries = 0;
+            const waitPreview = setInterval(() => {
+              tries++;
+              const dlg = findCreatePostDialog();
+              const hasAttachedPreview = hasAttachedPhotoInComposerDialog(dlg);
+              if (hasAttachedPreview) {
+                clearInterval(waitPreview);
+                if (onDone) onDone(true);
+                return;
+              }
+              if (tries >= 9) {
+                clearInterval(waitPreview);
+                if (attemptNo < 2) {
+                  attemptAttach(attemptNo + 1);
+                } else if (onDone) {
+                  onDone(Boolean(attRes && attRes.result && attRes.result.attached));
+                }
+              }
+            }, 350);
+          });
+        };
+        attemptAttach(1);
       });
     }
 

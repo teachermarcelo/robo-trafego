@@ -1234,8 +1234,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         target: { tabId },
         world: 'MAIN',
         args: [dataUrl],
-        func: (imgDataUrl) => {
+        func: async (imgDataUrl) => {
           try {
+            const wait = (ms) => new Promise((r) => setTimeout(r, ms));
             const parts = imgDataUrl.split(',');
             const mimeMatch = parts[0].match(/data:([^;]+);/i);
             const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
@@ -1244,7 +1245,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             const ia = new Uint8Array(ab);
             for (let i = 0; i < byteStr.length; i++) ia[i] = byteStr.charCodeAt(i);
             const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg';
-            const file = new File([ab], `autoviral-post.${ext}`, { type: mime });
+            const file = new File([ab], `product-photo.${ext}`, { type: mime });
             const dt = new DataTransfer();
             dt.items.add(file);
 
@@ -1259,37 +1260,124 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             }) || dialogs[dialogs.length - 1];
             if (!dlg) return { attached: false, reason: 'no_dialog' };
 
-            const findImgFileInput = () => {
-              const inDlg = Array.from(dlg.querySelectorAll('input[type="file"]'));
-              const dlgImg = inDlg.find((inp) => (inp.accept || '').includes('image')) || inDlg[0];
-              if (dlgImg) return dlgImg;
-              const docInputs = Array.from(document.querySelectorAll('input[type="file"]'));
-              const matchingDoc = docInputs.filter((inp) => (inp.accept || '').includes('image'));
-              return matchingDoc[matchingDoc.length - 1] || docInputs[docInputs.length - 1] || null;
+            const hasPhotoPreviewNow = () => {
+              const imgs = Array.from(dlg.querySelectorAll('img')).some((img) => {
+                const r = img.getBoundingClientRect();
+                const src = img.getAttribute('src') || '';
+                return (src.startsWith('blob:') || src.startsWith('data:image/')) && r.width > 72 && r.height > 72;
+              });
+              const editBtn = Boolean(
+                dlg.querySelector(
+                  '[aria-label="Editar"], [aria-label="Edit"], [aria-label*="Editar tudo" i], [aria-label*="Edit all" i], [aria-label*="Editar foto" i], [aria-label*="Edit photo" i]'
+                )
+              );
+              return imgs || editBtn;
             };
 
-            const fileInput = findImgFileInput();
-            if (fileInput) {
-              fileInput.files = dt.files;
-              fileInput.dispatchEvent(new Event('change', { bubbles: true }));
-              fileInput.dispatchEvent(new Event('input', { bubbles: true }));
-              return { attached: true, method: 'file_input' };
+            const findComposerFileInputs = () => {
+              const roots = [dlg, dlg.parentElement].filter(Boolean);
+              const collected = [];
+              for (const root of roots) {
+                const inps = Array.from(root.querySelectorAll('input[type="file"]')).filter(
+                  (inp) => !inp.closest('div[role="article"]')
+                );
+                for (const inp of inps) {
+                  if (!collected.includes(inp)) collected.push(inp);
+                }
+              }
+              return collected.sort((a, b) => {
+                const aScore = ((a.accept || '').includes('image') ? 2 : 0) + (a.multiple ? 2 : 0) + (dlg.contains(a) ? 3 : 0);
+                const bScore = ((b.accept || '').includes('image') ? 2 : 0) + (b.multiple ? 2 : 0) + (dlg.contains(b) ? 3 : 0);
+                return bScore - aScore;
+              });
+            };
+
+            const triggerReactFileInput = (inp) => {
+              try {
+                inp.files = dt.files;
+              } catch (e) {}
+              try {
+                inp.dispatchEvent(new Event('input', { bubbles: true }));
+                inp.dispatchEvent(new Event('change', { bubbles: true }));
+              } catch (e) {}
+              try {
+                const propsKey = Object.keys(inp).find((k) => k.startsWith('__reactProps$'));
+                if (propsKey && inp[propsKey] && typeof inp[propsKey].onChange === 'function') {
+                  inp[propsKey].onChange({
+                    target: inp,
+                    currentTarget: inp,
+                    preventDefault: () => {},
+                    stopPropagation: () => {}
+                  });
+                }
+              } catch (e) {}
+            };
+
+            let inputs = findComposerFileInputs();
+
+            // If Facebook hasn't mounted the photo dropzone <input type="file"> yet inside Criar Post,
+            // toggle the "Foto/vídeo" toolbar icon inside dlg (which opens the dropzone WITHOUT an OS file picker!).
+            if (inputs.length === 0) {
+              const photoBtn = Array.from(
+                dlg.querySelectorAll('div[role="button"], button')
+              ).find((el) => {
+                const r = el.getBoundingClientRect();
+                if (r.width === 0 || r.height === 0) return false;
+                const lbl = ((el.getAttribute('aria-label') || el.innerText || '') + '').trim().toLowerCase();
+                return (
+                  lbl.includes('foto/vídeo') ||
+                  lbl.includes('foto/video') ||
+                  lbl.includes('photo/video') ||
+                  lbl.includes('fotos/vídeos') ||
+                  lbl.includes('photos/videos') ||
+                  lbl.includes('adicionar fotos') ||
+                  lbl.includes('add photos')
+                );
+              });
+              if (photoBtn) {
+                try {
+                  photoBtn.click();
+                } catch (e) {}
+                await wait(450);
+                inputs = findComposerFileInputs();
+              }
             }
 
-            // Paste / Drop directly into Lexical textbox without opening OS file dialog!
+            for (const inp of inputs.slice(0, 2)) {
+              triggerReactFileInput(inp);
+              await wait(550);
+              if (hasPhotoPreviewNow()) {
+                return { attached: true, method: 'file_input_verified', previewDetected: true };
+              }
+            }
+
+            // Fallback: dispatch paste + drop directly onto dropzone and Lexical textbox
             const tb = dlg.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]');
-            if (tb) {
-              tb.focus();
+            const dropTargets = [
+              dlg.querySelector('[aria-label*="arraste" i], [aria-label*="drag" i], [aria-label*="Adicionar fotos" i], [aria-label*="Add photos" i]'),
+              tb,
+              dlg
+            ].filter(Boolean);
+
+            for (const target of dropTargets) {
               try {
-                tb.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+                if (target.focus) target.focus();
+                target.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+                target.dispatchEvent(new DragEvent('dragenter', { dataTransfer: dt, bubbles: true, cancelable: true }));
+                target.dispatchEvent(new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true }));
+                target.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
               } catch (e) {}
-              try {
-                tb.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
-              } catch (e) {}
-              return { attached: true, method: 'clipboard_drop' };
+              await wait(350);
+              if (hasPhotoPreviewNow()) {
+                return { attached: true, method: 'clipboard_drop_verified', previewDetected: true };
+              }
             }
 
-            return { attached: false, reason: 'no_target' };
+            return {
+              attached: inputs.length > 0 || Boolean(tb),
+              method: inputs.length > 0 ? 'file_input_unconfirmed' : 'clipboard_drop_unconfirmed',
+              previewDetected: hasPhotoPreviewNow()
+            };
           } catch (err) {
             return { attached: false, error: String(err) };
           }
@@ -1326,32 +1414,59 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             }) || dialogs[dialogs.length - 1];
             if (!dlg) return { dismissed: false, reason: 'no_dialog' };
 
-            const hasPhotoAttached = Array.from(dlg.querySelectorAll('img')).some((img) => {
+            const isRealAttachedPhotoImg = (img) => {
               const r = img.getBoundingClientRect();
               const src = img.getAttribute('src') || '';
-              return (src.startsWith('blob:') || src.startsWith('data:image/') || r.height > 90) && r.width > 90;
-            });
+              return (src.startsWith('blob:') || src.startsWith('data:image/')) && r.width > 72 && r.height > 72;
+            };
+
+            const hasPhotoAttached =
+              Array.from(dlg.querySelectorAll('img')).some(isRealAttachedPhotoImg) ||
+              Boolean(dlg.querySelector('[aria-label="Editar"], [aria-label="Edit"], [aria-label*="Editar tudo" i], [aria-label*="Edit all" i]'));
             if (!hasPhotoAttached) return { dismissed: false, reason: 'no_photo_attached' };
 
-            // Explicit Link Preview close/remove buttons in PT & EN Facebook
+            const boxContainsAttachedPhoto = (el) => {
+              if (!el) return false;
+              if (Array.from(el.querySelectorAll('img')).some(isRealAttachedPhotoImg)) return true;
+              return Boolean(el.querySelector('[aria-label="Editar"], [aria-label="Edit"], [aria-label*="Editar tudo" i], [aria-label*="Edit all" i]'));
+            };
+
+            // 1. Explicit Link Preview close/remove buttons in PT, EN, ES Facebook
             const explicitBtns = Array.from(
               dlg.querySelectorAll(
-                '[aria-label*="Remover prévia" i], [aria-label*="Remove link" i], [aria-label*="Fechar prévia" i], [aria-label*="Close preview" i], [aria-label*="Remove attachment" i], [aria-label*="Remover anexo" i]'
+                '[aria-label*="Remover prévia" i], [aria-label*="Remove link" i], [aria-label*="Fechar prévia" i], [aria-label*="Close preview" i], [aria-label*="Remove attachment" i], [aria-label*="Remover anexo" i], [aria-label*="Eliminar vista previa" i], [aria-label*="Quitar vista previa" i]'
               )
             );
             for (const btn of explicitBtns) {
               const r = btn.getBoundingClientRect();
               if (r.width === 0 || r.height === 0) continue;
-              // Never click a remove button sitting directly over an uploaded photo preview!
               const parentBox = btn.closest('div');
-              const boxHasBigImg = parentBox && Array.from(parentBox.querySelectorAll('img')).some((im) => {
-                const ir = im.getBoundingClientRect();
-                const src = im.getAttribute('src') || '';
-                return (src.startsWith('blob:') || src.startsWith('data:image/')) && ir.width > 100 && ir.height > 90;
-              });
-              if (boxHasBigImg) continue;
+              if (boxContainsAttachedPhoto(parentBox)) continue;
               btn.click();
               return { dismissed: true, method: 'explicit_aria' };
+            }
+
+            // 2. Fallback: find an external link preview card (contains domain like .com / .app / .br, ZERO blob/data photo inside)
+            const genericCloseBtns = Array.from(dlg.querySelectorAll('div[role="button"], button')).filter((btn) => {
+              const r = btn.getBoundingClientRect();
+              if (r.width === 0 || r.height === 0 || r.width > 48 || r.height > 48) return false;
+              const lbl = ((btn.getAttribute('aria-label') || '') + '').trim().toLowerCase();
+              return /^(remover|fechar|remove|close|dismiss|quitar|cerrar|excluir|delete)$/i.test(lbl);
+            });
+            for (const btn of genericCloseBtns) {
+              let card = btn.parentElement;
+              for (let depth = 0; depth < 5 && card && dlg.contains(card); depth++) {
+                if (boxContainsAttachedPhoto(card)) {
+                  card = null;
+                  break;
+                }
+                const cardText = (card.innerText || '').trim();
+                if (/\b[a-z0-9-]+\.(com|app|net|org|br|io|co|shop|store|site|online)\b/i.test(cardText) && cardText.length < 320) {
+                  btn.click();
+                  return { dismissed: true, method: 'link_card_domain_guard' };
+                }
+                card = card.parentElement;
+              }
             }
             return { dismissed: false, reason: 'no_preview_card' };
           } catch (err) {

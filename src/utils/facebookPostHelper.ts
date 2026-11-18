@@ -170,3 +170,54 @@ export async function copyImageToClipboardOrDownload(
     return 'none';
   }
 }
+
+const extensionImageDataUrlCache = new Map<string, string>();
+
+export async function resolveImageUrlToDataUrlForExtension(rawUrl: string): Promise<string> {
+  const trimmed = String(rawUrl || '').trim();
+  if (!trimmed) return '';
+  if (trimmed.startsWith('data:image/')) return trimmed;
+  if (extensionImageDataUrlCache.has(trimmed)) {
+    return extensionImageDataUrlCache.get(trimmed) || '';
+  }
+
+  const absoluteUrl =
+    trimmed.startsWith('/') && typeof window !== 'undefined'
+      ? `${window.location.origin}${trimmed}`
+      : trimmed;
+
+  try {
+    const resp = await fetch(absoluteUrl);
+    if (resp.ok) {
+      const blob = await resp.blob();
+      if (blob.type.startsWith('image/')) {
+        const dataUrl = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ''));
+          reader.onerror = () => resolve('');
+          reader.readAsDataURL(blob);
+        });
+        if (dataUrl.startsWith('data:image/')) {
+          extensionImageDataUrlCache.set(trimmed, dataUrl);
+          return dataUrl;
+        }
+      }
+    }
+  } catch {}
+
+  if (/^https?:\/\//i.test(absoluteUrl)) {
+    try {
+      const proxyResp = await fetch(`/api/proxy/image-base64?url=${encodeURIComponent(absoluteUrl)}`);
+      if (proxyResp.ok) {
+        const payload = await proxyResp.json();
+        if (payload?.ok && typeof payload.dataUrl === 'string' && payload.dataUrl.startsWith('data:image/')) {
+          extensionImageDataUrlCache.set(trimmed, payload.dataUrl);
+          return payload.dataUrl;
+        }
+      }
+    } catch {}
+  }
+
+  return absoluteUrl;
+}
+

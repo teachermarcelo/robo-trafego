@@ -2955,6 +2955,51 @@ app.get('/api/workspace/vault/:code', (req, res) => {
   }
 });
 
+app.get('/api/proxy/image-base64', async (req, res) => {
+  try {
+    const rawUrl = String(req.query.url || '').trim();
+    if (!rawUrl || !/^https?:\/\//i.test(rawUrl)) {
+      return res.status(400).json({ ok: false, error: 'URL inválida' });
+    }
+    const parsed = new URL(rawUrl);
+    const host = parsed.hostname.toLowerCase();
+    if (
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      host === '0.0.0.0' ||
+      host.startsWith('10.') ||
+      host.startsWith('192.168.') ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(host)
+    ) {
+      return res.status(403).json({ ok: false, error: 'Host não permitido' });
+    }
+    const upstream = await fetch(parsed.toString(), {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0.0.0 Safari/537.36',
+        Accept: 'image/*,*/*;q=0.8',
+      },
+    });
+    if (!upstream.ok) {
+      return res.status(502).json({ ok: false, error: `HTTP ${upstream.status}` });
+    }
+    const contentType = upstream.headers.get('content-type') || 'image/jpeg';
+    if (!contentType.startsWith('image/')) {
+      return res.status(415).json({ ok: false, error: 'Conteúdo não é imagem' });
+    }
+    const arrayBuf = await upstream.arrayBuffer();
+    if (arrayBuf.byteLength > 8 * 1024 * 1024) {
+      return res.status(413).json({ ok: false, error: 'Imagem excede 8MB' });
+    }
+    const b64 = Buffer.from(arrayBuf).toString('base64');
+    return res.json({
+      ok: true,
+      dataUrl: `data:${contentType.split(';')[0]};base64,${b64}`,
+    });
+  } catch (err: any) {
+    return res.status(502).json({ ok: false, error: err?.message || 'Erro ao carregar imagem' });
+  }
+});
+
 app.get('/api/health', (req, res) => {
   const ai = getGeminiClient();
   res.json({

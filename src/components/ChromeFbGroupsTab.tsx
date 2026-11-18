@@ -67,7 +67,8 @@ import {
   applySpinVariation,
   copyImageToClipboardOrDownload,
   getDisplayDomain,
-  resolveCampaignVisualImage
+  resolveCampaignVisualImage,
+  resolveImageUrlToDataUrlForExtension
 } from '../utils/facebookPostHelper';
 import {
   Campaign,
@@ -2386,7 +2387,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
   }, []);
 
   // Execute assisted Facebook group dispatch (NEVER fakes 'Postagem Feita' without real verification)
-  const handleExecuteGroupPost = () => {
+  const handleExecuteGroupPost = async () => {
     if (dailyDispatchesCompleted >= dailyDispatchLimit) {
       globalBotRunner.stop();
       setIsBotRunning(false);
@@ -2425,10 +2426,13 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
     const hasAnyUrl = /https?:\/\/[^\s]+/i.test(rawCombined);
     const fullText = hasAnyUrl ? `${rawCombined} ` : `${rawCombined}\n\n👉 Confira os detalhes completos:\n${brLandingUrl} `;
     const hasOwnOgLink = /(\/\?camp=|\/\?p=|\/z\/|\/api\/og)/i.test(fullText);
-    const brImageToSend =
+    const rawBrImg =
       brPostVisualMode === 'attached_photo' || !hasOwnOgLink
         ? resolveCampaignVisualImage(activeCampaign.imageUrl, activeCampaign.id)
         : '';
+    const brImageToSend = rawBrImg
+      ? await resolveImageUrlToDataUrlForExtension(rawBrImg)
+      : '';
 
     try {
       navigator.clipboard?.writeText(fullText);
@@ -2495,7 +2499,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
   };
 
   // Re-run auto-join check & auto-post on a previously join-requested/not_member group
-  const handleRetryJoinOrPost = (log: FacebookPostLog) => {
+  const handleRetryJoinOrPost = async (log: FacebookPostLog) => {
     const brLandingUrl = getCampaignLandingUrl(activeCampaign);
     const cleanHead = stripRobotMentionsFromPost(postHeadline);
     const cleanCopy = stripRobotMentionsFromPost(postCopy);
@@ -2503,10 +2507,13 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
     const hasAnyUrl = /https?:\/\/[^\s]+/i.test(rawCombined);
     const fullText = hasAnyUrl ? `${rawCombined} ` : `${rawCombined}\n\n👉 Confira os detalhes completos:\n${brLandingUrl} `;
     const hasOwnOgLink = /(\/\?camp=|\/\?p=|\/z\/|\/api\/og)/i.test(fullText);
-    const brImageToSend =
+    const rawBrImg =
       brPostVisualMode === 'attached_photo' || !hasOwnOgLink
         ? resolveCampaignVisualImage(activeCampaign.imageUrl, activeCampaign.id)
         : '';
+    const brImageToSend = rawBrImg
+      ? await resolveImageUrlToDataUrlForExtension(rawBrImg)
+      : '';
 
     try {
       navigator.clipboard?.writeText(fullText);

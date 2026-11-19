@@ -1,7 +1,7 @@
 // AutoViral AI Chrome Extension - Background Service Worker (Manifest V3)
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('[AutoViral AI] Extensão v1.5.7 instalada com sucesso!');
+  console.log('[AutoViral AI] Extensão v1.5.8 instalada com sucesso!');
   chrome.storage.local.get(['autoviral_interval', 'autoviral_mapped_groups', 'autoviral_waiting_approval_map'], (res) => {
     chrome.storage.local.set({
       autoviral_interval: res.autoviral_interval || 350,
@@ -2232,11 +2232,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         groupUrl: p.groupUrl || '',
         groupSlug: String(p.groupSlug || '').toLowerCase(),
         groupName: p.groupName || '',
+        postSnippet: String(request.postSnippet || '').toLowerCase().trim(),
         didAutoClickPublish: Boolean(request.didAutoClickPublish),
         userClickedPublish: Boolean(request.userClickedPublish),
+        sawFilledComposer: Boolean(request.sawFilledComposer || request.didAutoClickPublish),
         autoCloseOnFinish: request.autoCloseOnFinish !== false,
         sawDialogOpen: true,
         closedStreak: 0,
+        clearedStreak: 0,
         retriedClick: false,
         inFlight: false,
         startedAt: Date.now()
@@ -2355,7 +2358,8 @@ async function pollSingleBgPostWatch(tabId, job) {
         {
           target: { tabId },
           world: 'MAIN',
-          func: () => {
+          args: [job.postSnippet || ''],
+          func: (snippet) => {
             try {
               const allDialogs = Array.from(document.querySelectorAll('div[role="dialog"]'));
               const dialogTxt = allDialogs.map((d) => (d.innerText || '')).join(' ').toLowerCase();
@@ -2387,6 +2391,12 @@ async function pollSingleBgPostWatch(tabId, job) {
                 hay.includes('thanks for your post') ||
                 hay.includes('your post has been submitted');
 
+              const isComposerTextbox = (tb) => {
+                if (!tb) return false;
+                const lbl = ((tb.getAttribute('aria-label') || tb.getAttribute('aria-placeholder') || tb.getAttribute('placeholder') || '') + '').toLowerCase();
+                return !lbl.includes('coment') && !lbl.includes('comment') && !lbl.includes('responder') && !lbl.includes('reply') && !lbl.includes('pesquis') && !lbl.includes('search') && !lbl.includes('buscar');
+              };
+
               const activeDialog = allDialogs.find((d) => {
                 const r = d.getBoundingClientRect();
                 if (r.width < 200 || r.height < 150) return false;
@@ -2398,17 +2408,62 @@ async function pollSingleBgPostWatch(tabId, job) {
                   if (!isNaN(op) && op < 0.35) return false;
                 } catch (e) {}
                 const txt = (d.innerText || '').toLowerCase();
-                return (
-                  Boolean(d.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]')) ||
+                const aria = (d.getAttribute('aria-label') || '').toLowerCase();
+                const hasComposerTitle =
                   txt.includes('criar post') ||
                   txt.includes('create post') ||
                   txt.includes('criar publicação') ||
-                  txt.includes('crie um post público')
-                );
+                  txt.includes('crear publicación') ||
+                  txt.includes('crear publicacion') ||
+                  txt.includes('create a public post') ||
+                  txt.includes('crie um post público') ||
+                  txt.includes('publicação anônima') ||
+                  txt.includes('publicación anónima') ||
+                  txt.includes('anonymous post') ||
+                  aria.includes('criar post') ||
+                  aria.includes('create post');
+                const hasPubBtn = Array.from(d.querySelectorAll('div[role="button"], button')).some((b) => {
+                  const bt = ((b.innerText || b.getAttribute('aria-label') || '') + '').trim().toLowerCase();
+                  return bt === 'postar' || bt === 'publicar' || bt === 'post';
+                });
+                const isPostViewer =
+                  !hasComposerTitle &&
+                  !hasPubBtn &&
+                  (/^(post de |publicação de |publicación de |post by )/i.test(txt.trim()) ||
+                    /^(post de |publicação de |publicación de |post by )/i.test(aria.trim()));
+                if (isPostViewer) return false;
+                const tbs = Array.from(d.querySelectorAll('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]'));
+                return tbs.some(isComposerTextbox) || hasComposerTitle || hasPubBtn;
               });
 
               let hasEnabledPubBtn = false;
+              let tbTextLen = 0;
+              let hasPhotoInDialog = false;
+              let hasDialogError = false;
               if (activeDialog) {
+                const dlgTxt = (activeDialog.innerText || '').toLowerCase();
+                hasDialogError =
+                  dlgTxt.includes('ocorreu um erro') ||
+                  dlgTxt.includes('não foi possível publicar') ||
+                  dlgTxt.includes('erro ao publicar') ||
+                  dlgTxt.includes("couldn't share") ||
+                  dlgTxt.includes('could not share') ||
+                  dlgTxt.includes('error posting') ||
+                  dlgTxt.includes('something went wrong') ||
+                  dlgTxt.includes('algo deu errado');
+                const composerTb = Array.from(
+                  activeDialog.querySelectorAll('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]')
+                ).find(isComposerTextbox);
+                if (composerTb) {
+                  tbTextLen = (composerTb.innerText || composerTb.textContent || '').replace(/[\u200B-\u200D\uFEFF]/g, '').trim().length;
+                }
+                hasPhotoInDialog =
+                  Array.from(activeDialog.querySelectorAll('img')).some((img) => {
+                    const ir = img.getBoundingClientRect();
+                    const src = img.getAttribute('src') || '';
+                    return (src.startsWith('blob:') || src.startsWith('data:image/') || src.includes('scontent') || src.includes('fbcdn')) && ir.width > 72 && ir.height > 72;
+                  }) ||
+                  Boolean(activeDialog.querySelector('[aria-label="Editar"], [aria-label="Edit"], [aria-label*="Editar tudo" i], [aria-label*="Edit all" i]'));
                 const btns = Array.from(activeDialog.querySelectorAll('div[role="button"], button'));
                 hasEnabledPubBtn = btns.some((el) => {
                   const br = el.getBoundingClientRect();
@@ -2419,12 +2474,46 @@ async function pollSingleBgPostWatch(tabId, job) {
                 });
               }
 
+              const isComposerNowEmpty = Boolean(activeDialog) && !hasDialogError && tbTextLen <= 2 && !hasPhotoInDialog && !hasEnabledPubBtn;
+
+              const hasToastPublished =
+                hay.includes('sua publicação foi compartilhada') ||
+                hay.includes('sua publicação foi publicada') ||
+                hay.includes('seu post foi publicado') ||
+                hay.includes('publicação compartilhada') ||
+                hay.includes('your post has been shared') ||
+                hay.includes('your post was shared') ||
+                hay.includes('your post is now published') ||
+                hay.includes('tu publicación se compartió') ||
+                hay.includes('se compartió tu publicación');
+
+              let hasFeedOrPostModalMatch = false;
+              if (snippet && snippet.length >= 14) {
+                const normSnippet = snippet.replace(/\s+/g, ' ').trim();
+                const postViewerMatch = allDialogs.some((d) => {
+                  if (d === activeDialog) return false;
+                  const txt = (d.innerText || '').toLowerCase().replace(/\s+/g, ' ');
+                  return txt.includes(normSnippet);
+                });
+                const feedMatch = Array.from(document.querySelectorAll('div[role="article"]')).some((art) => {
+                  if (activeDialog && activeDialog.contains(art)) return false;
+                  const txt = (art.innerText || '').toLowerCase().replace(/\s+/g, ' ');
+                  return txt.includes(normSnippet);
+                });
+                hasFeedOrPostModalMatch = postViewerMatch || feedMatch;
+              }
+
               return {
                 ok: true,
                 isRateLimited,
                 isAwaitingAdmin,
                 hasDialog: Boolean(activeDialog),
                 hasEnabledPubBtn,
+                tbTextLen,
+                hasPhotoInDialog,
+                hasDialogError,
+                isComposerNowEmpty,
+                hasPublishedToastOrFeed: hasToastPublished || hasFeedOrPostModalMatch,
                 userClickedFlag: Boolean(window.__avUserClickedPublish),
                 url: window.location.href
               };
@@ -2470,14 +2559,74 @@ async function pollSingleBgPostWatch(tabId, job) {
         timestamp: new Date().toISOString()
       });
       if (job.autoCloseOnFinish !== false && !cancelledBgCloseTabs.has(tabId)) {
-        closeGroupTabSafely(tabId, 2600);
+        closeGroupTabSafely(tabId, 2000);
       }
+      return;
+    }
+
+    const didInitiatePublish = Boolean(job.didAutoClickPublish || job.userClickedPublish || probe.userClickedFlag);
+    const finalizePublishedAndClose = (dismissDialog) => {
+      markBgPostFinalized(tabId, job.logId, job.groupSlug);
+      clearPendingPostFromStorage(job.groupSlug);
+      if (dismissDialog) {
+        try {
+          chrome.scripting.executeScript(
+            {
+              target: { tabId },
+              world: 'MAIN',
+              func: () => {
+                try {
+                  const dlgs = Array.from(document.querySelectorAll('div[role="dialog"]'));
+                  for (const dlg of dlgs) {
+                    const scope = dlg.parentElement || dlg;
+                    const closeBtn = scope.querySelector('div[role="button"][aria-label="Fechar"], div[role="button"][aria-label="Close"], button[aria-label="Fechar"], button[aria-label="Close"]');
+                    if (closeBtn) { closeBtn.click(); break; }
+                  }
+                } catch (e) {}
+              }
+            },
+            () => { void chrome.runtime.lastError; }
+          );
+        } catch (e) {}
+      }
+      relayToAutoViralTabs({
+        action: 'AUTOVIRAL_FB_POST_RESULT',
+        logId: job.logId,
+        groupId: job.groupId,
+        groupUrl: probe.url || job.groupUrl,
+        groupName: job.groupName,
+        approvalStatus: 'published',
+        timestamp: new Date().toISOString()
+      });
+      if (job.autoCloseOnFinish !== false && !cancelledBgCloseTabs.has(tabId)) {
+        closeGroupTabSafely(tabId, 1600);
+      }
+    };
+
+    if (probe.hasPublishedToastOrFeed && didInitiatePublish && Date.now() - job.startedAt >= 1200) {
+      finalizePublishedAndClose(probe.hasDialog);
       return;
     }
 
     if (probe.hasDialog) {
       job.sawDialogOpen = true;
       job.closedStreak = 0;
+      if (probe.tbTextLen >= 8 || probe.hasPhotoInDialog || probe.hasEnabledPubBtn) {
+        job.sawFilledComposer = true;
+        job.clearedStreak = 0;
+      } else if (
+        probe.isComposerNowEmpty &&
+        job.sawFilledComposer &&
+        didInitiatePublish &&
+        Date.now() - job.startedAt >= 1800
+      ) {
+        job.clearedStreak = (job.clearedStreak || 0) + 1;
+        if (job.clearedStreak >= 2) {
+          finalizePublishedAndClose(true);
+          return;
+        }
+      }
+
       if (job.didAutoClickPublish && probe.hasEnabledPubBtn && !job.retriedClick && Date.now() - job.startedAt > 3500) {
         job.retriedClick = true;
         // Retry click using trusted Chrome Debugger mouse event
@@ -2525,23 +2674,11 @@ async function pollSingleBgPostWatch(tabId, job) {
       return;
     }
 
-    if (job.sawDialogOpen && (job.didAutoClickPublish || job.userClickedPublish || probe.userClickedFlag)) {
+    job.clearedStreak = 0;
+    if (job.sawDialogOpen && didInitiatePublish) {
       job.closedStreak = (job.closedStreak || 0) + 1;
       if (job.closedStreak >= 2) {
-        markBgPostFinalized(tabId, job.logId, job.groupSlug);
-        clearPendingPostFromStorage(job.groupSlug);
-        relayToAutoViralTabs({
-          action: 'AUTOVIRAL_FB_POST_RESULT',
-          logId: job.logId,
-          groupId: job.groupId,
-          groupUrl: probe.url || job.groupUrl,
-          groupName: job.groupName,
-          approvalStatus: 'published',
-          timestamp: new Date().toISOString()
-        });
-        if (job.autoCloseOnFinish !== false && !cancelledBgCloseTabs.has(tabId)) {
-          closeGroupTabSafely(tabId, 2400);
-        }
+        finalizePublishedAndClose(false);
       }
     }
   } finally {

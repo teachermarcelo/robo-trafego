@@ -1,4 +1,4 @@
-// AutoViral AI Chrome Extension - Content Script V1.5.7
+// AutoViral AI Chrome Extension - Content Script V1.5.8
 // Runs on Facebook, YouTube, Instagram, Pinterest and AutoViral AI Web Platform
 
 (function () {
@@ -1209,6 +1209,12 @@
       });
     }
 
+    function isComposerTextboxElement(tb) {
+      if (!tb) return false;
+      const label = ((tb.getAttribute('aria-label') || tb.getAttribute('aria-placeholder') || tb.getAttribute('placeholder') || '') + '').toLowerCase();
+      return !label.includes('coment') && !label.includes('comment') && !label.includes('responder') && !label.includes('reply') && !label.includes('pesquis') && !label.includes('search') && !label.includes('buscar');
+    }
+
     function findCreatePostDialog() {
       const allDialogs = Array.from(document.querySelectorAll('div[role="dialog"]'));
       const scored = [];
@@ -1223,7 +1229,8 @@
           if (!isNaN(op) && op < 0.35) return;
         } catch (e) {}
 
-        const tb = d.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]');
+        const tbs = Array.from(d.querySelectorAll('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]'));
+        const tb = tbs.find(isComposerTextboxElement) || null;
         const txt = (d.innerText || '').toLowerCase();
         const aria = (d.getAttribute('aria-label') || '').toLowerCase();
         const isComposerTitle =
@@ -1244,6 +1251,12 @@
           const bt = ((b.innerText || b.getAttribute('aria-label') || '') + '').trim().toLowerCase();
           return bt === 'postar' || bt === 'publicar' || bt === 'post';
         });
+        const isPostViewer =
+          !isComposerTitle &&
+          !hasPublishBtn &&
+          (/^(post de |publicação de |publicación de |post by )/i.test(txt.trim()) ||
+            /^(post de |publicação de |publicación de |post by )/i.test(aria.trim()));
+        if (isPostViewer) return;
         if (!tb && !isComposerTitle && !hasPublishBtn) return;
 
         let score = idx * 100 + (tb ? 500 : 0) + (hasPublishBtn ? 200 : 0);
@@ -1508,6 +1521,17 @@
       }
     }
 
+    function extractPostMatchSnippet(fullText) {
+      if (!fullText) return '';
+      const lines = String(fullText)
+        .split(/\r?\n/)
+        .map((l) => l.replace(/https?:\/\/\S+/gi, '').replace(/[\u200B-\u200D\uFEFF]/g, '').replace(/\s+/g, ' ').trim())
+        .filter((l) => l.length >= 16);
+      const best = lines.find((l) => !/^[^a-zA-Z0-9À-ÿ]{3,}$/.test(l)) || lines[0] || '';
+      const alphaTrimmed = best.replace(/^[^a-zA-Z0-9À-ÿ]+/, '').trim();
+      return (alphaTrimmed || best).slice(0, 38).toLowerCase().trim();
+    }
+
     function startSubmissionMonitor(pending, currentSlug, msgEl, didAutoClickPublish, cancelAutoBtn) {
       let finished = false;
       const startedAt = Date.now();
@@ -1515,7 +1539,10 @@
       let retriedThirdPublish = false;
       let userClickedPublish = !!didAutoClickPublish;
       let sawDialogOpen = !!didAutoClickPublish || !!findCreatePostDialog();
+      let sawFilledComposer = !!didAutoClickPublish;
       let dialogClosedStreak = 0;
+      let composerClearedStreak = 0;
+      const postSnippet = extractPostMatchSnippet(pending && pending.fullText);
 
       const registerBgWatch = (clickedByUser) => {
         if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
@@ -1529,8 +1556,10 @@
                 groupSlug: currentSlug,
                 groupName: pending.groupName
               },
+              postSnippet,
               didAutoClickPublish: Boolean(didAutoClickPublish),
               userClickedPublish: Boolean(clickedByUser || userClickedPublish),
+              sawFilledComposer: Boolean(sawFilledComposer || clickedByUser || didAutoClickPublish),
               autoCloseOnFinish: pending.autoJoinAndPost !== false
             },
             () => { void chrome.runtime.lastError; }
@@ -1548,6 +1577,32 @@
 
       registerBgWatch(userClickedPublish);
 
+      const finalizePublishedNow = (lingeringDlg, customLabel) => {
+        if (finished) return;
+        finished = true;
+        clearInterval(checkInterval);
+        unregisterBgWatch();
+        if (lingeringDlg) {
+          closeStuckCreatePostDialog(lingeringDlg);
+        }
+        sendRealPostResultToPlatform({
+          logId: pending.logId,
+          groupId: pending.groupId,
+          groupUrl: window.location.href,
+          groupName: pending.groupName,
+          approvalStatus: 'published'
+        });
+        clearStoredPendingGroupPost(currentSlug);
+        if (msgEl) {
+          msgEl.style.color = '#34d399';
+        }
+        if (pending.autoJoinAndPost !== false) {
+          scheduleAutoCloseTab(msgEl, cancelAutoBtn, customLabel || '✅ POSTAGEM FEITA confirmada no Painel!', 2);
+        } else if (msgEl) {
+          msgEl.textContent = '✅ Publicação enviada e confirmada como POSTAGEM FEITA! Já pode fechar esta aba.';
+        }
+      };
+
       const attachPublishClickListener = () => {
         if (userClickedPublish) return;
         const dlg = findCreatePostDialog();
@@ -1560,6 +1615,7 @@
             btn.dataset.avHooked = '1';
             btn.addEventListener('click', () => {
               userClickedPublish = true;
+              sawFilledComposer = true;
               try { window.__avUserClickedPublish = true; } catch (e) {}
               registerBgWatch(true);
               if (msgEl) {
@@ -1627,7 +1683,7 @@
             msgEl.style.color = '#fbbf24';
           }
           if (pending.autoJoinAndPost !== false) {
-            scheduleAutoCloseTab(msgEl, cancelAutoBtn, '⏳ Enviada p/ Aprovação do Admin e registrada!', 3);
+            scheduleAutoCloseTab(msgEl, cancelAutoBtn, '⏳ Enviada p/ Aprovação do Admin e registrada!', 2);
           } else if (msgEl) {
             msgEl.textContent = '⏳ Aprovação Pendente do Admin registrada! Já pode fechar esta aba.';
           }
@@ -1635,57 +1691,108 @@
         }
 
         const activeDialog = findCreatePostDialog();
+
+        // Check toast or visible published post in group feed / "Post de ..." dialog
+        if (userClickedPublish && elapsedMs >= 1200) {
+          const hasToastPub =
+            bodyTxt.includes('sua publicação foi compartilhada') ||
+            bodyTxt.includes('sua publicação foi publicada') ||
+            bodyTxt.includes('seu post foi publicado') ||
+            bodyTxt.includes('publicação compartilhada') ||
+            bodyTxt.includes('your post has been shared') ||
+            bodyTxt.includes('your post was shared') ||
+            bodyTxt.includes('your post is now published') ||
+            bodyTxt.includes('tu publicación se compartió');
+          let hasFeedMatch = false;
+          if (!hasToastPub && postSnippet && postSnippet.length >= 14) {
+            const normSnippet = postSnippet.replace(/\s+/g, ' ').trim();
+            const viewerDlgMatch = Array.from(document.querySelectorAll('div[role="dialog"]')).some((d) => {
+              if (d === activeDialog) return false;
+              const dt = (d.innerText || '').toLowerCase().replace(/\s+/g, ' ');
+              return dt.includes(normSnippet);
+            });
+            const feedArtMatch = Array.from(document.querySelectorAll('div[role="article"]')).some((art) => {
+              if (activeDialog && activeDialog.contains(art)) return false;
+              const at = (art.innerText || '').toLowerCase().replace(/\s+/g, ' ');
+              return at.includes(normSnippet);
+            });
+            hasFeedMatch = viewerDlgMatch || feedArtMatch;
+          }
+          if (hasToastPub || hasFeedMatch) {
+            finalizePublishedNow(activeDialog, '✅ POSTAGEM FEITA confirmada no Facebook!');
+            return;
+          }
+        }
+
         if (activeDialog) {
           sawDialogOpen = true;
           dialogClosedStreak = 0;
-          if (didAutoClickPublish && elapsedMs >= 3500 && !retriedRealPublish) {
+
+          const dlgTxt = (activeDialog.innerText || '').toLowerCase();
+          const hasDialogError =
+            dlgTxt.includes('ocorreu um erro') ||
+            dlgTxt.includes('não foi possível publicar') ||
+            dlgTxt.includes('erro ao publicar') ||
+            dlgTxt.includes("couldn't share") ||
+            dlgTxt.includes('could not share') ||
+            dlgTxt.includes('error posting') ||
+            dlgTxt.includes('something went wrong') ||
+            dlgTxt.includes('algo deu errado');
+          const tbInDlg = findCreatePostTextbox(activeDialog);
+          const tbTextLen = tbInDlg
+            ? (tbInDlg.innerText || tbInDlg.textContent || '').replace(/[\u200B-\u200D\uFEFF]/g, '').trim().length
+            : 0;
+          const hasPhotoNow = hasAttachedPhotoInComposerDialog(activeDialog);
+          const stillEnabledPub = findPublishButtonInDialog(activeDialog);
+
+          if (tbTextLen >= 8 || hasPhotoNow || stillEnabledPub) {
+            sawFilledComposer = true;
+            composerClearedStreak = 0;
+          } else if (
+            userClickedPublish &&
+            sawFilledComposer &&
+            !hasDialogError &&
+            tbTextLen <= 2 &&
+            !hasPhotoNow &&
+            !stillEnabledPub &&
+            elapsedMs >= 1800
+          ) {
+            composerClearedStreak++;
+            if (composerClearedStreak >= 2) {
+              finalizePublishedNow(activeDialog, '✅ POSTAGEM FEITA confirmada!');
+              return;
+            }
+          }
+
+          if (didAutoClickPublish && stillEnabledPub && elapsedMs >= 3500 && !retriedRealPublish) {
             retriedRealPublish = true;
-            const stillEnabledPub = findPublishButtonInDialog(activeDialog);
-            if (stillEnabledPub && chrome && chrome.runtime && chrome.runtime.sendMessage) {
+            if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
               chrome.runtime.sendMessage({ action: 'AUTOVIRAL_REAL_CLICK_PUBLISH' }, () => {
                 void chrome.runtime.lastError;
               });
             }
-          } else if (didAutoClickPublish && elapsedMs >= 9000 && !retriedThirdPublish) {
+          } else if (didAutoClickPublish && stillEnabledPub && elapsedMs >= 9000 && !retriedThirdPublish) {
             retriedThirdPublish = true;
-            const stillEnabledPub = findPublishButtonInDialog(activeDialog);
-            if (stillEnabledPub) {
-              if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
-                chrome.runtime.sendMessage({ action: 'AUTOVIRAL_MAIN_CLICK_PUBLISH' }, () => {
-                  void chrome.runtime.lastError;
-                });
-              }
-              try {
-                stillEnabledPub.focus();
-                stillEnabledPub.click();
-              } catch (e) {}
+            if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
+              chrome.runtime.sendMessage({ action: 'AUTOVIRAL_MAIN_CLICK_PUBLISH' }, () => {
+                void chrome.runtime.lastError;
+              });
             }
+            try {
+              stillEnabledPub.focus();
+              stillEnabledPub.click();
+            } catch (e) {}
           }
-        } else if (sawDialogOpen || userClickedPublish) {
-          dialogClosedStreak++;
+        } else {
+          composerClearedStreak = 0;
+          if (sawDialogOpen || userClickedPublish) {
+            dialogClosedStreak++;
+          }
         }
 
         if (dialogClosedStreak >= 2) {
           if (userClickedPublish) {
-            finished = true;
-            clearInterval(checkInterval);
-            unregisterBgWatch();
-            sendRealPostResultToPlatform({
-              logId: pending.logId,
-              groupId: pending.groupId,
-              groupUrl: window.location.href,
-              groupName: pending.groupName,
-              approvalStatus: 'published'
-            });
-            clearStoredPendingGroupPost(currentSlug);
-            if (msgEl) {
-              msgEl.style.color = '#34d399';
-            }
-            if (pending.autoJoinAndPost !== false) {
-              scheduleAutoCloseTab(msgEl, cancelAutoBtn, '✅ POSTAGEM FEITA confirmada no Painel!', 3);
-            } else if (msgEl) {
-              msgEl.textContent = '✅ Publicação enviada e confirmada como POSTAGEM FEITA! Já pode fechar esta aba.';
-            }
+            finalizePublishedNow(null, '✅ POSTAGEM FEITA confirmada no Painel!');
             return;
           } else if (sawDialogOpen && elapsedMs >= 4000) {
             finished = true;
@@ -2114,7 +2221,7 @@
                   groupUrl: window.location.href,
                   groupName: pending.groupName,
                   approvalStatus: 'composer_stuck',
-                  note: 'Facebook travou o modal automático (Atualize p/ Extensão v1.5.7 ou pause AdBlock). Texto copiado.'
+                  note: 'Facebook travou o modal automático (Atualize p/ Extensão v1.5.8 ou pause AdBlock). Texto copiado.'
                 });
                 if (msgEl) {
                   msgEl.style.color = '#fbbf24';

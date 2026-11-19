@@ -1,4 +1,4 @@
-// AutoViral AI Chrome Extension - Content Script V1.5.8
+// AutoViral AI Chrome Extension - Content Script V1.5.9
 // Runs on Facebook, YouTube, Instagram, Pinterest and AutoViral AI Web Platform
 
 (function () {
@@ -829,31 +829,39 @@
 
     function isFacebookRateLimited() {
       try {
-        const dialogs = Array.from(document.querySelectorAll('div[role="dialog"]'));
-        const dialogText = dialogs.map((d) => (d.innerText || '')).join(' ').toLowerCase();
+        const dialogs = Array.from(document.querySelectorAll('div[role="dialog"], [role="alert"], [role="alertdialog"]'));
+        const modalAlertText = dialogs.map((d) => (d.innerText || '')).join(' ').toLowerCase();
         const bodyText = (document.body ? document.body.innerText : '').toLowerCase();
-        const haystack = dialogText + ' ' + bodyText;
-        return (
-          haystack.includes('você não pode usar este recurso no momento') ||
-          haystack.includes('voce nao pode usar este recurso no momento') ||
-          haystack.includes('você está temporariamente bloqueado') ||
-          haystack.includes('voce esta temporariamente bloqueado') ||
-          haystack.includes('você foi bloqueado') ||
-          haystack.includes('limitamos a frequência') ||
-          haystack.includes('limitamos a frequencia') ||
-          haystack.includes('no puedes usar esta función') ||
-          haystack.includes('no puedes usar esta funcion') ||
-          haystack.includes('bloqueado temporalmente') ||
-          haystack.includes("you can't use this feature right now") ||
-          haystack.includes("you're temporarily blocked") ||
-          haystack.includes('you are temporarily blocked') ||
-          haystack.includes('we limit how often you can post') ||
-          haystack.includes('ação bloqueada') ||
-          haystack.includes('action blocked') ||
-          haystack.includes('temporarily blocked') ||
-          haystack.includes('tente novamente mais tarde') ||
-          haystack.includes('try again later')
-        );
+        const strictHaystack = modalAlertText + ' ' + bodyText;
+
+        const hasExplicitBlock =
+          strictHaystack.includes('você não pode usar este recurso no momento') ||
+          strictHaystack.includes('voce nao pode usar este recurso no momento') ||
+          strictHaystack.includes('você está temporariamente bloqueado') ||
+          strictHaystack.includes('voce esta temporariamente bloqueado') ||
+          strictHaystack.includes('você foi bloqueado') ||
+          strictHaystack.includes('limitamos a frequência') ||
+          strictHaystack.includes('limitamos a frequencia') ||
+          strictHaystack.includes('no puedes usar esta función') ||
+          strictHaystack.includes('no puedes usar esta funcion') ||
+          strictHaystack.includes('bloqueado temporalmente') ||
+          strictHaystack.includes("you can't use this feature right now") ||
+          strictHaystack.includes("you're temporarily blocked") ||
+          strictHaystack.includes('you are temporarily blocked') ||
+          strictHaystack.includes('we limit how often you can post') ||
+          strictHaystack.includes('ação bloqueada') ||
+          strictHaystack.includes('action blocked') ||
+          strictHaystack.includes('temporarily blocked');
+
+        // Generic "try again later" / "tente novamente mais tarde" must ONLY match inside
+        // actual Facebook dialogs/alerts (never random feed posts!) so we never trigger false Limite Temp. FB
+        const hasModalTempError =
+          modalAlertText.includes('tente novamente mais tarde') ||
+          modalAlertText.includes('try again later') ||
+          modalAlertText.includes('ocorreu um erro ao postar') ||
+          modalAlertText.includes('there was an error posting');
+
+        return hasExplicitBlock || hasModalTempError;
       } catch (e) {}
       return false;
     }
@@ -1646,7 +1654,7 @@
             note: 'Facebook exibiu: Você não pode usar este recurso no momento'
           });
           if (msgEl) {
-            msgEl.textContent = '🛡️ FREIO ANTI-BLOQUEIO: Facebook limitou ações agora! Robô pausado — aguarde 15–30 min antes de continuar.';
+            msgEl.textContent = '🛡️ FREIO ANTI-BLOQUEIO: Facebook limitou ações agora! Painel pausado (máx. 1h) — voltará ao normal automaticamente.';
             msgEl.style.color = '#fb7185';
           }
           return;
@@ -2221,7 +2229,7 @@
                   groupUrl: window.location.href,
                   groupName: pending.groupName,
                   approvalStatus: 'composer_stuck',
-                  note: 'Facebook travou o modal automático (Atualize p/ Extensão v1.5.8 ou pause AdBlock). Texto copiado.'
+                  note: 'Facebook travou o modal automático (Atualize p/ Extensão v1.5.9 ou pause AdBlock). Texto copiado.'
                 });
                 if (msgEl) {
                   msgEl.style.color = '#fbbf24';
@@ -2356,7 +2364,7 @@
               }
             }
             if (msgEl) {
-              msgEl.textContent = '🛡️ FREIO ANTI-BLOQUEIO: Facebook limitou temporariamente ("Você não pode usar este recurso no momento"). Painel pausado — aguarde 15–30 min!';
+              msgEl.textContent = '🛡️ FREIO ANTI-BLOQUEIO: Facebook limitou temporariamente. Painel pausado (máx. 1h) e retomará automaticamente!';
               msgEl.style.color = '#fb7185';
             }
             return;
@@ -2429,7 +2437,7 @@
                   }
                 }
                 if (msgEl) {
-                  msgEl.textContent = '🛡️ FREIO ANTI-BLOQUEIO: Facebook exibiu "Você não pode usar este recurso no momento". Robô pausado para proteger sua conta — aguarde 15–30 min!';
+                  msgEl.textContent = '🛡️ FREIO ANTI-BLOQUEIO: Facebook limitou temporariamente. Robô pausado (máx. 1h) e voltará ao normal sozinho!';
                   msgEl.style.color = '#fb7185';
                 }
                 return;

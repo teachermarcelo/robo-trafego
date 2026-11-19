@@ -1478,11 +1478,45 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
 
   // Bot Running Engine & Countdown
   const [isBotRunning, setIsBotRunning] = useState<boolean>(() => globalBotRunner.getIsRunning());
+  const [isInCooldown, setIsInCooldown] = useState<boolean>(() => globalBotRunner.getIsInCooldown());
+  const [cooldownRemainingSeconds, setCooldownRemainingSeconds] = useState<number>(() =>
+    globalBotRunner.getCooldownRemainingSeconds()
+  );
+  const [cooldownMaxMinutes, setCooldownMaxMinutes] = useState<number>(() =>
+    globalBotRunner.getCooldownMaxMinutes()
+  );
   const [currentPostingIndex, setCurrentPostingIndex] = useState<number>(0);
   const [secondsRemaining, setSecondsRemaining] = useState<number>(() => {
     const rem = globalBotRunner.getRemainingSeconds();
     return rem > 0 ? rem : 350;
   });
+
+  const formatBrCooldownClock = (totalSeconds: number) => {
+    const clamped = Math.max(0, Math.floor(totalSeconds));
+    const mins = Math.floor(clamped / 60);
+    const secs = clamped % 60;
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  };
+
+  const releaseBrazilRateLimitedGroups = (customNote?: string): number => {
+    let releasedCount = 0;
+    const checkedNow = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    setMappedGroups((prev) =>
+      prev.map((g) => {
+        if (g.membershipStatus === 'rate_limited') {
+          releasedCount += 1;
+          return {
+            ...g,
+            membershipStatus: 'authorized',
+            membershipCheckedAt: checkedNow,
+            membershipNote: customNote || 'Liberado automaticamente após pausa de segurança (≤1h)',
+          };
+        }
+        return g;
+      })
+    );
+    return releasedCount;
+  };
 
   const [botLogs, setBotLogs] = useState<FacebookPostLog[]>(() => {
     try {
@@ -1909,7 +1943,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
     return () => clearTimeout(timer);
   }, [savedCopiesMap, customCopyPresets, audiences, youtubeVideos, pinterestPins, mappedGroups]);
 
-  // Hook into Persistent Background Bot Runner
+  // Hook into Persistent Background Bot Runner (including max 1h cooldown & auto-resume)
   useEffect(() => {
     globalBotRunner.setCallbacks(
       () => {
@@ -1920,11 +1954,36 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
         if (isExec) {
           // Handled inside handleExecuteGroupPost
         }
+      },
+      (cooldownRemSecs, inCooldown, reason) => {
+        setCooldownRemainingSeconds(cooldownRemSecs);
+        setIsInCooldown(inCooldown);
+        if (inCooldown) {
+          setIsBotRunning(false);
+          if (reason) setDefenseTriggerReason(reason);
+        }
+      },
+      () => {
+        setIsDefenseModalOpen(false);
+        setDefenseTriggerReason('');
+        setIsInCooldown(false);
+        setCooldownRemainingSeconds(0);
+        const released = releaseBrazilRateLimitedGroups('Liberado automaticamente após pausa de 1h');
+        setIsBotRunning(true);
+        setExtensionSyncBanner({
+          message:
+            released > 0
+              ? `✅ Pausa de segurança concluída! ${released} grupo(s) saíram do "Limite Temp. FB" e o Robô Brasil voltou ao normal automaticamente.`
+              : '✅ Pausa de segurança concluída! Robô Brasil retomado automaticamente ao normal.',
+          tone: 'success'
+        });
       }
     );
 
-    // Initial check
+    // Initial sync with persistent background worker
     setIsBotRunning(globalBotRunner.getIsRunning());
+    setIsInCooldown(globalBotRunner.getIsInCooldown());
+    setCooldownRemainingSeconds(globalBotRunner.getCooldownRemainingSeconds());
   }, [currentPostingIndex, selectedGroupIds, mappedGroups, dailyDispatchesCompleted, dailyDispatchLimit]);
 
   useEffect(() => {
@@ -1932,6 +1991,8 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       const customEv = ev as CustomEvent<{ origin?: string }>;
       if (customEv.detail?.origin === 'global') {
         setIsBotRunning(false);
+        setIsInCooldown(false);
+        setCooldownRemainingSeconds(0);
         setExtensionSyncBanner({
           message: '⏸️ Robô Brasil pausado automaticamente porque o Robô Global foi iniciado (proteção anti-bloqueio).',
           tone: 'warning'
@@ -2298,18 +2359,28 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
           tone: 'warning'
         });
       } else if (normalizedStatus === 'rate_limited') {
-        globalBotRunner.stop();
-        setIsBotRunning(false);
+        const cooldownReason =
+          'Facebook exibiu limite temporário de ações — pausa automática de no máximo ' +
+          cooldownMaxMinutes +
+          ' min (volta ao normal sozinho)';
         if (brBatchJoinTimerRef.current) {
           window.clearTimeout(brBatchJoinTimerRef.current);
           brBatchJoinTimerRef.current = null;
         }
         setIsBrBatchJoinRunning(false);
+        // Never extend an existing cooldown beyond 1 hour
+        if (!globalBotRunner.getIsInCooldown()) {
+          globalBotRunner.pauseForCooldown(cooldownMaxMinutes * 60, cooldownReason);
+        }
+        setIsBotRunning(false);
+        setIsInCooldown(true);
+        setCooldownRemainingSeconds(globalBotRunner.getCooldownRemainingSeconds());
         setDefensePlatform('Facebook');
-        setDefenseTriggerReason('Facebook exibiu: "Você não pode usar este recurso no momento" (Limite temporário de frequência)');
+        setDefenseTriggerReason(cooldownReason);
         setIsDefenseModalOpen(true);
+        const minsLeft = Math.max(1, Math.ceil(globalBotRunner.getCooldownRemainingSeconds() / 60));
         setExtensionSyncBanner({
-          message: `🛡️ FREIO ANTI-BLOQUEIO ATIVADO! O Facebook limitou ações temporariamente em "${groupName || 'grupo'}". A fila foi pausada — aguarde 15–30 min e priorize grupos onde você já é membro.`,
+          message: `🛡️ FREIO ANTI-BLOQUEIO (máx. ${cooldownMaxMinutes} min): Facebook limitou ações temporariamente em "${groupName || 'grupo'}". O Robô Brasil retomará automaticamente ao normal em ~${minsLeft} min (ou clique em "Retomar Agora").`,
           tone: 'warning'
         });
       } else if (normalizedStatus === 'join_requested') {
@@ -2849,11 +2920,50 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
     );
   };
 
+  // Change max cooldown (strictly capped between 5 and 60 minutes)
+  const handleChangeBrCooldownMaxMinutes = (mins: number) => {
+    const clean = Math.max(5, Math.min(60, Math.round(mins || 60)));
+    globalBotRunner.setCooldownMaxMinutes(clean);
+    setCooldownMaxMinutes(clean);
+    if (globalBotRunner.getIsInCooldown()) {
+      setCooldownRemainingSeconds(globalBotRunner.getCooldownRemainingSeconds());
+    }
+  };
+
+  // Immediately end cooldown, release temporary rate-limited groups, and resume normal posting
+  const handleResumeBrFromCooldownNow = () => {
+    setIsDefenseModalOpen(false);
+    setDefenseTriggerReason('');
+    setIsInCooldown(false);
+    setCooldownRemainingSeconds(0);
+    const released = releaseBrazilRateLimitedGroups('Liberado manualmente ao retomar fila');
+    if (globalBotRunner.getIsInCooldown()) {
+      globalBotRunner.cancelCooldownAndResumeNow();
+    } else {
+      globalBotRunner.start(
+        intervalSeconds,
+        isRandomJitterActive,
+        () => handleExecuteGroupPost(),
+        (remaining) => setSecondsRemaining(remaining)
+      );
+    }
+    setIsBotRunning(true);
+    setExtensionSyncBanner({
+      message:
+        released > 0
+          ? `✅ Robô Brasil retomado ao normal agora! ${released} grupo(s) saíram do "Limite Temp. FB".`
+          : '✅ Robô Brasil retomado ao normal agora!',
+      tone: 'success'
+    });
+  };
+
   // Toggle Bot Execution with Background Persistence
   const handleToggleBot = () => {
-    if (isBotRunning) {
+    if (isBotRunning || isInCooldown) {
       globalBotRunner.stop();
       setIsBotRunning(false);
+      setIsInCooldown(false);
+      setCooldownRemainingSeconds(0);
     } else {
       globalBotRunner.start(
         intervalSeconds,
@@ -3260,7 +3370,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
     try {
       const zip = new JSZip();
 
-      const cacheBust = `v=1.5.8&t=${Date.now()}`;
+      const cacheBust = `v=1.5.9&t=${Date.now()}`;
       const manifestRes = await fetch(`/chrome-extension/manifest.json?${cacheBust}`, { cache: 'no-store' });
       const manifestText = await manifestRes.text();
 
@@ -3287,21 +3397,21 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
       zip.file('README.md', readmeText);
       zip.file(
         'COMO-INSTALAR.txt',
-        `INSTRUÇÕES DE INSTALAÇÃO NO GOOGLE CHROME (AutoViral AI v1.5.8):\n\n1. Extraia este arquivo ZIP em uma pasta nova.\n2. No Chrome, abra chrome://extensions e REMOVA extensões AutoViral antigas (deixe APENAS UMA v1.5.8).\n3. Ative a chave "Modo do desenvolvedor" (topo direito).\n4. Clique em "Carregar sem compactação" (topo esquerdo) e escolha a pasta extraída.\n5. Abra o Facebook (grupos), role a busca, clique em "Mapear Grupos" e depois em "Enviar para o Painel".`
+        `INSTRUÇÕES DE INSTALAÇÃO NO GOOGLE CHROME (AutoViral AI v1.5.9):\n\n1. Extraia este arquivo ZIP em uma pasta nova.\n2. No Chrome, abra chrome://extensions e REMOVA extensões AutoViral antigas (deixe APENAS UMA v1.5.9).\n3. Ative a chave "Modo do desenvolvedor" (topo direito).\n4. Clique em "Carregar sem compactação" (topo esquerdo) e escolha a pasta extraída.\n5. Abra o Facebook (grupos), role a busca, clique em "Mapear Grupos" e depois em "Enviar para o Painel".`
       );
 
       const blob = await zip.generateAsync({ type: 'blob' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = 'extensao-autoviral-v1.5.8.zip';
+      link.download = 'extensao-autoviral-v1.5.9.zip';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
     } catch (err) {
       console.error('Error generating extension zip:', err);
       const fallbackLink = document.createElement('a');
-      fallbackLink.href = '/api/extension/download?v=1.5.8';
-      fallbackLink.download = 'extensao-autoviral-v1.5.8.zip';
+      fallbackLink.href = '/api/extension/download?v=1.5.9';
+      fallbackLink.download = 'extensao-autoviral-v1.5.9.zip';
       document.body.appendChild(fallbackLink);
       fallbackLink.click();
       document.body.removeChild(fallbackLink);
@@ -3469,7 +3579,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
               ) : (
                 <>
                   <Download className="w-4 h-4" />
-                  Baixar Extensão v1.5.8 (.ZIP)
+                  Baixar Extensão v1.5.9 (.ZIP)
                 </>
               )}
             </button>
@@ -4915,7 +5025,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                           <span className="text-[11px] text-emerald-400 font-medium">Verifica sem abrir abas</span>
                         </div>
                         <p className="text-[11px] text-slate-400">
-                          Consulta cada grupo via Extensão v1.5.8: <strong>✅ Aceito</strong>, <strong>⏳ Pendente Admin</strong>, <strong>🛡️ Bloqueado FB</strong>, <strong>📝 Perguntas</strong> ou <strong>❌ Recusado</strong>.
+                          Consulta cada grupo via Extensão v1.5.9: <strong>✅ Aceito</strong>, <strong>⏳ Pendente Admin</strong>, <strong>🛡️ Bloqueado FB</strong>, <strong>📝 Perguntas</strong> ou <strong>❌ Recusado</strong>.
                         </p>
                         <div className="flex flex-wrap items-center gap-2 pt-0.5">
                           <button
@@ -6432,7 +6542,7 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
               <div className="bg-slate-950 border border-emerald-800/50 rounded-xl p-3.5 space-y-2.5 text-xs">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <span className="font-bold text-white flex items-center gap-1.5">
-                    🤖 Fluxo Automático: Solicitar Entrada + Postagem (Extensão v1.5.8)
+                    🤖 Fluxo Automático: Solicitar Entrada + Postagem (Extensão v1.5.9)
                   </span>
                   <div className="flex flex-wrap items-center gap-3">
                     <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">
@@ -6610,12 +6720,19 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
                 <button
                   onClick={handleToggleBot}
                   className={`flex-1 py-3.5 font-extrabold rounded-xl text-sm flex items-center justify-center gap-2 shadow-xl transition transform hover:-translate-y-0.5 cursor-pointer ${
-                    isBotRunning
+                    isInCooldown
+                      ? 'bg-rose-700 hover:bg-rose-600 text-white'
+                      : isBotRunning
                       ? 'bg-amber-600 hover:bg-amber-500 text-white'
                       : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white'
                   }`}
                 >
-                  {isBotRunning ? (
+                  {isInCooldown ? (
+                    <>
+                      <Pause className="w-4 h-4 fill-white" />
+                      Cancelar Pausa Anti-Bloqueio ({formatBrCooldownClock(cooldownRemainingSeconds)})
+                    </>
+                  ) : isBotRunning ? (
                     <>
                       <Pause className="w-4 h-4 fill-white" />
                       Pausar Fila Assistida
@@ -6642,26 +6759,127 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
             {/* Right: Live Countdown & Distinct Group Status */}
             <div className="lg:col-span-5 space-y-5">
               {/* Countdown Card */}
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 text-center space-y-3">
-                <span className="text-xs text-emerald-300 font-semibold tracking-wide uppercase">
-                  Próximo Grupo da Fila Assistida:
+              <div
+                className={`border rounded-2xl p-6 text-center space-y-3 ${
+                  isInCooldown
+                    ? 'bg-amber-950/30 border-amber-500/50'
+                    : 'bg-slate-900 border-slate-800'
+                }`}
+              >
+                <span
+                  className={`text-xs font-semibold tracking-wide uppercase ${
+                    isInCooldown ? 'text-amber-300' : 'text-emerald-300'
+                  }`}
+                >
+                  {isInCooldown
+                    ? `🛡️ Pausa Limite FB (Retoma Automático ≤ ${cooldownMaxMinutes}m):`
+                    : 'Próximo Grupo da Fila Assistida:'}
                 </span>
 
-                <div className="text-5xl font-black text-white font-mono tabular-nums tracking-tight">
-                  {isBotRunning ? `${secondsRemaining}s` : 'Pausado'}
+                <div
+                  className={`text-5xl font-black font-mono tabular-nums tracking-tight ${
+                    isInCooldown ? 'text-amber-300' : 'text-white'
+                  }`}
+                >
+                  {isInCooldown
+                    ? formatBrCooldownClock(cooldownRemainingSeconds)
+                    : isBotRunning
+                    ? `${secondsRemaining}s`
+                    : 'Pausado'}
                 </div>
 
                 <p className="text-xs text-slate-300">
-                  {isBotRunning
+                  {isInCooldown
+                    ? 'Ao zerar o relógio, os grupos em "Limite Temp. FB" são liberados e o robô volta ao normal sozinho.'
+                    : isBotRunning
                     ? 'Intervalo anti-bloqueio em andamento entre 300s e 400s.'
                     : 'Em espera. Clique em "Abrir Grupo + Copiar Texto" para publicar manualmente agora.'}
                 </p>
 
                 <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
                   <div
-                    className="bg-emerald-500 h-full transition-all duration-1000"
-                    style={{ width: `${((350 - secondsRemaining) / 350) * 100}%` }}
+                    className={`h-full transition-all duration-1000 ${
+                      isInCooldown ? 'bg-amber-400' : 'bg-emerald-500'
+                    }`}
+                    style={{
+                      width: isInCooldown
+                        ? `${Math.max(
+                            0,
+                            Math.min(
+                              100,
+                              ((cooldownMaxMinutes * 60 - cooldownRemainingSeconds) /
+                                Math.max(1, cooldownMaxMinutes * 60)) *
+                                100
+                            )
+                          )}%`
+                        : `${((350 - secondsRemaining) / 350) * 100}%`
+                    }}
                   />
+                </div>
+
+                {isInCooldown && (
+                  <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={handleResumeBrFromCooldownNow}
+                      className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg inline-flex items-center gap-1.5 cursor-pointer shadow"
+                    >
+                      <Zap className="w-3.5 h-3.5" />
+                      <span>Retomar Agora (Normal)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsDefenseModalOpen(true)}
+                      className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-amber-200 border border-amber-500/40 text-xs font-semibold rounded-lg cursor-pointer"
+                    >
+                      Ver Detalhes
+                    </button>
+                  </div>
+                )}
+
+                {/* Max Cooldown Selector (≤ 1h) + 1-Click Release Rate-Limited Groups */}
+                <div className="pt-2 border-t border-slate-800/80 space-y-2 text-left">
+                  <div className="flex flex-wrap items-center justify-between gap-1.5">
+                    <span className="text-[11px] font-semibold text-slate-400">
+                      Tempo máx. no Limite Temp. FB:
+                    </span>
+                    <div className="flex items-center gap-1">
+                      {[15, 30, 45, 60].map((m) => (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => handleChangeBrCooldownMaxMinutes(m)}
+                          className={`px-2 py-0.5 text-[10px] font-bold rounded border cursor-pointer transition-colors ${
+                            cooldownMaxMinutes === m
+                              ? 'bg-amber-500/25 border-amber-400 text-amber-200'
+                              : 'bg-slate-950 border-slate-700 text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          {m === 60 ? '60m (1h máx)' : `${m}m`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {mappedGroups.some((g) => g.membershipStatus === 'rate_limited') && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const released = releaseBrazilRateLimitedGroups('Liberado manualmente pelo usuário');
+                        setExtensionSyncBanner({
+                          message: `♻️ ${released} grupo(s) saíram de "Limite Temp. FB" e voltaram ao normal!`,
+                          tone: 'success'
+                        });
+                      }}
+                      className="w-full py-1.5 px-3 bg-emerald-950/60 hover:bg-emerald-900/60 border border-emerald-500/40 text-emerald-200 text-[11px] font-bold rounded-lg inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                      <span>
+                        ♻️ Liberar Grupos com Limite Temp. FB (
+                        {mappedGroups.filter((g) => g.membershipStatus === 'rate_limited').length})
+                      </span>
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -8964,18 +9182,23 @@ export const ChromeFbGroupsTab: React.FC<ChromeFbGroupsTabProps> = ({
         onClose={() => setIsPWAInstallModalOpen(false)}
       />
 
-      {/* Internal Security Defense Modal (Matching image_031f9bdf.png) */}
+      {/* Internal Security Defense Modal (Max 1h persistent background cooldown + auto-resume) */}
       <SecurityDefenseModal
         isOpen={isDefenseModalOpen}
         onClose={() => {
           setIsDefenseModalOpen(false);
-          setDefenseTriggerReason('');
         }}
-        onResumeAnyway={() => {
+        onResumeAnyway={handleResumeBrFromCooldownNow}
+        onAutoResume={() => {
           setIsDefenseModalOpen(false);
           setDefenseTriggerReason('');
-          setIsBotRunning(true);
+          if (!globalBotRunner.getIsRunning()) {
+            handleResumeBrFromCooldownNow();
+          }
         }}
+        controlledRemainingSeconds={isInCooldown ? cooldownRemainingSeconds : undefined}
+        maxCooldownMinutes={cooldownMaxMinutes}
+        onChangeMaxCooldownMinutes={handleChangeBrCooldownMaxMinutes}
         platformName={defensePlatform}
         triggerReason={defenseTriggerReason || undefined}
       />

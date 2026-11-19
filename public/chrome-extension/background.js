@@ -1,7 +1,7 @@
 // AutoViral AI Chrome Extension - Background Service Worker (Manifest V3)
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('[AutoViral AI] Extensão v1.5.8 instalada com sucesso!');
+  console.log('[AutoViral AI] Extensão v1.5.9 instalada com sucesso!');
   chrome.storage.local.get(['autoviral_interval', 'autoviral_mapped_groups', 'autoviral_waiting_approval_map'], (res) => {
     chrome.storage.local.set({
       autoviral_interval: res.autoviral_interval || 350,
@@ -2361,7 +2361,7 @@ async function pollSingleBgPostWatch(tabId, job) {
           args: [job.postSnippet || ''],
           func: (snippet) => {
             try {
-              const allDialogs = Array.from(document.querySelectorAll('div[role="dialog"]'));
+              const allDialogs = Array.from(document.querySelectorAll('div[role="dialog"], [role="alert"], [role="alertdialog"]'));
               const dialogTxt = allDialogs.map((d) => (d.innerText || '')).join(' ').toLowerCase();
               const bodyTxt = (document.body ? document.body.innerText : '').toLowerCase();
               const hay = dialogTxt + ' ' + bodyTxt;
@@ -2373,8 +2373,10 @@ async function pollSingleBgPostWatch(tabId, job) {
                 hay.includes('limitamos a frequência') ||
                 hay.includes("you can't use this feature right now") ||
                 hay.includes('temporarily blocked') ||
-                hay.includes('tente novamente mais tarde') ||
-                hay.includes('try again later');
+                dialogTxt.includes('tente novamente mais tarde') ||
+                dialogTxt.includes('try again later') ||
+                dialogTxt.includes('ocorreu um erro ao postar') ||
+                dialogTxt.includes('there was an error posting');
 
               const isAwaitingAdmin =
                 hay.includes('aguardando aprovação de um administrador') ||

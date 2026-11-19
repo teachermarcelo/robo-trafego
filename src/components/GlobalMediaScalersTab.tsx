@@ -1413,7 +1413,34 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
   // Global Bot Dispatcher State
   const [botChannel, setBotChannel] = useState<'facebook' | 'youtube' | 'pinterest'>('facebook');
   const [isBotRunning, setIsBotRunning] = useState<boolean>(() => globalEnBotRunner.getIsRunning());
+  const [isInCooldown, setIsInCooldown] = useState<boolean>(() => globalEnBotRunner.getIsInCooldown());
+  const [cooldownRemainingSeconds, setCooldownRemainingSeconds] = useState<number>(() =>
+    globalEnBotRunner.getCooldownRemainingSeconds()
+  );
+  const [cooldownMaxMinutes, setCooldownMaxMinutes] = useState<number>(() =>
+    globalEnBotRunner.getCooldownMaxMinutes()
+  );
   const [secondsRemaining, setSecondsRemaining] = useState<number>(() => globalEnBotRunner.getRemainingSeconds());
+
+  const releaseGlobalRateLimitedGroups = (customNote?: string): number => {
+    let releasedCount = 0;
+    const checkedNow = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    setGlobalGroups((prev) =>
+      prev.map((g) => {
+        if (g.membershipStatus === 'rate_limited') {
+          releasedCount += 1;
+          return {
+            ...g,
+            membershipStatus: 'authorized',
+            membershipCheckedAt: checkedNow,
+            membershipNote: customNote || 'Liberado automaticamente após pausa de segurança (≤1h)',
+          };
+        }
+        return g;
+      })
+    );
+    return releasedCount;
+  };
   const [dispatchIntervalSec, setDispatchIntervalSec] = useState<number>(() => {
     try {
       const saved = parseInt(localStorage.getItem('autoviral_global_dispatch_interval_sec') || '350', 10);
@@ -2135,7 +2162,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
         join_requested: 'Entrada Solicitada (Cookie Ativo)',
         approved_posting: 'ADMIN ACEITOU! Gatilho disparado → Postando agora!',
         not_member: 'Precisa Participar',
-        composer_stuck: 'Janela Travada no FB (Atualize Extensão v1.5.8)',
+        composer_stuck: 'Janela Travada no FB (Atualize Extensão v1.5.9)',
         rate_limited: 'Limite Temporário FB',
         unavailable: 'Grupo Indisponível',
       };
@@ -2153,10 +2180,17 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
           tone: 'success',
         });
       } else if (normalizedStatus === 'rate_limited') {
-        globalEnBotRunner.stop();
+        const cooldownReason = `Limite temporário do Facebook — pausa automática de no máximo ${cooldownMaxMinutes} min (volta ao normal sozinho)`;
+        if (!globalEnBotRunner.getIsInCooldown()) {
+          globalEnBotRunner.pauseForCooldown(cooldownMaxMinutes * 60, cooldownReason);
+        }
         setIsBotRunning(false);
+        setIsInCooldown(true);
+        const remSecs = globalEnBotRunner.getCooldownRemainingSeconds();
+        setCooldownRemainingSeconds(remSecs);
+        const minsLeft = Math.max(1, Math.ceil(remSecs / 60));
         setBanner({
-          message: 'Freio anti-bloqueio ativado: Facebook limitou ações temporariamente. Robô Global pausado por segurança.',
+          message: `🛡️ Freio anti-bloqueio (máx. ${cooldownMaxMinutes} min): Facebook limitou ações temporariamente. O Robô Global voltará ao normal automaticamente em ~${minsLeft} min (ou clique em "Retomar Agora").`,
           tone: 'warning',
         });
       } else if (normalizedStatus === 'unavailable' && groupUrl) {
@@ -3960,7 +3994,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
     } else {
       setBanner({
         message: autoJoinAndPostEnabled
-          ? `Grupo Global "${cleanGroupName}" aberto (${dispatchLimitCount > 0 ? `${nextSentCount}/${dispatchLimitCount}` : `#${nextSentCount}`})! Extensão v1.5.8 vai postar ${imageToSend ? 'imagem + link clicável' : 'card de link clicável'} e fechar a aba.`
+          ? `Grupo Global "${cleanGroupName}" aberto (${dispatchLimitCount > 0 ? `${nextSentCount}/${dispatchLimitCount}` : `#${nextSentCount}`})! Extensão v1.5.9 vai postar ${imageToSend ? 'imagem + link clicável' : 'card de link clicável'} e fechar a aba.`
           : `Grupo Global "${cleanGroupName}" aberto e texto copiado para postagem manual assistida.`,
         tone: 'success',
       });
@@ -4301,7 +4335,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
     try {
       const zip = new JSZip();
       const files = ['manifest.json', 'popup.html', 'popup.js', 'content.js', 'background.js', 'README.md'];
-      const cacheBust = `v=1.5.8&t=${Date.now()}`;
+      const cacheBust = `v=1.5.9&t=${Date.now()}`;
       await Promise.all(
         files.map(async (fname) => {
           const r = await fetch(`/chrome-extension/${fname}?${cacheBust}`, { cache: 'no-store' });
@@ -4310,17 +4344,17 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
       );
       zip.file(
         'COMO-ATUALIZAR.txt',
-        '1. Extraia este ZIP substituindo os arquivos da pasta anterior (ou em uma pasta nova).\n2. Abra chrome://extensions no Google Chrome.\n3. Clique no ícone de Atualizar (↻) da extensão AutoViral AI v1.5.8.\n4. Recarregue (F5) a aba do AutoViral AI.'
+        '1. Extraia este ZIP substituindo os arquivos da pasta anterior (ou em uma pasta nova).\n2. Abra chrome://extensions no Google Chrome.\n3. Clique no ícone de Atualizar (↻) da extensão AutoViral AI v1.5.9.\n4. Recarregue (F5) a aba do AutoViral AI.'
       );
       const blob = await zip.generateAsync({ type: 'blob' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = 'extensao-autoviral-v1.5.8.zip';
+      link.download = 'extensao-autoviral-v1.5.9.zip';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       setBanner({
-        message: 'Extensão v1.5.8 atualizada baixada! Extraia, recarregue (↻) em chrome://extensions e dê F5 nesta página.',
+        message: 'Extensão v1.5.9 atualizada baixada! Extraia, recarregue (↻) em chrome://extensions e dê F5 nesta página.',
         tone: 'success',
       });
     } catch {
@@ -4404,20 +4438,44 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
     });
   };
 
-  // Re-attach Global runner callbacks on mount/update
+  // Re-attach Global runner callbacks on mount/update (including max 1h cooldown & auto-resume)
   useEffect(() => {
     globalEnBotRunner.setCallbacks(
       () => executeSingleGlobalPost(false),
       (rem) => setSecondsRemaining(rem),
       () => {
         setIsBotRunning(false);
+        setIsInCooldown(false);
+        setCooldownRemainingSeconds(0);
         setBanner({
           message: 'Robô Global pausado automaticamente porque você iniciou o Robô Brasil (proteção anti-bloqueio).',
           tone: 'info',
         });
+      },
+      (cooldownRemSecs, inCooldown) => {
+        setCooldownRemainingSeconds(cooldownRemSecs);
+        setIsInCooldown(inCooldown);
+        if (inCooldown) {
+          setIsBotRunning(false);
+        }
+      },
+      () => {
+        setIsInCooldown(false);
+        setCooldownRemainingSeconds(0);
+        const released = releaseGlobalRateLimitedGroups('Liberado automaticamente após pausa de 1h');
+        setIsBotRunning(true);
+        setBanner({
+          message:
+            released > 0
+              ? `✅ Pausa de segurança concluída! ${released} grupo(s) saíram do "Limite Temp. FB" e o Robô Global voltou ao normal automaticamente.`
+              : '✅ Pausa de segurança concluída! Robô Global retomado automaticamente ao normal.',
+          tone: 'success',
+        });
       }
     );
     setIsBotRunning(globalEnBotRunner.getIsRunning());
+    setIsInCooldown(globalEnBotRunner.getIsInCooldown());
+    setCooldownRemainingSeconds(globalEnBotRunner.getCooldownRemainingSeconds());
   });
 
   const handleChangeGlobalIntervalSec = (nextSec: number) => {
@@ -4429,10 +4487,54 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
     globalEnBotRunner.setIntervalSeconds(clean, isBotRunning);
   };
 
+  const handleChangeGlobalCooldownMaxMinutes = (mins: number) => {
+    const clean = Math.max(5, Math.min(60, Math.round(mins || 60)));
+    globalEnBotRunner.setCooldownMaxMinutes(clean);
+    setCooldownMaxMinutes(clean);
+    if (globalEnBotRunner.getIsInCooldown()) {
+      setCooldownRemainingSeconds(globalEnBotRunner.getCooldownRemainingSeconds());
+    }
+  };
+
+  const handleResumeGlobalFromCooldownNow = () => {
+    setIsInCooldown(false);
+    setCooldownRemainingSeconds(0);
+    const released = releaseGlobalRateLimitedGroups('Liberado manualmente ao retomar fila');
+    if (globalEnBotRunner.getIsInCooldown()) {
+      globalEnBotRunner.cancelCooldownAndResumeNow();
+    } else {
+      globalEnBotRunner.start(
+        dispatchIntervalSec,
+        true,
+        () => executeSingleGlobalPost(false),
+        (rem) => setSecondsRemaining(rem),
+        () => {
+          setIsBotRunning(false);
+          setIsInCooldown(false);
+          setCooldownRemainingSeconds(0);
+          setBanner({
+            message: 'Robô Global pausado automaticamente porque o Robô Brasil foi iniciado.',
+            tone: 'info',
+          });
+        }
+      );
+    }
+    setIsBotRunning(true);
+    setBanner({
+      message:
+        released > 0
+          ? `✅ Robô Global retomado ao normal agora! ${released} grupo(s) saíram do "Limite Temp. FB".`
+          : '✅ Robô Global retomado ao normal agora!',
+      tone: 'success',
+    });
+  };
+
   const handleToggleGlobalBot = () => {
-    if (isBotRunning) {
+    if (isBotRunning || isInCooldown) {
       globalEnBotRunner.stop();
       setIsBotRunning(false);
+      setIsInCooldown(false);
+      setCooldownRemainingSeconds(0);
     } else {
       if (dispatchLimitCount > 0 && sessionDispatchedRef.current >= dispatchLimitCount) {
         sessionDispatchedRef.current = 0;
@@ -4447,6 +4549,8 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
         (rem) => setSecondsRemaining(rem),
         () => {
           setIsBotRunning(false);
+          setIsInCooldown(false);
+          setCooldownRemainingSeconds(0);
           setBanner({
             message: 'Robô Global pausado automaticamente porque o Robô Brasil foi iniciado.',
             tone: 'info',
@@ -7038,19 +7142,47 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                     <div className="flex flex-wrap items-center gap-3 shrink-0">
                       <div
                         className={`flex items-center gap-2.5 rounded-lg px-3.5 py-2 border ${
-                          isBotRunning
+                          isInCooldown
+                            ? 'bg-amber-950/50 border-amber-500/60'
+                            : isBotRunning
                             ? 'bg-emerald-950/40 border-emerald-600/40'
                             : 'bg-slate-950 border-slate-800'
                         }`}
                       >
-                        <Clock className={`w-4 h-4 ${isBotRunning ? 'text-emerald-400' : 'text-amber-400'}`} />
+                        {isInCooldown ? (
+                          <ShieldAlert className="w-4 h-4 text-amber-400" />
+                        ) : (
+                          <Clock className={`w-4 h-4 ${isBotRunning ? 'text-emerald-400' : 'text-amber-400'}`} />
+                        )}
                         <div>
-                          <div className="text-[10px] text-slate-400 leading-none">Próximo disparo</div>
-                          <div className={`font-mono text-lg font-bold tabular-nums leading-tight ${isBotRunning ? 'text-emerald-300' : 'text-white'}`}>
-                            {isBotRunning ? formatCountdownClock(secondsRemaining) : 'Pronto'}
+                          <div className={`text-[10px] leading-none ${isInCooldown ? 'text-amber-300 font-semibold' : 'text-slate-400'}`}>
+                            {isInCooldown ? `Pausa FB (≤${cooldownMaxMinutes}m) · Volta em` : 'Próximo disparo'}
+                          </div>
+                          <div
+                            className={`font-mono text-lg font-bold tabular-nums leading-tight ${
+                              isInCooldown ? 'text-amber-200' : isBotRunning ? 'text-emerald-300' : 'text-white'
+                            }`}
+                          >
+                            {isInCooldown
+                              ? formatCountdownClock(cooldownRemainingSeconds)
+                              : isBotRunning
+                              ? formatCountdownClock(secondsRemaining)
+                              : 'Pronto'}
                           </div>
                         </div>
                       </div>
+
+                      {isInCooldown && (
+                        <button
+                          type="button"
+                          onClick={handleResumeGlobalFromCooldownNow}
+                          className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-xs font-bold text-white rounded-lg inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap shadow-md"
+                          title="Encerra a pausa agora, libera os grupos com Limite Temp. FB e volta ao normal"
+                        >
+                          <Play className="w-3.5 h-3.5" />
+                          <span>⚡ Retomar Agora</span>
+                        </button>
+                      )}
 
                       {queueLen > 1 && (
                         <button
@@ -7088,15 +7220,23 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                       <button
                         type="button"
                         onClick={handleToggleGlobalBot}
-                        disabled={queueLen === 0 && !isBotRunning}
+                        disabled={queueLen === 0 && !isBotRunning && !isInCooldown}
                         className={`px-4 py-2 text-xs font-semibold rounded-lg inline-flex items-center gap-2 cursor-pointer whitespace-nowrap ${
-                          isBotRunning
+                          isInCooldown
+                            ? 'bg-rose-700 hover:bg-rose-600 text-white'
+                            : isBotRunning
                             ? 'bg-amber-600 hover:bg-amber-500 text-white'
                             : 'bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white'
                         }`}
                       >
-                        {isBotRunning ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-                        <span>{isBotRunning ? 'Pausar Robô Global' : 'Iniciar Robô Global'}</span>
+                        {isInCooldown || isBotRunning ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+                        <span>
+                          {isInCooldown
+                            ? 'Cancelar Pausa'
+                            : isBotRunning
+                            ? 'Pausar Robô Global'
+                            : 'Iniciar Robô Global'}
+                        </span>
                       </button>
                     </div>
                   </div>
@@ -7269,6 +7409,67 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                           title="Tempo mínimo em segundos entre um grupo e outro (o robô adiciona +25% aleatório)"
                         />
                       </label>
+                    </div>
+                  </div>
+
+                  {/* Anti-Block Max Cooldown (≤ 1h Auto-Resume) + 1-Click Release Rate-Limited Groups */}
+                  <div
+                    className={`rounded-lg p-3 border flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 ${
+                      isInCooldown
+                        ? 'bg-amber-950/35 border-amber-500/50'
+                        : 'bg-slate-950 border-slate-800'
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <ShieldAlert className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span className="font-semibold text-slate-300">
+                        Tempo máx. no Limite Temp. FB (volta ao normal automático):
+                      </span>
+                      <span className="text-[11px] font-mono text-amber-300 font-bold">
+                        {isInCooldown
+                          ? `Retomando em ${formatCountdownClock(cooldownRemainingSeconds)}`
+                          : `Máx. ${cooldownMaxMinutes} min`}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {[
+                        { val: 15, label: '15 min' },
+                        { val: 30, label: '30 min' },
+                        { val: 45, label: '45 min' },
+                        { val: 60, label: '60 min (1h máx)' },
+                      ].map((opt) => (
+                        <button
+                          key={opt.val}
+                          type="button"
+                          onClick={() => handleChangeGlobalCooldownMaxMinutes(opt.val)}
+                          className={`px-2.5 py-1 text-[11px] rounded border cursor-pointer transition-colors ${
+                            cooldownMaxMinutes === opt.val
+                              ? 'bg-amber-500/25 border-amber-400 text-amber-200 font-bold'
+                              : 'bg-slate-900 border-slate-700 text-slate-300 hover:text-white'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                      {globalGroups.some((g) => g.membershipStatus === 'rate_limited') && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const released = releaseGlobalRateLimitedGroups('Liberado manualmente pelo usuário');
+                            setBanner({
+                              message: `♻️ ${released} grupo(s) globais saíram de "Limite Temp. FB" e voltaram ao normal!`,
+                              tone: 'success',
+                            });
+                          }}
+                          className="px-2.5 py-1 bg-emerald-950/70 hover:bg-emerald-900/70 border border-emerald-500/50 text-emerald-200 text-[11px] font-bold rounded inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          <RefreshCw className="w-3 h-3" />
+                          <span>
+                            ♻️ Liberar Limite Temp. FB (
+                            {globalGroups.filter((g) => g.membershipStatus === 'rate_limited').length})
+                          </span>
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -7446,10 +7647,10 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                           onClick={handleDownloadGlobalExtensionZip}
                           disabled={isDownloadingExt}
                           className="px-3 py-1.5 bg-cyan-600/20 hover:bg-cyan-600/35 border border-cyan-500/40 text-cyan-200 text-[11px] font-semibold rounded-md inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
-                          title="Baixar Extensão v1.5.8 (Foco no Modal Ativo + Foto Automática + Watchdog em 2º Plano)"
+                          title="Baixar Extensão v1.5.9 (Anti-Falso Limite FB + Foto Automática + Watchdog em 2º Plano)"
                         >
                           <Download className="w-3 h-3" />
-                          <span>{isDownloadingExt ? 'Gerando ZIP...' : 'Atualizar Extensão v1.5.8 (ZIP)'}</span>
+                          <span>{isDownloadingExt ? 'Gerando ZIP...' : 'Atualizar Extensão v1.5.9 (ZIP)'}</span>
                         </button>
                       </div>
                       <div className="flex flex-wrap gap-2">
@@ -7813,7 +8014,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                                   )}
                                   <div className="min-w-0">
                                     <span className="font-bold text-amber-300">🛡️ Proteção Anti-Caixa Cinza Ativada:</span>{' '}
-                                    Como <span className="font-mono text-amber-100">{getDisplayDomain(previewUrl)}</span> é externo e não gera capa automática, o formato está travado em <strong className="text-white">Foto do Produto + Link Clicável</strong> (baixe/atualize a extensão v1.5.8 para o robô anexar a foto ao lado automaticamente).
+                                    Como <span className="font-mono text-amber-100">{getDisplayDomain(previewUrl)}</span> é externo e não gera capa automática, o formato está travado em <strong className="text-white">Foto do Produto + Link Clicável</strong> (baixe/atualize a extensão v1.5.9 para o robô anexar a foto ao lado automaticamente).
                                   </div>
                                 </div>
                               )}
@@ -8023,7 +8224,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5">
                         <div className="text-xs">
                           <div className="font-semibold text-white">
-                            Sistema Automático: Abrir → Entrar / Responder Perguntas → Card Imagem Clicável → Fechar Aba (v1.5.8)
+                            Sistema Automático: Abrir → Entrar / Responder Perguntas → Card Imagem Clicável → Fechar Aba (v1.5.9)
                           </div>
                           <div className="text-[11px] text-slate-400">
                             {autoJoinAndPostEnabled

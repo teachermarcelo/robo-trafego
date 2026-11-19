@@ -1,7 +1,7 @@
 // AutoViral AI Chrome Extension - Background Service Worker (Manifest V3)
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('[AutoViral AI] Extensão v1.5.6 instalada com sucesso!');
+  console.log('[AutoViral AI] Extensão v1.5.7 instalada com sucesso!');
   chrome.storage.local.get(['autoviral_interval', 'autoviral_mapped_groups', 'autoviral_waiting_approval_map'], (res) => {
     chrome.storage.local.set({
       autoviral_interval: res.autoviral_interval || 350,
@@ -32,6 +32,82 @@ ensureApprovalWatchdogAlarm();
 
 const sleepMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const silentTabIds = new Set();
+const activeBgPostWatches = new Map();
+const finalizedPostWatchKeys = new Set();
+const cancelledBgCloseTabs = new Set();
+let bgPostWatchIntervalId = null;
+
+function getPostWatchDedupeKey(tabId, logId, slug) {
+  if (logId) return `log:${String(logId)}`;
+  return `tab:${tabId}:slug:${String(slug || '')}`;
+}
+
+function isPostWatchFinalized(tabId, logId, slug) {
+  return finalizedPostWatchKeys.has(getPostWatchDedupeKey(tabId, logId, slug));
+}
+
+function markBgPostFinalized(tabId, logId, slug) {
+  finalizedPostWatchKeys.add(getPostWatchDedupeKey(tabId, logId, slug));
+  if (finalizedPostWatchKeys.size > 400) {
+    const oldest = finalizedPostWatchKeys.values().next().value;
+    if (oldest) finalizedPostWatchKeys.delete(oldest);
+  }
+  if (typeof tabId === 'number') {
+    activeBgPostWatches.delete(tabId);
+  }
+}
+
+function clearPendingPostFromStorage(slug) {
+  const cleanSlug = String(slug || '').toLowerCase();
+  try {
+    chrome.storage.local.get(['autoviral_pending_fb_post', 'autoviral_pending_fb_posts_map'], (res) => {
+      const postsMap = (res && res.autoviral_pending_fb_posts_map && typeof res.autoviral_pending_fb_posts_map === 'object')
+        ? { ...res.autoviral_pending_fb_posts_map }
+        : {};
+      if (cleanSlug && postsMap[cleanSlug]) {
+        delete postsMap[cleanSlug];
+      }
+      chrome.storage.local.set({ autoviral_pending_fb_posts_map: postsMap });
+      const active = res && res.autoviral_pending_fb_post;
+      if (!active || !cleanSlug || (active.groupSlug || '').toLowerCase() === cleanSlug || (active.groupUrl || '').toLowerCase().includes(`/groups/${cleanSlug}`)) {
+        chrome.storage.local.remove(['autoviral_pending_fb_post']);
+      }
+    });
+  } catch (e) {}
+}
+
+function closeGroupTabSafely(tabId, delayMs) {
+  if (typeof tabId !== 'number') return;
+  const waitMs = Math.max(0, Number(delayMs) || 0);
+  setTimeout(() => {
+    if (cancelledBgCloseTabs.has(tabId)) {
+      cancelledBgCloseTabs.delete(tabId);
+      return;
+    }
+    silentTabIds.delete(tabId);
+    activeBgPostWatches.delete(tabId);
+    chrome.storage.local.get(['autoviral_silent_tabs'], (r) => {
+      const m = r && r.autoviral_silent_tabs && typeof r.autoviral_silent_tabs === 'object'
+        ? { ...r.autoviral_silent_tabs }
+        : null;
+      if (m && m[String(tabId)]) {
+        delete m[String(tabId)];
+        chrome.storage.local.set({ autoviral_silent_tabs: m });
+      }
+    });
+    chrome.tabs.remove(tabId, () => {
+      void chrome.runtime.lastError;
+    });
+  }, waitMs);
+}
+
+if (chrome.tabs && chrome.tabs.onRemoved) {
+  chrome.tabs.onRemoved.addListener((closedTabId) => {
+    activeBgPostWatches.delete(closedTabId);
+    cancelledBgCloseTabs.delete(closedTabId);
+    silentTabIds.delete(closedTabId);
+  });
+}
 
 async function withTabDebugger(tabId, fn) {
   if (!chrome.debugger || typeof tabId !== 'number') {
@@ -422,6 +498,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     request.action === 'AUTOVIRAL_FB_POST_RESULT' ||
     request.action === 'AUTOVIRAL_GROUP_MEMBERSHIP_RESULT'
   ) {
+    if (request.action === 'AUTOVIRAL_FB_POST_RESULT') {
+      const senderTabId = sender && sender.tab && typeof sender.tab.id === 'number' ? sender.tab.id : null;
+      const slugMatch = String(request.groupUrl || '').match(/\/groups\/([^\/?#]+)/i);
+      const slug = slugMatch ? slugMatch[1].toLowerCase() : '';
+      if (
+        request.approvalStatus === 'published' ||
+        request.approvalStatus === 'awaiting_admin' ||
+        request.approvalStatus === 'rate_limited' ||
+        request.approvalStatus === 'unavailable'
+      ) {
+        markBgPostFinalized(senderTabId, request.logId, slug);
+      }
+    }
     if (request.action === 'AUTOVIRAL_IMPORT_INSTAGRAM_ACCOUNTS' && Array.isArray(request.accounts)) {
       chrome.storage.local.set({ autoviral_insta_accounts: request.accounts });
     }
@@ -890,12 +979,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             });
             if (!pubBtn) return { clicked: false, reason: 'no_enabled_btn' };
 
+            pubBtn.scrollIntoView({ behavior: 'instant', block: 'nearest' });
             const r = pubBtn.getBoundingClientRect();
             const cx = Math.round(r.left + r.width / 2);
             const cy = Math.round(r.top + r.height / 2);
             pubBtn.focus();
-            pubBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy }));
-            pubBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy }));
+            try { pubBtn.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, pointerType: 'mouse', isPrimary: true })); } catch (e) {}
+            try { pubBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy })); } catch (e) {}
+            try { pubBtn.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, pointerType: 'mouse', isPrimary: true })); } catch (e) {}
+            try { pubBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy })); } catch (e) {}
             pubBtn.click();
             return { clicked: true };
           } catch (err) {
@@ -2128,9 +2220,74 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === 'AUTOVIRAL_REGISTER_BG_POST_WATCH') {
+    const watchTabId = sender && sender.tab && typeof sender.tab.id === 'number' ? sender.tab.id : null;
+    const p = request.pending || {};
+    if (watchTabId !== null && p.groupSlug) {
+      cancelledBgCloseTabs.delete(watchTabId);
+      activeBgPostWatches.set(watchTabId, {
+        tabId: watchTabId,
+        logId: p.logId || '',
+        groupId: p.groupId || '',
+        groupUrl: p.groupUrl || '',
+        groupSlug: String(p.groupSlug || '').toLowerCase(),
+        groupName: p.groupName || '',
+        didAutoClickPublish: Boolean(request.didAutoClickPublish),
+        userClickedPublish: Boolean(request.userClickedPublish),
+        autoCloseOnFinish: request.autoCloseOnFinish !== false,
+        sawDialogOpen: true,
+        closedStreak: 0,
+        retriedClick: false,
+        inFlight: false,
+        startedAt: Date.now()
+      });
+      ensureBgPostWatchLoop();
+      sendResponse({ ok: true });
+      return false;
+    }
+    sendResponse({ ok: false });
+    return false;
+  }
+
+  if (request.action === 'AUTOVIRAL_UNREGISTER_BG_POST_WATCH') {
+    const watchTabId = sender && sender.tab && typeof sender.tab.id === 'number' ? sender.tab.id : null;
+    if (watchTabId !== null) {
+      activeBgPostWatches.delete(watchTabId);
+      if (request.cancelAutoClose) {
+        cancelledBgCloseTabs.add(watchTabId);
+      }
+    }
+    sendResponse({ ok: true });
+    return false;
+  }
+
+  if (request.action === 'AUTOVIRAL_SCHEDULE_BG_CLOSE_TAB') {
+    const targetTabId = sender && sender.tab && typeof sender.tab.id === 'number' ? sender.tab.id : null;
+    if (targetTabId !== null) {
+      cancelledBgCloseTabs.delete(targetTabId);
+      closeGroupTabSafely(targetTabId, Math.max(800, Number(request.delayMs) || 3500));
+      sendResponse({ ok: true });
+      return false;
+    }
+    sendResponse({ ok: false });
+    return false;
+  }
+
+  if (request.action === 'AUTOVIRAL_CANCEL_BG_CLOSE_TAB') {
+    const targetTabId = sender && sender.tab && typeof sender.tab.id === 'number' ? sender.tab.id : null;
+    if (targetTabId !== null) {
+      cancelledBgCloseTabs.add(targetTabId);
+      activeBgPostWatches.delete(targetTabId);
+    }
+    sendResponse({ ok: true });
+    return false;
+  }
+
   if (request.action === 'AUTOVIRAL_CLOSE_CURRENT_TAB') {
     if (sender && sender.tab && typeof sender.tab.id === 'number') {
       const closingId = sender.tab.id;
+      activeBgPostWatches.delete(closingId);
+      cancelledBgCloseTabs.delete(closingId);
       silentTabIds.delete(closingId);
       chrome.storage.local.get(['autoviral_silent_tabs'], (r) => {
         const m = r && r.autoviral_silent_tabs && typeof r.autoviral_silent_tabs === 'object'
@@ -2151,6 +2308,246 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return false;
   }
 });
+
+// =========================================================================
+// BACKGROUND POST SUBMISSION WATCHDOG (IMMUNE TO TAB THROTTLING)
+// =========================================================================
+function ensureBgPostWatchLoop() {
+  if (bgPostWatchIntervalId) return;
+  bgPostWatchIntervalId = setInterval(() => {
+    if (activeBgPostWatches.size === 0) {
+      clearInterval(bgPostWatchIntervalId);
+      bgPostWatchIntervalId = null;
+      return;
+    }
+    for (const [tabId, job] of activeBgPostWatches.entries()) {
+      pollSingleBgPostWatch(tabId, job).catch(() => {});
+    }
+  }, 1600);
+}
+
+async function pollSingleBgPostWatch(tabId, job) {
+  if (!job || job.inFlight) return;
+  if (Date.now() - job.startedAt > 120000) {
+    activeBgPostWatches.delete(tabId);
+    return;
+  }
+  if (isPostWatchFinalized(tabId, job.logId, job.groupSlug)) {
+    activeBgPostWatches.delete(tabId);
+    return;
+  }
+
+  job.inFlight = true;
+  try {
+    const tabExists = await new Promise((resolve) => {
+      chrome.tabs.get(tabId, (tab) => {
+        if (chrome.runtime.lastError || !tab) resolve(null);
+        else resolve(tab);
+      });
+    });
+    if (!tabExists) {
+      activeBgPostWatches.delete(tabId);
+      return;
+    }
+
+    const probe = await new Promise((resolve) => {
+      chrome.scripting.executeScript(
+        {
+          target: { tabId },
+          world: 'MAIN',
+          func: () => {
+            try {
+              const allDialogs = Array.from(document.querySelectorAll('div[role="dialog"]'));
+              const dialogTxt = allDialogs.map((d) => (d.innerText || '')).join(' ').toLowerCase();
+              const bodyTxt = (document.body ? document.body.innerText : '').toLowerCase();
+              const hay = dialogTxt + ' ' + bodyTxt;
+
+              const isRateLimited =
+                hay.includes('você não pode usar este recurso no momento') ||
+                hay.includes('voce nao pode usar este recurso no momento') ||
+                hay.includes('você está temporariamente bloqueado') ||
+                hay.includes('limitamos a frequência') ||
+                hay.includes("you can't use this feature right now") ||
+                hay.includes('temporarily blocked') ||
+                hay.includes('tente novamente mais tarde') ||
+                hay.includes('try again later');
+
+              const isAwaitingAdmin =
+                hay.includes('aguardando aprovação de um administrador') ||
+                hay.includes('pendente de aprovação do administrador') ||
+                hay.includes('enviada para aprovação do administrador') ||
+                hay.includes('sua publicação foi enviada') ||
+                hay.includes('pendiente de aprobación del administrador') ||
+                hay.includes('tu publicación fue enviada') ||
+                hay.includes('pending admin approval') ||
+                hay.includes('sent for admin approval') ||
+                hay.includes('waiting for admin approval') ||
+                hay.includes('submitted for approval') ||
+                hay.includes('your post is pending') ||
+                hay.includes('thanks for your post') ||
+                hay.includes('your post has been submitted');
+
+              const activeDialog = allDialogs.find((d) => {
+                const r = d.getBoundingClientRect();
+                if (r.width < 200 || r.height < 150) return false;
+                if (d.getAttribute('aria-hidden') === 'true') return false;
+                try {
+                  const st = window.getComputedStyle(d);
+                  if (st.display === 'none' || st.visibility === 'hidden' || st.pointerEvents === 'none') return false;
+                  const op = parseFloat(st.opacity || '1');
+                  if (!isNaN(op) && op < 0.35) return false;
+                } catch (e) {}
+                const txt = (d.innerText || '').toLowerCase();
+                return (
+                  Boolean(d.querySelector('div[role="textbox"][contenteditable="true"], div[contenteditable="true"][data-lexical-editor="true"]')) ||
+                  txt.includes('criar post') ||
+                  txt.includes('create post') ||
+                  txt.includes('criar publicação') ||
+                  txt.includes('crie um post público')
+                );
+              });
+
+              let hasEnabledPubBtn = false;
+              if (activeDialog) {
+                const btns = Array.from(activeDialog.querySelectorAll('div[role="button"], button'));
+                hasEnabledPubBtn = btns.some((el) => {
+                  const br = el.getBoundingClientRect();
+                  if (br.width === 0 || br.height === 0) return false;
+                  const bt = ((el.innerText || el.getAttribute('aria-label') || '') + '').trim().toLowerCase();
+                  if (bt !== 'postar' && bt !== 'publicar' && bt !== 'post' && bt !== 'enviar' && bt !== 'submit') return false;
+                  return el.getAttribute('aria-disabled') !== 'true' && !el.disabled && el.getAttribute('tabindex') !== '-1';
+                });
+              }
+
+              return {
+                ok: true,
+                isRateLimited,
+                isAwaitingAdmin,
+                hasDialog: Boolean(activeDialog),
+                hasEnabledPubBtn,
+                userClickedFlag: Boolean(window.__avUserClickedPublish),
+                url: window.location.href
+              };
+            } catch (e) {
+              return { ok: false };
+            }
+          }
+        },
+        (results) => {
+          void chrome.runtime.lastError;
+          resolve(results && results[0] ? results[0].result : null);
+        }
+      );
+    });
+
+    if (!probe || !probe.ok) return;
+
+    if (probe.isRateLimited) {
+      markBgPostFinalized(tabId, job.logId, job.groupSlug);
+      relayToAutoViralTabs({
+        action: 'AUTOVIRAL_FB_POST_RESULT',
+        logId: job.logId,
+        groupId: job.groupId,
+        groupUrl: probe.url || job.groupUrl,
+        groupName: job.groupName,
+        approvalStatus: 'rate_limited',
+        note: 'Facebook exibiu: Tente novamente mais tarde / Limite temporário',
+        timestamp: new Date().toISOString()
+      });
+      return;
+    }
+
+    if (probe.isAwaitingAdmin) {
+      markBgPostFinalized(tabId, job.logId, job.groupSlug);
+      clearPendingPostFromStorage(job.groupSlug);
+      relayToAutoViralTabs({
+        action: 'AUTOVIRAL_FB_POST_RESULT',
+        logId: job.logId,
+        groupId: job.groupId,
+        groupUrl: probe.url || job.groupUrl,
+        groupName: job.groupName,
+        approvalStatus: 'awaiting_admin',
+        timestamp: new Date().toISOString()
+      });
+      if (job.autoCloseOnFinish !== false && !cancelledBgCloseTabs.has(tabId)) {
+        closeGroupTabSafely(tabId, 2600);
+      }
+      return;
+    }
+
+    if (probe.hasDialog) {
+      job.sawDialogOpen = true;
+      job.closedStreak = 0;
+      if (job.didAutoClickPublish && probe.hasEnabledPubBtn && !job.retriedClick && Date.now() - job.startedAt > 3500) {
+        job.retriedClick = true;
+        // Retry click using trusted Chrome Debugger mouse event
+        const isSilent = silentTabIds.has(tabId);
+        if (!isSilent) {
+          await withTabDebugger(tabId, async (sendCmd) => {
+            await sleepMs(260);
+            const btnCoords = await new Promise((resBtn) => {
+              chrome.scripting.executeScript(
+                {
+                  target: { tabId },
+                  world: 'MAIN',
+                  func: () => {
+                    const dlgs = Array.from(document.querySelectorAll('div[role="dialog"]')).filter((d) => {
+                      const r = d.getBoundingClientRect();
+                      return r.width > 200 && r.height > 150 && d.getAttribute('aria-hidden') !== 'true';
+                    });
+                    const dlg = dlgs[dlgs.length - 1];
+                    if (!dlg) return null;
+                    const pubBtn = Array.from(dlg.querySelectorAll('div[role="button"], button')).find((el) => {
+                      const r = el.getBoundingClientRect();
+                      if (r.width === 0 || r.height === 0) return false;
+                      const bt = ((el.innerText || el.getAttribute('aria-label') || '') + '').trim().toLowerCase();
+                      if (bt !== 'postar' && bt !== 'publicar' && bt !== 'post' && bt !== 'enviar' && bt !== 'submit') return false;
+                      return el.getAttribute('aria-disabled') !== 'true' && !el.disabled && el.getAttribute('tabindex') !== '-1';
+                    });
+                    if (!pubBtn) return null;
+                    pubBtn.scrollIntoView({ behavior: 'instant', block: 'nearest' });
+                    const pr = pubBtn.getBoundingClientRect();
+                    return { cx: Math.round(pr.left + pr.width / 2), cy: Math.round(pr.top + pr.height / 2) };
+                  }
+                },
+                (r) => {
+                  void chrome.runtime.lastError;
+                  resBtn(r && r[0] ? r[0].result : null);
+                }
+              );
+            });
+            if (btnCoords) {
+              await dispatchRealTrustedClick(sendCmd, btnCoords.cx, btnCoords.cy, 80);
+            }
+          });
+        }
+      }
+      return;
+    }
+
+    if (job.sawDialogOpen && (job.didAutoClickPublish || job.userClickedPublish || probe.userClickedFlag)) {
+      job.closedStreak = (job.closedStreak || 0) + 1;
+      if (job.closedStreak >= 2) {
+        markBgPostFinalized(tabId, job.logId, job.groupSlug);
+        clearPendingPostFromStorage(job.groupSlug);
+        relayToAutoViralTabs({
+          action: 'AUTOVIRAL_FB_POST_RESULT',
+          logId: job.logId,
+          groupId: job.groupId,
+          groupUrl: probe.url || job.groupUrl,
+          groupName: job.groupName,
+          approvalStatus: 'published',
+          timestamp: new Date().toISOString()
+        });
+        if (job.autoCloseOnFinish !== false && !cancelledBgCloseTabs.has(tabId)) {
+          closeGroupTabSafely(tabId, 2400);
+        }
+      }
+    }
+  } finally {
+    job.inFlight = false;
+  }
+}
 
 // =========================================================================
 // BACKGROUND APPROVAL WATCHDOG (MONITORS EVEN WHEN GROUP TAB IS CLOSED)

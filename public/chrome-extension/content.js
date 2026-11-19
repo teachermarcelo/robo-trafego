@@ -1,4 +1,4 @@
-// AutoViral AI Chrome Extension - Content Script V1.5.6
+// AutoViral AI Chrome Extension - Content Script V1.5.7
 // Runs on Facebook, YouTube, Instagram, Pinterest and AutoViral AI Web Platform
 
 (function () {
@@ -1416,12 +1416,21 @@
     function scheduleAutoCloseTab(msgEl, cancelAutoBtn, baseMsg, delaySeconds) {
       let keepOpen = false;
       let secsLeft = delaySeconds || 4;
+      if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
+        chrome.runtime.sendMessage(
+          { action: 'AUTOVIRAL_SCHEDULE_BG_CLOSE_TAB', delayMs: secsLeft * 1000 },
+          () => { void chrome.runtime.lastError; }
+        );
+      }
       if (cancelAutoBtn) {
         cancelAutoBtn.style.display = 'block';
         cancelAutoBtn.textContent = '✋ Manter esta aba aberta';
         cancelAutoBtn.onclick = () => {
           keepOpen = true;
           cancelAutoBtn.style.display = 'none';
+          if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
+            chrome.runtime.sendMessage({ action: 'AUTOVIRAL_CANCEL_BG_CLOSE_TAB' }, () => { void chrome.runtime.lastError; });
+          }
           if (msgEl) {
             msgEl.textContent = baseMsg + ' (Você já pode fechar esta aba quando quiser.)';
           }
@@ -1501,10 +1510,43 @@
 
     function startSubmissionMonitor(pending, currentSlug, msgEl, didAutoClickPublish, cancelAutoBtn) {
       let finished = false;
-      let ticks = 0;
+      const startedAt = Date.now();
+      let retriedRealPublish = false;
+      let retriedThirdPublish = false;
       let userClickedPublish = !!didAutoClickPublish;
       let sawDialogOpen = !!didAutoClickPublish || !!findCreatePostDialog();
       let dialogClosedStreak = 0;
+
+      const registerBgWatch = (clickedByUser) => {
+        if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
+          chrome.runtime.sendMessage(
+            {
+              action: 'AUTOVIRAL_REGISTER_BG_POST_WATCH',
+              pending: {
+                logId: pending.logId,
+                groupId: pending.groupId,
+                groupUrl: window.location.href,
+                groupSlug: currentSlug,
+                groupName: pending.groupName
+              },
+              didAutoClickPublish: Boolean(didAutoClickPublish),
+              userClickedPublish: Boolean(clickedByUser || userClickedPublish),
+              autoCloseOnFinish: pending.autoJoinAndPost !== false
+            },
+            () => { void chrome.runtime.lastError; }
+          );
+        }
+      };
+
+      const unregisterBgWatch = () => {
+        if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
+          chrome.runtime.sendMessage({ action: 'AUTOVIRAL_UNREGISTER_BG_POST_WATCH' }, () => {
+            void chrome.runtime.lastError;
+          });
+        }
+      };
+
+      registerBgWatch(userClickedPublish);
 
       const attachPublishClickListener = () => {
         if (userClickedPublish) return;
@@ -1518,6 +1560,8 @@
             btn.dataset.avHooked = '1';
             btn.addEventListener('click', () => {
               userClickedPublish = true;
+              try { window.__avUserClickedPublish = true; } catch (e) {}
+              registerBgWatch(true);
               if (msgEl) {
                 msgEl.textContent = '🚀 Publicando no grupo... aguarde confirmação antes de fechar!';
                 msgEl.style.color = '#34d399';
@@ -1529,13 +1573,14 @@
 
       const checkInterval = setInterval(() => {
         if (finished) return;
-        ticks++;
+        const elapsedMs = Date.now() - startedAt;
         attachPublishClickListener();
         const bodyTxt = (document.body ? document.body.innerText : '').toLowerCase();
 
         if (isFacebookRateLimited()) {
           finished = true;
           clearInterval(checkInterval);
+          unregisterBgWatch();
           sendRealPostResultToPlatform({
             logId: pending.logId,
             groupId: pending.groupId,
@@ -1569,6 +1614,7 @@
         ) {
           finished = true;
           clearInterval(checkInterval);
+          unregisterBgWatch();
           sendRealPostResultToPlatform({
             logId: pending.logId,
             groupId: pending.groupId,
@@ -1581,7 +1627,7 @@
             msgEl.style.color = '#fbbf24';
           }
           if (pending.autoJoinAndPost !== false) {
-            scheduleAutoCloseTab(msgEl, cancelAutoBtn, '⏳ Enviada p/ Aprovação do Admin e registrada!', 4);
+            scheduleAutoCloseTab(msgEl, cancelAutoBtn, '⏳ Enviada p/ Aprovação do Admin e registrada!', 3);
           } else if (msgEl) {
             msgEl.textContent = '⏳ Aprovação Pendente do Admin registrada! Já pode fechar esta aba.';
           }
@@ -1592,22 +1638,38 @@
         if (activeDialog) {
           sawDialogOpen = true;
           dialogClosedStreak = 0;
-          if (didAutoClickPublish && ticks === 4) {
+          if (didAutoClickPublish && elapsedMs >= 3500 && !retriedRealPublish) {
+            retriedRealPublish = true;
             const stillEnabledPub = findPublishButtonInDialog(activeDialog);
             if (stillEnabledPub && chrome && chrome.runtime && chrome.runtime.sendMessage) {
               chrome.runtime.sendMessage({ action: 'AUTOVIRAL_REAL_CLICK_PUBLISH' }, () => {
                 void chrome.runtime.lastError;
               });
             }
+          } else if (didAutoClickPublish && elapsedMs >= 9000 && !retriedThirdPublish) {
+            retriedThirdPublish = true;
+            const stillEnabledPub = findPublishButtonInDialog(activeDialog);
+            if (stillEnabledPub) {
+              if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
+                chrome.runtime.sendMessage({ action: 'AUTOVIRAL_MAIN_CLICK_PUBLISH' }, () => {
+                  void chrome.runtime.lastError;
+                });
+              }
+              try {
+                stillEnabledPub.focus();
+                stillEnabledPub.click();
+              } catch (e) {}
+            }
           }
         } else if (sawDialogOpen || userClickedPublish) {
           dialogClosedStreak++;
         }
 
-        if (dialogClosedStreak >= 3) {
+        if (dialogClosedStreak >= 2) {
           if (userClickedPublish) {
             finished = true;
             clearInterval(checkInterval);
+            unregisterBgWatch();
             sendRealPostResultToPlatform({
               logId: pending.logId,
               groupId: pending.groupId,
@@ -1620,14 +1682,15 @@
               msgEl.style.color = '#34d399';
             }
             if (pending.autoJoinAndPost !== false) {
-              scheduleAutoCloseTab(msgEl, cancelAutoBtn, '✅ POSTAGEM FEITA confirmada no Painel!', 4);
+              scheduleAutoCloseTab(msgEl, cancelAutoBtn, '✅ POSTAGEM FEITA confirmada no Painel!', 3);
             } else if (msgEl) {
               msgEl.textContent = '✅ Publicação enviada e confirmada como POSTAGEM FEITA! Já pode fechar esta aba.';
             }
             return;
-          } else if (sawDialogOpen && ticks >= 4) {
+          } else if (sawDialogOpen && elapsedMs >= 4000) {
             finished = true;
             clearInterval(checkInterval);
+            unregisterBgWatch();
             if (msgEl) {
               msgEl.textContent = '⚠️ Janela "Criar post" fechou sem clicar em Publicar. Clique em "Solicitar Entrada / Preencher Post Agora" para tentar de novo.';
               msgEl.style.color = '#fbbf24';
@@ -1636,7 +1699,7 @@
           }
         }
 
-        if (ticks >= 50) {
+        if (elapsedMs >= 95000) {
           finished = true;
           clearInterval(checkInterval);
         }
@@ -2051,7 +2114,7 @@
                   groupUrl: window.location.href,
                   groupName: pending.groupName,
                   approvalStatus: 'composer_stuck',
-                  note: 'Facebook travou o modal automático (Atualize p/ Extensão v1.5.6 ou pause AdBlock). Texto copiado.'
+                  note: 'Facebook travou o modal automático (Atualize p/ Extensão v1.5.7 ou pause AdBlock). Texto copiado.'
                 });
                 if (msgEl) {
                   msgEl.style.color = '#fbbf24';
@@ -2493,6 +2556,9 @@
 
         if (btnPub && pending) {
           btnPub.onclick = () => {
+            if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
+              chrome.runtime.sendMessage({ action: 'AUTOVIRAL_UNREGISTER_BG_POST_WATCH' }, () => { void chrome.runtime.lastError; });
+            }
             sendRealPostResultToPlatform({
               logId: pending.logId,
               groupId: pending.groupId,
@@ -2502,14 +2568,21 @@
             });
             clearStoredPendingGroupPost(currentSlug);
             if (msgEl) {
-              msgEl.textContent = '✅ Confirmado como POSTAGEM FEITA no AutoViral!';
               msgEl.style.color = '#34d399';
+            }
+            if (pending.autoJoinAndPost !== false) {
+              scheduleAutoCloseTab(msgEl, cancelAutoBtn, '✅ POSTAGEM FEITA confirmada no AutoViral!', 2);
+            } else if (msgEl) {
+              msgEl.textContent = '✅ Confirmado como POSTAGEM FEITA no AutoViral!';
             }
           };
         }
 
         if (btnAdm && pending) {
           btnAdm.onclick = () => {
+            if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
+              chrome.runtime.sendMessage({ action: 'AUTOVIRAL_UNREGISTER_BG_POST_WATCH' }, () => { void chrome.runtime.lastError; });
+            }
             sendRealPostResultToPlatform({
               logId: pending.logId,
               groupId: pending.groupId,
@@ -2519,8 +2592,12 @@
             });
             clearStoredPendingGroupPost(currentSlug);
             if (msgEl) {
-              msgEl.textContent = '⏳ Confirmado como AGUARDANDO ADMIN no AutoViral!';
               msgEl.style.color = '#fbbf24';
+            }
+            if (pending.autoJoinAndPost !== false) {
+              scheduleAutoCloseTab(msgEl, cancelAutoBtn, '⏳ AGUARDANDO ADMIN confirmado no AutoViral!', 2);
+            } else if (msgEl) {
+              msgEl.textContent = '⏳ Confirmado como AGUARDANDO ADMIN no AutoViral!';
             }
           };
         }

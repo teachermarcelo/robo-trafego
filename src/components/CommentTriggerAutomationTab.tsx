@@ -184,7 +184,7 @@ export const CommentTriggerAutomationTab: React.FC<CommentTriggerAutomationTabPr
     safeSetLocalStorageJson(TRIGGER_STORAGE_KEYS.SETTINGS, settings);
   }, [settings]);
 
-  // Sync rules + settings to Chrome Extension v1.6.0 automatically whenever they change
+  // Sync rules + settings to Chrome Extension v1.6.1 automatically whenever they change
   const syncRulesToExtension = (showToast = false) => {
     try {
       const preparedRules = rules.map((r) => ({
@@ -209,7 +209,7 @@ export const CommentTriggerAutomationTab: React.FC<CommentTriggerAutomationTabPr
         setSyncedToast(true);
         window.setTimeout(() => setSyncedToast(false), 2400);
         onNotifyBanner(
-          `✅ ${rules.filter((r) => r.active).length} regra(s) Gatilho → Link sincronizadas com a Extensão v1.6.0 (${settings.mode === 'auto' ? 'Modo Automático Seguro' : 'Modo Semi-Automático'})!`,
+          `✅ ${rules.filter((r) => r.active).length} regra(s) Gatilho → Link sincronizadas com a Extensão v1.6.1 (${settings.mode === 'auto' ? 'Modo Automático Seguro' : 'Modo Semi-Automático'})!`,
           'success'
         );
       }
@@ -220,7 +220,7 @@ export const CommentTriggerAutomationTab: React.FC<CommentTriggerAutomationTabPr
     syncRulesToExtension(false);
   }, [rules, settings]);
 
-  // Listen for real replies reported back from Chrome Extension v1.6.0
+  // Listen for real replies reported back from Chrome Extension v1.6.1
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       if (!event.data || event.data.type !== 'AUTOVIRAL_COMMENT_TRIGGER_RESULT') return;
@@ -568,7 +568,7 @@ export const CommentTriggerAutomationTab: React.FC<CommentTriggerAutomationTabPr
                 FLUXO SIMPLES: GATILHO → LINK PRESELL RASTREADO
               </span>
               <span className="text-[11px] text-emerald-300 font-semibold">
-                {activeRulesCount} regra(s) ativa(s) · Conectado à Extensão v1.6.0
+                {activeRulesCount} regra(s) ativa(s) · Conectado à Extensão v1.6.1
               </span>
             </div>
             <h3 className="text-base font-bold text-white">
@@ -593,10 +593,10 @@ export const CommentTriggerAutomationTab: React.FC<CommentTriggerAutomationTabPr
               onClick={onDownloadExtensionZip}
               disabled={isDownloadingExt}
               className="px-3.5 py-2 bg-cyan-600/25 hover:bg-cyan-600/40 border border-cyan-400/50 text-cyan-100 text-xs font-bold rounded-lg inline-flex items-center gap-1.5 cursor-pointer"
-              title="Baixar a Extensão Chrome v1.6.0 com motor de resposta automática nos comentários"
+              title="Baixar a Extensão Chrome v1.6.1 com motor de resposta automática nos comentários"
             >
               <Download className="w-3.5 h-3.5" />
-              <span>{isDownloadingExt ? 'Gerando ZIP...' : 'Baixar Extensão v1.6.0 (.ZIP)'}</span>
+              <span>{isDownloadingExt ? 'Gerando ZIP...' : 'Baixar Extensão v1.6.1 (.ZIP)'}</span>
             </button>
           </div>
         </div>
@@ -1173,7 +1173,7 @@ export const CommentTriggerAutomationTab: React.FC<CommentTriggerAutomationTabPr
           <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 text-xs text-slate-400 flex items-center gap-2">
             <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0" />
             <span>
-              Assim que a Extensão v1.6.0 detectar alguém comentando um dos seus gatilhos (ex.: <strong>“EU QUERO”</strong>), cada resposta enviada com seu link Presell aparecerá registrada aqui em tempo real.
+              Assim que a Extensão v1.6.1 detectar alguém comentando um dos seus gatilhos (ex.: <strong>“EU QUERO”</strong>), cada resposta enviada com seu link Presell aparecerá registrada aqui em tempo real.
             </span>
           </div>
         ) : (

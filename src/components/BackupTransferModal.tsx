@@ -374,7 +374,7 @@ export const BackupTransferModal: React.FC<BackupTransferModalProps> = ({
 
           {/* Note about Chrome Extension */}
           <div className="bg-amber-950/30 border border-amber-800/40 rounded-xl p-3 text-[11px] text-amber-200/90 leading-relaxed">
-            <strong>💡 Dica importante para Aba Anônima no Chrome:</strong> por padrão o Google Chrome desativa extensões na janela anônima. Se quiser que a <strong>extensão v1.6.0</strong> poste no Facebook usando uma aba anônima, acesse{' '}
+            <strong>💡 Dica importante para Aba Anônima no Chrome:</strong> por padrão o Google Chrome desativa extensões na janela anônima. Se quiser que a <strong>extensão v1.6.1</strong> poste no Facebook usando uma aba anônima, acesse{' '}
             <span className="font-mono text-white bg-slate-900 px-1.5 py-0.5 rounded">chrome://extensions</span> → <strong>Detalhes</strong> da extensão AutoViral AI → ative{' '}
             <strong>"Permitir no modo de navegação anônima"</strong>.
           </div>

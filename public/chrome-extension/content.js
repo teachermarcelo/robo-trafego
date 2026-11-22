@@ -1,4 +1,4 @@
-// AutoViral AI Chrome Extension - Content Script V1.6.0
+// AutoViral AI Chrome Extension - Content Script V1.6.1
 // Runs on Facebook, YouTube, Instagram, Pinterest and AutoViral AI Web Platform
 
 (function () {
@@ -2255,7 +2255,7 @@
                   groupUrl: window.location.href,
                   groupName: pending.groupName,
                   approvalStatus: 'composer_stuck',
-                  note: 'Facebook travou o modal automático (Atualize p/ Extensão v1.6.0 ou pause AdBlock). Texto copiado.'
+                  note: 'Facebook travou o modal automático (Atualize p/ Extensão v1.6.1 ou pause AdBlock). Texto copiado.'
                 });
                 if (msgEl) {
                   msgEl.style.color = '#fbbf24';
@@ -2998,15 +2998,35 @@
       return null;
     }
 
-    function extractVisibleFacebookComments() {
-      const articles = Array.from(document.querySelectorAll('div[role="article"]'));
+    function findActivePostModalDialog() {
+      const dialogs = Array.from(document.querySelectorAll('div[role="dialog"]'));
+      const scored = [];
+      dialogs.forEach((d, idx) => {
+        const r = d.getBoundingClientRect();
+        if (r.width < 320 || r.height < 260) return;
+        if (d.getAttribute('aria-hidden') === 'true') return;
+        try {
+          const st = window.getComputedStyle(d);
+          if (st.display === 'none' || st.visibility === 'hidden' || st.pointerEvents === 'none') return;
+        } catch (e) {}
+        const arts = d.querySelectorAll('div[role="article"]');
+        if (arts.length === 0) return;
+        scored.push({ d, score: idx * 100 + arts.length * 10 });
+      });
+      scored.sort((a, b) => b.score - a.score);
+      return scored[0] ? scored[0].d : null;
+    }
+
+    function extractVisibleFacebookComments(rootScope) {
+      const scope = rootScope || document;
+      const articles = Array.from(scope.querySelectorAll('div[role="article"]'));
       const results = [];
       const seenNodes = new Set();
 
       for (const art of articles) {
         if (seenNodes.has(art)) continue;
         const rect = art.getBoundingClientRect();
-        if (rect.width < 120 || rect.height < 28) continue;
+        if (rect.width < 100 || rect.height < 24) continue;
 
         const ariaRaw = (art.getAttribute('aria-label') || '').trim();
         const ariaLow = normalizeTriggerStr(ariaRaw);
@@ -3043,7 +3063,7 @@
           if (!t || t.length < 2) return false;
           if (normalizeTriggerStr(t) === normalizeTriggerStr(authorName)) return false;
           const low = normalizeTriggerStr(t);
-          if (['curtir', 'responder', 'like', 'reply', 'me gusta', 'compartilhar', 'share', 'editar', 'excluir', 'autor', 'author', 'top fan', 'fa numero 1'].includes(low)) {
+          if (['curtir', 'responder', 'like', 'reply', 'me gusta', 'compartilhar', 'share', 'editar', 'excluir', 'autor', 'author', 'top fan', 'fa numero 1', 'seguir', 'follow'].includes(low)) {
             return false;
           }
           // Skip parent wrapper if it contains child dir=auto elements
@@ -3094,104 +3114,99 @@
       return null;
     }
 
-    function findActiveReplyTextboxNear(commentArticle) {
-      const active = document.activeElement;
-      if (active && active.getAttribute && active.getAttribute('contenteditable') === 'true' && active.getAttribute('role') === 'textbox') {
-        return active;
+    function getVisibleCommentTextboxes(rootScope) {
+      const scope = rootScope || document;
+      return Array.from(
+        scope.querySelectorAll('div[contenteditable="true"][role="textbox"], div[contenteditable="true"][data-lexical-editor="true"]')
+      ).filter((b) => {
+        const r = b.getBoundingClientRect();
+        return r.width >= 50 && r.height >= 14;
+      });
+    }
+
+    function findActiveReplyTextboxNear(commentArticle, beforeBoxesSet, rootScope) {
+      const scope = rootScope || document;
+      const allNow = getVisibleCommentTextboxes(scope);
+
+      // 1. Best signal: a brand-new visible reply box that appeared right after clicking "Responder"
+      if (beforeBoxesSet) {
+        const newlyOpened = allNow.find((b) => !beforeBoxesSet.has(b));
+        if (newlyOpened) return newlyOpened;
       }
+
+      // 2. Second best: currently focused contenteditable textbox whose label is a reply box
+      const active = document.activeElement;
+      if (
+        active &&
+        active.getAttribute &&
+        active.getAttribute('contenteditable') === 'true' &&
+        (active.getAttribute('role') === 'textbox' || active.getAttribute('data-lexical-editor') === 'true')
+      ) {
+        const lbl = normalizeTriggerStr(active.getAttribute('aria-label') || active.getAttribute('aria-placeholder') || '');
+        if (lbl.includes('respond') || lbl.includes('reply') || lbl.includes('contestar')) {
+          return active;
+        }
+      }
+
+      // 3. Third: walk up ancestors looking specifically for a reply box ("Responda..." / "Reply...")
       let container = commentArticle.parentElement;
-      for (let depth = 0; depth < 5 && container && container !== document.body; depth++) {
-        const boxes = Array.from(container.querySelectorAll('div[contenteditable="true"][role="textbox"], div[contenteditable="true"][data-lexical-editor="true"]'));
-        const visibleBox = boxes.find((b) => {
-          const r = b.getBoundingClientRect();
-          if (r.width < 60 || r.height < 16) return false;
+      for (let depth = 0; depth < 6 && container && container !== document.body; depth++) {
+        const boxes = getVisibleCommentTextboxes(container);
+        const replyOnly = boxes.find((b) => {
           const lbl = normalizeTriggerStr(b.getAttribute('aria-label') || b.getAttribute('aria-placeholder') || '');
-          return lbl.includes('respond') || lbl.includes('reply') || lbl.includes('coment') || lbl.includes('comment') || lbl === '';
+          return lbl.includes('respond') || lbl.includes('reply') || lbl.includes('contestar');
         });
-        if (visibleBox) return visibleBox;
+        if (replyOnly) return replyOnly;
         container = container.parentElement;
+      }
+
+      // 4. Last fallback: any focused textbox or nearest visible textbox inside immediate thread
+      if (active && active.getAttribute && active.getAttribute('contenteditable') === 'true') {
+        return active;
       }
       return null;
     }
 
-    async function insertTextIntoCommentReplyBox(textbox, text) {
+    async function typeAndSubmitCommentReplyReal(textbox, text, autoSubmit) {
+      // Mark this exact reply textbox so background.js (Chrome Debugger + MAIN world) targets it cleanly
       try {
-        textbox.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      } catch (e) {}
-      await new Promise((r) => setTimeout(r, 250));
-      try {
-        textbox.focus();
-        textbox.click();
+        document.querySelectorAll('[data-autoviral-reply-target="1"]').forEach((el) => {
+          el.removeAttribute('data-autoviral-reply-target');
+        });
+        textbox.setAttribute('data-autoviral-reply-target', '1');
       } catch (e) {}
 
-      // Place caret at end (preserving Facebook's @Author mention tag if Facebook pre-populated it)
       try {
-        const sel = window.getSelection();
-        if (sel) {
-          const range = document.createRange();
-          range.selectNodeContents(textbox);
-          range.collapse(false);
-          sel.removeAllRanges();
-          sel.addRange(range);
+        textbox.scrollIntoView({ behavior: 'instant', block: 'center' });
+      } catch (e) {}
+      await new Promise((r) => setTimeout(r, 220));
+
+      const bgResult = await new Promise((resolve) => {
+        if (!chrome || !chrome.runtime || !chrome.runtime.sendMessage) {
+          resolve({ ok: false, reason: 'no_runtime' });
+          return;
         }
-      } catch (e) {}
-
-      const existingLen = (textbox.innerText || '').trim().length;
-      const textToPaste = existingLen > 0 ? ` ${text}` : text;
-
-      try {
-        const dt = new DataTransfer();
-        dt.setData('text/plain', textToPaste);
-        textbox.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
-      } catch (e) {}
-
-      await new Promise((r) => setTimeout(r, 280));
-      const afterPaste = (textbox.innerText || textbox.textContent || '').trim();
-      if (!afterPaste.includes(text.slice(0, Math.min(18, text.length)))) {
-        try {
-          textbox.focus();
-          document.execCommand('insertText', false, textToPaste);
-        } catch (e) {}
-        try {
-          textbox.dispatchEvent(new InputEvent('input', { bubbles: true, data: textToPaste, inputType: 'insertText' }));
-        } catch (e) {}
-      }
-      await new Promise((r) => setTimeout(r, 250));
-      const finalTxt = (textbox.innerText || textbox.textContent || '').trim();
-      return finalTxt.length > existingLen + 4;
-    }
-
-    async function submitCommentReplyBox(textbox) {
-      textbox.focus();
-      const enterInit = {
-        key: 'Enter',
-        code: 'Enter',
-        keyCode: 13,
-        which: 13,
-        bubbles: true,
-        cancelable: true
-      };
-      try { textbox.dispatchEvent(new KeyboardEvent('keydown', enterInit)); } catch (e) {}
-      try { textbox.dispatchEvent(new KeyboardEvent('keypress', enterInit)); } catch (e) {}
-      try { textbox.dispatchEvent(new KeyboardEvent('keyup', enterInit)); } catch (e) {}
-
-      await new Promise((r) => setTimeout(r, 650));
-      // Fallback: if text still remains in box, click nearby send/comment icon button
-      const remaining = (textbox.innerText || '').trim();
-      if (remaining.length > 8) {
-        const form = textbox.closest('form') || textbox.parentElement && textbox.parentElement.parentElement;
-        if (form) {
-          const btns = Array.from(form.querySelectorAll('div[role="button"], button'));
-          const sendBtn = btns.find((b) => {
-            const lbl = normalizeTriggerStr(b.getAttribute('aria-label') || b.innerText || '');
-            const disabled = b.getAttribute('aria-disabled') === 'true' || b.disabled;
-            return !disabled && (lbl === 'comentar' || lbl === 'comment' || lbl === 'responder' || lbl === 'enviar' || lbl === 'send');
-          });
-          if (sendBtn) {
-            try { sendBtn.click(); } catch (e) {}
+        chrome.runtime.sendMessage(
+          {
+            action: 'AUTOVIRAL_REAL_REPLY_COMMENT',
+            text,
+            autoSubmit: Boolean(autoSubmit)
+          },
+          (res) => {
+            if (chrome.runtime.lastError) {
+              resolve({ ok: false, reason: chrome.runtime.lastError.message || 'runtime_error' });
+            } else {
+              resolve(res || { ok: false, reason: 'empty_response' });
+            }
           }
-        }
-      }
+        );
+      });
+
+      try {
+        textbox.removeAttribute('data-autoviral-reply-target');
+      } catch (e) {}
+
+      return bgResult;
     }
 
     async function runCommentTriggerScanOnPage(explicitJob, triggeredManually) {
@@ -3241,12 +3256,21 @@
           setTriggerWidgetStatus('⚠️ Nenhuma regra Gatilho → Link sincronizada. Abra a aba 1C no painel e clique em "Sincronizar".', 'danger');
           return;
         }
+        const rulesWithLink = activeRules.filter((r) => Boolean((r.baseLinkUrl || r.trackedLinkPreview || '').trim()));
+        if (rulesWithLink.length === 0) {
+          setTriggerWidgetStatus('⚠️ Sua regra na aba 1C está sem LINK! Cole o link na aba 1C, salve e sincronize.', 'danger');
+          return;
+        }
 
-        setTriggerWidgetStatus(`🔍 Lendo comentários (${activeRules.length} regra(s) · modo ${mode === 'auto' ? 'Automático Seguro' : 'Semi-Automático'})...`, 'info');
+        setTriggerWidgetStatus(`🔍 Lendo comentários (${rulesWithLink.length} regra(s) · modo ${mode === 'auto' ? 'Automático Seguro' : 'Semi-Automático'})...`, 'info');
 
-        // Lightly expand "Ver mais comentários" (max 2 clicks) so fresh comments appear
+        // Prefer active visible post modal dialog when Facebook opens a post in a modal
+        const activePostDialog = findActivePostModalDialog();
+        const scanScope = activePostDialog || document;
+
+        // Lightly expand "Ver mais comentários" inside active scope (max 2 clicks)
         try {
-          const expandBtns = Array.from(document.querySelectorAll('div[role="button"], span[role="button"]')).filter((el) => {
+          const expandBtns = Array.from(scanScope.querySelectorAll('div[role="button"], span[role="button"]')).filter((el) => {
             const t = normalizeTriggerStr(el.innerText || '');
             return (
               t.includes('ver mais comentarios') ||
@@ -3267,7 +3291,7 @@
           : {};
 
         const pageKey = window.location.pathname.replace(/\/+$/, '').toLowerCase();
-        const comments = extractVisibleFacebookComments();
+        const comments = extractVisibleFacebookComments(scanScope);
 
         const matches = [];
         const localSeenAuthors = new Set();
@@ -3278,7 +3302,7 @@
           if (repliedKeysMap[commentKey] || repliedKeysMap[authorKey] || localSeenAuthors.has(authorKey)) {
             continue;
           }
-          const matched = matchCommentWithActiveRules(c.commentText, activeRules, restrictRuleId);
+          const matched = matchCommentWithActiveRules(c.commentText, rulesWithLink, restrictRuleId);
           if (matched) {
             localSeenAuthors.add(authorKey);
             matches.push({
@@ -3337,19 +3361,23 @@
           );
 
           try {
-            item.article.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            item.article.scrollIntoView({ behavior: 'instant', block: 'center' });
           } catch (e) {}
-          await new Promise((r) => setTimeout(r, 450));
+          await new Promise((r) => setTimeout(r, 400));
 
           const replyBtn = findReplyButtonForComment(item.article);
           if (!replyBtn) {
             continue;
           }
+
+          // Snapshot visible reply boxes BEFORE clicking "Responder" to identify the exact box that opens
+          const beforeBoxes = new Set(getVisibleCommentTextboxes(scanScope));
           try { replyBtn.click(); } catch (e) {}
           await new Promise((r) => setTimeout(r, 950));
 
-          const replyBox = findActiveReplyTextboxNear(item.article);
+          const replyBox = findActiveReplyTextboxNear(item.article, beforeBoxes, scanScope);
           if (!replyBox) {
+            setTriggerWidgetStatus(`⚠️ Não encontrei a caixa de resposta para ${item.authorName}.`, 'danger');
             continue;
           }
 
@@ -3360,16 +3388,20 @@
             groupName
           );
 
-          const inserted = await insertTextIntoCommentReplyBox(replyBox, replyText);
-          if (!inserted) {
+          const typeResult = await typeAndSubmitCommentReplyReal(replyBox, replyText, mode === 'auto');
+          if (!typeResult || !typeResult.ok) {
+            try { navigator.clipboard && navigator.clipboard.writeText(replyText); } catch (e) {}
+            setTriggerWidgetStatus(
+              `⚠️ FB bloqueou digitação automática p/ ${item.authorName} — texto + link copiados (Ctrl+V e Enter).`,
+              'danger'
+            );
             continue;
           }
 
-          // Save anti-duplicate keys immediately
+          // Save anti-duplicate keys immediately after verified insertion
           const nowIso = new Date().toISOString();
           repliedKeysMap[item.commentKey] = nowIso;
           repliedKeysMap[item.authorKey] = nowIso;
-          // Trim map to last 1500 keys to keep storage lean
           const allKeys = Object.keys(repliedKeysMap);
           if (allKeys.length > 1500) {
             allKeys.slice(0, allKeys.length - 1500).forEach((k) => { delete repliedKeysMap[k]; });
@@ -3387,7 +3419,7 @@
             } catch (e) {}
             processedCount++;
             setTriggerWidgetStatus(
-              `🖐️ SEMI-AUTO: Resposta preenchida p/ ${item.authorName}! Confira e aperte Enter. (${batch.length - 1} restante(s))`,
+              `🖐️ SEMI-AUTO: Link preenchido p/ ${item.authorName}! Confira e aperte Enter. (${batch.length - 1} restante(s))`,
               'success'
             );
             sendCommentTriggerResultToPlatform({
@@ -3406,8 +3438,6 @@
             });
             break;
           } else {
-            await new Promise((r) => setTimeout(r, 650));
-            await submitCommentReplyBox(replyBox);
             processedCount++;
             sendCommentTriggerResultToPlatform({
               status: 'replied',
@@ -3428,7 +3458,7 @@
               const waitSec = Math.floor(minDelaySec + Math.random() * Math.max(1, maxDelaySec - minDelaySec));
               for (let s = waitSec; s > 0; s--) {
                 setTriggerWidgetStatus(
-                  `✅ Respondido p/ ${item.authorName}! Pausa segura anti-bloqueio: ${s}s p/ próximo (${idx + 2}/${batch.length})...`,
+                  `✅ Link enviado p/ ${item.authorName}! Pausa segura anti-bloqueio: ${s}s p/ próximo (${idx + 2}/${batch.length})...`,
                   'success'
                 );
                 await new Promise((r) => setTimeout(r, 1000));
@@ -3439,8 +3469,10 @@
 
         if (mode === 'auto') {
           setTriggerWidgetStatus(
-            `✅ Concluído! ${processedCount} comentário(s) respondido(s) com segurança.`,
-            'success'
+            processedCount > 0
+              ? `✅ Concluído! ${processedCount} comentário(s) respondido(s) com o link!`
+              : '⚠️ Nenhum comentário pôde ser preenchido agora. Atualize para a Extensão v1.6.1 e tente novamente.',
+            processedCount > 0 ? 'success' : 'danger'
           );
         }
         sendCommentTriggerResultToPlatform({

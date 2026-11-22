@@ -1,7 +1,7 @@
 // AutoViral AI Chrome Extension - Background Service Worker (Manifest V3)
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('[AutoViral AI] Extensão v1.6.0 instalada com sucesso!');
+  console.log('[AutoViral AI] Extensão v1.6.1 instalada com sucesso!');
   chrome.storage.local.get(['autoviral_interval', 'autoviral_mapped_groups', 'autoviral_waiting_approval_map'], (res) => {
     chrome.storage.local.set({
       autoviral_interval: res.autoviral_interval || 350,
@@ -561,6 +561,302 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendResponse({ success: true, tabId: targetTabId, jobId: scanJob.jobId });
       });
     });
+    return true;
+  }
+
+  // Real trusted typing + submit into Facebook Lexical comment reply box (Subaba 1C v1.6.1)
+  if (request.action === 'AUTOVIRAL_REAL_REPLY_COMMENT') {
+    const tabId = sender && sender.tab && sender.tab.id;
+    const rawText = String(request.text || '').trim();
+    const autoSubmit = Boolean(request.autoSubmit);
+    if (!tabId || !rawText || !chrome.scripting || !chrome.scripting.executeScript) {
+      sendResponse({ ok: false, reason: 'missing_tab_or_text' });
+      return false;
+    }
+
+    (async () => {
+      try {
+        // Ensure tab is active so Chrome Debugger trusted input works reliably
+        try {
+          await new Promise((resolve) => {
+            chrome.tabs.update(tabId, { active: true }, () => {
+              void chrome.runtime.lastError;
+              resolve();
+            });
+          });
+        } catch (e) {}
+
+        const measureReplyTarget = (scrollFirst) =>
+          new Promise((resolve) => {
+            chrome.scripting.executeScript(
+              {
+                target: { tabId },
+                world: 'MAIN',
+                args: [Boolean(scrollFirst)],
+                func: (shouldScroll) => {
+                  try {
+                    const tb = document.querySelector('[data-autoviral-reply-target="1"]');
+                    if (!tb) return { ok: false, reason: 'target_not_found' };
+                    if (shouldScroll) {
+                      try { tb.scrollIntoView({ behavior: 'instant', block: 'center' }); } catch (e) {}
+                    }
+                    const r = tb.getBoundingClientRect();
+                    if (r.width < 20 || r.height < 12) return { ok: false, reason: 'target_hidden' };
+
+                    // Find paper-plane Send/Comment button inside the same comment form/container
+                    let sendBtnInfo = null;
+                    const form = tb.closest('form') || (tb.parentElement && tb.parentElement.parentElement && tb.parentElement.parentElement.parentElement);
+                    if (form) {
+                      const submitById = form.querySelector('#focused-state-composer-submit div[role="button"], #focused-state-composer-submit button, #focused-state-composer-submit');
+                      const allBtns = Array.from(form.querySelectorAll('div[role="button"], button'));
+                      if (submitById) allBtns.unshift(submitById);
+                      for (const b of allBtns) {
+                        const br = b.getBoundingClientRect();
+                        if (br.width < 12 || br.height < 12) continue;
+                        const lbl = ((b.getAttribute('aria-label') || b.innerText || '') + '')
+                          .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+                        const disabled = b.getAttribute('aria-disabled') === 'true' || b.disabled;
+                        const isSendLabel =
+                          lbl === 'comentar' ||
+                          lbl === 'comment' ||
+                          lbl === 'responder' ||
+                          lbl === 'reply' ||
+                          lbl === 'enviar' ||
+                          lbl === 'send' ||
+                          Boolean(b.closest('#focused-state-composer-submit'));
+                        if (isSendLabel && !disabled) {
+                          sendBtnInfo = {
+                            cx: Math.round(br.left + br.width / 2),
+                            cy: Math.round(br.top + br.height / 2)
+                          };
+                          break;
+                        }
+                      }
+                    }
+
+                    const curText = (tb.innerText || tb.textContent || '').trim();
+                    return {
+                      ok: true,
+                      cx: Math.round(r.left + Math.min(Math.max(r.width * 0.35, 30), 140)),
+                      cy: Math.round(r.top + Math.min(r.height / 2, 20)),
+                      textLen: curText.length,
+                      sendBtn: sendBtnInfo
+                    };
+                  } catch (err) {
+                    return { ok: false, error: String(err) };
+                  }
+                }
+              },
+              (results) => {
+                void chrome.runtime.lastError;
+                resolve(results && results[0] ? results[0].result : null);
+              }
+            );
+          });
+
+        // Flatten newlines to single spaces so Facebook comments never submit mid-message
+        const cleanText = rawText.replace(/\r?\n+/g, ' ').replace(/\s{2,}/g, ' ').trim();
+
+        const preInfo = await measureReplyTarget(true);
+        if (!preInfo || !preInfo.ok) {
+          sendResponse({ ok: false, reason: (preInfo && preInfo.reason) || 'target_missing' });
+          return;
+        }
+        const initialLen = Number(preInfo.textLen) || 0;
+
+        // 1. Primary path: Chrome Debugger real trusted click + Input.insertText + real Enter/Send click
+        const dbg = await withTabDebugger(tabId, async (sendCmd) => {
+          await sleepMs(260);
+          const boxInfo = await measureReplyTarget(false);
+          if (!boxInfo || !boxInfo.ok) return { inserted: false, reason: 'target_lost' };
+
+          await dispatchRealTrustedClick(sendCmd, boxInfo.cx, boxInfo.cy, 70);
+          await sleepMs(140);
+
+          // Move caret to end to preserve any @mention pill Facebook pre-inserted
+          await sendCmd('Input.dispatchKeyEvent', {
+            type: 'keyDown',
+            key: 'End',
+            code: 'End',
+            windowsVirtualKeyCode: 35,
+            nativeVirtualKeyCode: 35
+          });
+          await sendCmd('Input.dispatchKeyEvent', {
+            type: 'keyUp',
+            key: 'End',
+            code: 'End',
+            windowsVirtualKeyCode: 35,
+            nativeVirtualKeyCode: 35
+          });
+          await sleepMs(60);
+
+          if (initialLen > 0) {
+            await sendCmd('Input.insertText', { text: ' ' });
+            await sleepMs(40);
+          }
+
+          // Insert text + URLs with real Space after URL so Facebook turns it into a clickable link
+          const tokens = cleanText.split(/(https?:\/\/[^\s<>"']+)/gi);
+          for (let i = 0; i < tokens.length; i++) {
+            const part = tokens[i];
+            if (!part) continue;
+            if (/^https?:\/\//i.test(part)) {
+              await sendCmd('Input.insertText', { text: part });
+              await sendCmd('Input.dispatchKeyEvent', {
+                type: 'keyDown',
+                key: ' ',
+                code: 'Space',
+                text: ' ',
+                windowsVirtualKeyCode: 32,
+                nativeVirtualKeyCode: 32
+              });
+              await sendCmd('Input.dispatchKeyEvent', {
+                type: 'keyUp',
+                key: ' ',
+                code: 'Space',
+                windowsVirtualKeyCode: 32,
+                nativeVirtualKeyCode: 32
+              });
+              await sleepMs(280);
+            } else {
+              let chunk = part;
+              if (i > 0 && /^https?:\/\//i.test(tokens[i - 1]) && chunk.startsWith(' ')) {
+                chunk = chunk.slice(1);
+              }
+              if (chunk) {
+                await sendCmd('Input.insertText', { text: chunk });
+                await sleepMs(40);
+              }
+            }
+          }
+
+          await sleepMs(260);
+          const verify = await measureReplyTarget(false);
+          const afterLen = verify && typeof verify.textLen === 'number' ? verify.textLen : 0;
+          if (afterLen < initialLen + Math.min(8, cleanText.length)) {
+            return { inserted: false, reason: 'text_did_not_stick' };
+          }
+
+          let submitted = false;
+          if (autoSubmit) {
+            await sleepMs(420);
+            await sendCmd('Input.dispatchKeyEvent', {
+              type: 'keyDown',
+              key: 'Enter',
+              code: 'Enter',
+              text: '\r',
+              windowsVirtualKeyCode: 13,
+              nativeVirtualKeyCode: 13
+            });
+            await sendCmd('Input.dispatchKeyEvent', {
+              type: 'keyUp',
+              key: 'Enter',
+              code: 'Enter',
+              windowsVirtualKeyCode: 13,
+              nativeVirtualKeyCode: 13
+            });
+            await sleepMs(850);
+
+            const afterEnter = await measureReplyTarget(false);
+            // If box disappeared or cleared, Enter succeeded!
+            if (!afterEnter || !afterEnter.ok || (afterEnter.textLen || 0) <= initialLen + 3) {
+              submitted = true;
+            } else if (afterEnter.sendBtn) {
+              await dispatchRealTrustedClick(sendCmd, afterEnter.sendBtn.cx, afterEnter.sendBtn.cy, 60);
+              await sleepMs(700);
+              submitted = true;
+            }
+          }
+
+          return { inserted: true, submitted };
+        });
+
+        if (dbg.usedDebugger && dbg.value && dbg.value.inserted) {
+          sendResponse({
+            ok: true,
+            inserted: true,
+            submitted: Boolean(dbg.value.submitted),
+            mode: 'debugger_trusted'
+          });
+          return;
+        }
+
+        // 2. Fallback path: MAIN-world paste/execCommand + submit button click
+        const mainRes = await new Promise((resolve) => {
+          chrome.scripting.executeScript(
+            {
+              target: { tabId },
+              world: 'MAIN',
+              args: [cleanText, autoSubmit],
+              func: (text, shouldSubmit) => {
+                try {
+                  const tb = document.querySelector('[data-autoviral-reply-target="1"]');
+                  if (!tb) return { inserted: false, reason: 'main_target_missing' };
+                  tb.scrollIntoView({ behavior: 'instant', block: 'center' });
+                  tb.focus();
+                  tb.click();
+                  try {
+                    const sel = window.getSelection();
+                    if (sel) {
+                      const range = document.createRange();
+                      range.selectNodeContents(tb);
+                      range.collapse(false);
+                      sel.removeAllRanges();
+                      sel.addRange(range);
+                    }
+                  } catch (e) {}
+
+                  const beforeLen = (tb.innerText || '').trim().length;
+                  const payload = beforeLen > 0 ? ` ${text}` : text;
+                  try {
+                    const dt = new DataTransfer();
+                    dt.setData('text/plain', payload);
+                    tb.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+                  } catch (e) {}
+
+                  const midLen = (tb.innerText || '').trim().length;
+                  if (midLen <= beforeLen + 3) {
+                    try { document.execCommand('insertText', false, payload); } catch (e) {}
+                    try { tb.dispatchEvent(new InputEvent('input', { bubbles: true, data: payload, inputType: 'insertText' })); } catch (e) {}
+                  }
+
+                  const afterLen = (tb.innerText || '').trim().length;
+                  const inserted = afterLen > beforeLen + 3;
+                  if (inserted && shouldSubmit) {
+                    setTimeout(() => {
+                      const form = tb.closest('form') || (tb.parentElement && tb.parentElement.parentElement && tb.parentElement.parentElement.parentElement);
+                      const sendBtn = form && form.querySelector('#focused-state-composer-submit div[role="button"], #focused-state-composer-submit button, div[role="button"][aria-label="Comentar"], div[role="button"][aria-label="Comment"], div[role="button"][aria-label="Responder"]');
+                      if (sendBtn && sendBtn.getAttribute('aria-disabled') !== 'true') {
+                        sendBtn.click();
+                      } else {
+                        tb.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+                      }
+                    }, 350);
+                  }
+                  return { inserted, submitted: inserted && shouldSubmit };
+                } catch (err) {
+                  return { inserted: false, error: String(err) };
+                }
+              }
+            },
+            (results) => {
+              void chrome.runtime.lastError;
+              resolve(results && results[0] ? results[0].result : null);
+            }
+          );
+        });
+
+        sendResponse({
+          ok: Boolean(mainRes && mainRes.inserted),
+          inserted: Boolean(mainRes && mainRes.inserted),
+          submitted: Boolean(mainRes && mainRes.submitted),
+          mode: 'main_world_fallback',
+          reason: (mainRes && mainRes.reason) || (dbg.value && dbg.value.reason) || dbg.error || 'insert_failed'
+        });
+      } catch (err) {
+        sendResponse({ ok: false, error: String(err) });
+      }
+    })();
     return true;
   }
 

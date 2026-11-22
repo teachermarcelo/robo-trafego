@@ -47,12 +47,14 @@ interface RealPhotoCommentStudioProps {
   activeOffer: StudioOfferLite;
   allOffers: StudioOfferLite[];
   onSelectOffer: (offerId: string) => void;
+  onUpdatePresellUrl: (nextUrl: string) => void;
   onSaveRealPhotoConfig: (
     nextConfig: RealPhotoCommentConfig,
     nextPhotoDataUrl?: string,
     activateInDispatch?: boolean
   ) => void;
   onGoToTriage: () => void;
+  onGoToTriggerAutomation: () => void;
   onCopyImageToClipboard: (imageUrl: string) => Promise<void>;
 }
 
@@ -80,13 +82,18 @@ export const RealPhotoCommentStudio: React.FC<RealPhotoCommentStudioProps> = ({
   activeOffer,
   allOffers,
   onSelectOffer,
+  onUpdatePresellUrl,
   onSaveRealPhotoConfig,
   onGoToTriage,
+  onGoToTriggerAutomation,
   onCopyImageToClipboard,
 }) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [copiedTag, setCopiedTag] = useState<string | null>(null);
   const [savedToast, setSavedToast] = useState<boolean>(false);
+  const [copy3ASavedToast, setCopy3ASavedToast] = useState<boolean>(false);
+  const [copy3BSavedToast, setCopy3BSavedToast] = useState<boolean>(false);
+  const [copyDirty, setCopyDirty] = useState<boolean>(false);
 
   const resolvedConfig: RealPhotoCommentConfig = useMemo(() => {
     if (activeOffer.realPhotoCommentConfig) {
@@ -147,6 +154,22 @@ export const RealPhotoCommentStudio: React.FC<RealPhotoCommentStudioProps> = ({
     onSaveRealPhotoConfig(updated, nextPhoto, false);
   };
 
+  const handleExplicitSaveCopy = (which: '3a' | '3b') => {
+    const cleanPost =
+      which === '3a'
+        ? stripAllUrlsFromPostBody(resolvedConfig.postText)
+        : resolvedConfig.postText;
+    commitConfig({ postText: cleanPost });
+    setCopyDirty(false);
+    if (which === '3a') {
+      setCopy3ASavedToast(true);
+      window.setTimeout(() => setCopy3ASavedToast(false), 2600);
+    } else {
+      setCopy3BSavedToast(true);
+      window.setTimeout(() => setCopy3BSavedToast(false), 2600);
+    }
+  };
+
   const handleSelectNiche = (nextNiche: RealPhotoNicheId) => {
     const nextPack = REAL_PHOTO_NICHES[nextNiche].packs[resolvedConfig.lang];
     const priceLabel = activeOffer.offerPriceText?.trim() || nextPack.defaultPriceExample;
@@ -158,6 +181,7 @@ export const RealPhotoCommentStudio: React.FC<RealPhotoCommentStudioProps> = ({
       postText: hydrateTemplateText(nextPack.postTemplates[0], nextPack.defaultKeyword, priceLabel),
       replyText: nextPack.replyTemplates[0],
     });
+    setCopyDirty(false);
   };
 
   const handleSelectLang = (nextLang: RealPhotoLang) => {
@@ -173,6 +197,7 @@ export const RealPhotoCommentStudio: React.FC<RealPhotoCommentStudioProps> = ({
       postText: hydrateTemplateText(nextPack.postTemplates[0], nextPack.defaultKeyword, priceLabel),
       replyText: nextPack.replyTemplates[0],
     });
+    setCopyDirty(false);
   };
 
   const handleCyclePostVariation = () => {
@@ -197,6 +222,7 @@ export const RealPhotoCommentStudio: React.FC<RealPhotoCommentStudioProps> = ({
     const updatedPost = oldKw
       ? resolvedConfig.postText.replace(new RegExp(`"${oldKw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`, 'gi'), `"${nextKeyword.toUpperCase()}"`)
       : resolvedConfig.postText;
+    setCopyDirty(true);
     commitConfig({
       keyword: nextKeyword.toUpperCase(),
       postText: updatedPost,
@@ -270,6 +296,7 @@ export const RealPhotoCommentStudio: React.FC<RealPhotoCommentStudioProps> = ({
       customNaturalPhotoUrl: finalPhoto || resolvedConfig.customNaturalPhotoUrl,
       updatedAt: Date.now(),
     };
+    setCopyDirty(false);
     onSaveRealPhotoConfig(finalConfig, finalPhoto || undefined, true);
     setSavedToast(true);
     window.setTimeout(() => setSavedToast(false), 2600);
@@ -505,6 +532,21 @@ export const RealPhotoCommentStudio: React.FC<RealPhotoCommentStudioProps> = ({
                 </button>
                 <button
                   type="button"
+                  onClick={() => handleExplicitSaveCopy('3a')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg inline-flex items-center gap-1 cursor-pointer shadow transition-colors ${
+                    copy3ASavedToast
+                      ? 'bg-emerald-600 text-white'
+                      : copyDirty
+                      ? 'bg-amber-500 hover:bg-amber-400 text-slate-950'
+                      : 'bg-sky-600 hover:bg-sky-500 text-white'
+                  }`}
+                  title="Grava suas edições da copy no navegador + nuvem e atualiza o disparador"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>{copy3ASavedToast ? 'Copy Salva!' : '💾 Salvar Atualizações'}</span>
+                </button>
+                <button
+                  type="button"
                   onClick={() => markCopied('post-text', stripAllUrlsFromPostBody(resolvedConfig.postText))}
                   className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg inline-flex items-center gap-1 cursor-pointer"
                 >
@@ -544,7 +586,10 @@ export const RealPhotoCommentStudio: React.FC<RealPhotoCommentStudioProps> = ({
             <textarea
               rows={5}
               value={resolvedConfig.postText}
-              onChange={(e) => commitConfig({ postText: e.target.value })}
+              onChange={(e) => {
+                setCopyDirty(true);
+                commitConfig({ postText: e.target.value });
+              }}
               className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-xs text-slate-100 leading-relaxed"
             />
           </div>
@@ -558,7 +603,7 @@ export const RealPhotoCommentStudio: React.FC<RealPhotoCommentStudioProps> = ({
                   <span>3B. Resposta Pronta para Comentários (COM Link Presell Rastreado)</span>
                 </h4>
                 <p className="text-[11px] text-slate-400">
-                  Quando alguém comentar <strong>“{resolvedConfig.keyword}”</strong>, cole esta resposta — o link já leva rastreamento automático da sua Presell!
+                  Quando alguém comentar <strong>“{resolvedConfig.keyword}”</strong>, cole esta resposta — ou automatize na aba <strong>1C. Gatilho → Link</strong>!
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -572,6 +617,18 @@ export const RealPhotoCommentStudio: React.FC<RealPhotoCommentStudioProps> = ({
                 </button>
                 <button
                   type="button"
+                  onClick={() => handleExplicitSaveCopy('3b')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg inline-flex items-center gap-1 cursor-pointer ${
+                    copy3BSavedToast
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-sky-600 hover:bg-sky-500 text-white'
+                  }`}
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>{copy3BSavedToast ? 'Salvo!' : '💾 Salvar'}</span>
+                </button>
+                <button
+                  type="button"
                   onClick={() => markCopied('reply-full', hydratedReplyPreview)}
                   className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold rounded-lg inline-flex items-center gap-1 cursor-pointer"
                 >
@@ -581,33 +638,60 @@ export const RealPhotoCommentStudio: React.FC<RealPhotoCommentStudioProps> = ({
               </div>
             </div>
 
-            <div className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-[11px]">
-              <div className="min-w-0 flex-1">
-                <span className="text-slate-400 block text-[10px]">Link Presell com Rastreamento Ativo:</span>
-                <span className="font-mono text-emerald-300 break-all">{trackedPresellUrl}</span>
+            {/* Direct Editable Presell / Destination Link Field right here */}
+            <div className="bg-slate-950 border border-slate-700/90 rounded-lg p-3 space-y-2">
+              <label className="block space-y-1">
+                <span className="text-[11px] font-bold text-cyan-300">
+                  🔗 Seu Link da Presell / Página de Venda (edite ou cole aqui diretamente):
+                </span>
+                <input
+                  type="url"
+                  value={activeOffer.presellUrl || ''}
+                  onChange={(e) => onUpdatePresellUrl(e.target.value)}
+                  placeholder="https://sua-presell-ou-pagina.vercel.app/produto"
+                  className="w-full bg-slate-900 border border-slate-700 focus:border-cyan-400 rounded-lg px-3 py-2 text-xs font-mono text-emerald-300"
+                />
+              </label>
+              <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                <div className="min-w-0 flex-1">
+                  <span className="text-slate-400 block text-[10px]">Link final com rastreamento automático:</span>
+                  <span className="font-mono text-emerald-300 break-all">{trackedPresellUrl}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => markCopied('presell-only', trackedPresellUrl)}
+                  className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-emerald-200 rounded font-semibold shrink-0 cursor-pointer"
+                >
+                  {copiedTag === 'presell-only' ? 'Link Copiado!' : 'Copiar só Link'}
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => markCopied('presell-only', trackedPresellUrl)}
-                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-emerald-200 rounded font-semibold shrink-0 cursor-pointer"
-              >
-                {copiedTag === 'presell-only' ? 'Link Copiado!' : 'Copiar só Link'}
-              </button>
             </div>
 
             <textarea
               rows={3}
               value={resolvedConfig.replyText}
-              onChange={(e) => commitConfig({ replyText: e.target.value })}
+              onChange={(e) => {
+                setCopyDirty(true);
+                commitConfig({ replyText: e.target.value });
+              }}
               className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-xs text-slate-100 leading-relaxed"
               placeholder="Use [PRESELL_LINK] onde deseja que o link rastreado apareça..."
             />
 
-            <div className="bg-emerald-950/30 border border-emerald-500/30 rounded-lg p-2.5 text-xs text-emerald-100">
-              <span className="text-[10px] uppercase tracking-wide text-emerald-400 font-bold block mb-1">
-                Prévia real do comentário que você vai responder:
-              </span>
-              {hydratedReplyPreview}
+            <div className="bg-emerald-950/30 border border-emerald-500/30 rounded-lg p-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-emerald-100">
+              <div className="min-w-0">
+                <span className="text-[10px] uppercase tracking-wide text-emerald-400 font-bold block mb-1">
+                  Prévia real do comentário que você vai responder:
+                </span>
+                <span className="break-words">{hydratedReplyPreview}</span>
+              </div>
+              <button
+                type="button"
+                onClick={onGoToTriggerAutomation}
+                className="px-3 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 text-[11px] font-extrabold rounded-lg shrink-0 cursor-pointer whitespace-nowrap shadow"
+              >
+                ⚡ Automatizar na Aba 1C →
+              </button>
             </div>
           </div>
         </div>

@@ -1,7 +1,7 @@
 // AutoViral AI Chrome Extension - Background Service Worker (Manifest V3)
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('[AutoViral AI] Extensão v1.5.9 instalada com sucesso!');
+  console.log('[AutoViral AI] Extensão v1.6.0 instalada com sucesso!');
   chrome.storage.local.get(['autoviral_interval', 'autoviral_mapped_groups', 'autoviral_waiting_approval_map'], (res) => {
     chrome.storage.local.set({
       autoviral_interval: res.autoviral_interval || 350,
@@ -490,13 +490,88 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  // Sync Comment Trigger -> Link automation rules & settings from Subaba 1C
+  if (request.action === 'AUTOVIRAL_SYNC_COMMENT_TRIGGERS') {
+    const payload = {
+      autoviral_comment_trigger_rules: Array.isArray(request.rules) ? request.rules : [],
+      autoviral_comment_trigger_settings: request.settings && typeof request.settings === 'object' ? request.settings : {},
+      autoviral_comment_trigger_posts: Array.isArray(request.monitoredPosts) ? request.monitoredPosts : [],
+      autoviral_comment_trigger_synced_at: new Date().toISOString()
+    };
+    chrome.storage.local.set(payload, () => {
+      sendResponse({ success: true, rulesCount: payload.autoviral_comment_trigger_rules.length });
+    });
+    return true;
+  }
+
+  // Open a Facebook post/group URL and run Comment Trigger -> Link scan (Subaba 1C)
+  if (request.action === 'AUTOVIRAL_CHECK_POST_COMMENTS') {
+    const postUrl = String(request.postUrl || '').trim();
+    if (!postUrl || !/^https?:\/\//i.test(postUrl)) {
+      sendResponse({ success: false, error: 'invalid_post_url' });
+      return false;
+    }
+    const scanJob = {
+      jobId: `scan-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      postId: request.postId || '',
+      postUrl,
+      groupName: request.groupName || 'Post Facebook',
+      restrictRuleId: request.restrictRuleId || 'all',
+      mode: request.mode === 'semi_auto' ? 'semi_auto' : 'auto',
+      minDelaySeconds: Math.max(10, Number(request.minDelaySeconds) || 20),
+      maxDelaySeconds: Math.max(15, Number(request.maxDelaySeconds) || 45),
+      maxRepliesPerCheck: Math.max(1, Math.min(20, Number(request.maxRepliesPerCheck) || 5)),
+      rules: Array.isArray(request.rules) ? request.rules : [],
+      createdAt: Date.now()
+    };
+
+    const storagePatch = {
+      autoviral_pending_comment_scan: scanJob
+    };
+    if (Array.isArray(request.rules) && request.rules.length > 0) {
+      storagePatch.autoviral_comment_trigger_rules = request.rules;
+    }
+
+    chrome.storage.local.set(storagePatch, () => {
+      chrome.tabs.create({ url: postUrl, active: true }, (tab) => {
+        void chrome.runtime.lastError;
+        if (!tab || typeof tab.id !== 'number') {
+          sendResponse({ success: false });
+          return;
+        }
+        const targetTabId = tab.id;
+        let dispatched = false;
+        const onTabUpdated = (updatedTabId, changeInfo) => {
+          if (updatedTabId !== targetTabId || changeInfo.status !== 'complete' || dispatched) return;
+          dispatched = true;
+          chrome.tabs.onUpdated.removeListener(onTabUpdated);
+          setTimeout(() => {
+            sendMessageToTabAllFrames(targetTabId, {
+              action: 'AUTOVIRAL_RUN_COMMENT_TRIGGER_SCAN',
+              scanJob
+            });
+          }, 2600);
+        };
+        chrome.tabs.onUpdated.addListener(onTabUpdated);
+        setTimeout(() => {
+          if (!dispatched) {
+            chrome.tabs.onUpdated.removeListener(onTabUpdated);
+          }
+        }, 25000);
+        sendResponse({ success: true, tabId: targetTabId, jobId: scanJob.jobId });
+      });
+    });
+    return true;
+  }
+
   // Relay Instagram mapped accounts, connected handle, YouTube videos, or real FB post results to AutoViral platform tabs
   if (
     request.action === 'AUTOVIRAL_IMPORT_INSTAGRAM_ACCOUNTS' ||
     request.action === 'AUTOVIRAL_INSTA_ACCOUNT_SYNC' ||
     request.action === 'AUTOVIRAL_IMPORT_YOUTUBE_VIDEOS_FROM_EXTENSION' ||
     request.action === 'AUTOVIRAL_FB_POST_RESULT' ||
-    request.action === 'AUTOVIRAL_GROUP_MEMBERSHIP_RESULT'
+    request.action === 'AUTOVIRAL_GROUP_MEMBERSHIP_RESULT' ||
+    request.action === 'AUTOVIRAL_COMMENT_TRIGGER_RESULT'
   ) {
     if (request.action === 'AUTOVIRAL_FB_POST_RESULT') {
       const senderTabId = sender && sender.tab && typeof sender.tab.id === 'number' ? sender.tab.id : null;

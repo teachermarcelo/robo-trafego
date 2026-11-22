@@ -44,6 +44,7 @@ import {
   Flame,
   Camera,
   MessageSquare,
+  Zap,
 } from 'lucide-react';
 import JSZip from 'jszip';
 import { Campaign, FacebookGroup, FacebookPostLog } from '../types';
@@ -84,6 +85,7 @@ import {
   stripAllUrlsFromPostBody,
 } from '../utils/realPhotoCommentTemplates';
 import { RealPhotoCommentStudio } from './RealPhotoCommentStudio';
+import { CommentTriggerAutomationTab } from './CommentTriggerAutomationTab';
 
 export interface GlobalOffer {
   id: string;
@@ -1275,7 +1277,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
   onUpdateCampaign,
 }) => {
   const [subTab, setSubTab] = useState<'offers' | 'kit' | 'triage' | 'bot'>('offers');
-  const [offersInnerTab, setOffersInnerTab] = useState<'standard' | 'real_photo_comment'>('standard');
+  const [offersInnerTab, setOffersInnerTab] = useState<'standard' | 'real_photo_comment' | 'comment_triggers'>('standard');
   const [dispatchPostMode, setDispatchPostMode] = useState<'traditional' | 'real_photo_comment'>(() => {
     try {
       const saved = localStorage.getItem('autoviral_global_dispatch_post_mode');
@@ -2193,7 +2195,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
         join_requested: 'Entrada Solicitada (Cookie Ativo)',
         approved_posting: 'ADMIN ACEITOU! Gatilho disparado → Postando agora!',
         not_member: 'Precisa Participar',
-        composer_stuck: 'Janela Travada no FB (Atualize Extensão v1.5.9)',
+        composer_stuck: 'Janela Travada no FB (Atualize Extensão v1.6.0)',
         rate_limited: 'Limite Temporário FB',
         unavailable: 'Grupo Indisponível',
       };
@@ -4130,7 +4132,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
         message: autoJoinAndPostEnabled
           ? isRealPhotoMode
             ? `📸 Grupo "${cleanGroupName}" aberto no modo FOTO REAL + COMENTÁRIO (${dispatchLimitCount > 0 ? `${nextSentCount}/${dispatchLimitCount}` : `#${nextSentCount}`})! Post vai SEM link para alcance máximo — use o botão de Resposta Presell para responder quem comentar.`
-            : `Grupo Global "${cleanGroupName}" aberto (${dispatchLimitCount > 0 ? `${nextSentCount}/${dispatchLimitCount}` : `#${nextSentCount}`})! Extensão v1.5.9 vai postar ${imageToSend ? 'imagem + link clicável' : 'card de link clicável'} e fechar a aba.`
+            : `Grupo Global "${cleanGroupName}" aberto (${dispatchLimitCount > 0 ? `${nextSentCount}/${dispatchLimitCount}` : `#${nextSentCount}`})! Extensão v1.6.0 vai postar ${imageToSend ? 'imagem + link clicável' : 'card de link clicável'} e fechar a aba.`
           : `Grupo Global "${cleanGroupName}" aberto e texto copiado para postagem manual assistida.`,
         tone: 'success',
       });
@@ -4471,7 +4473,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
     try {
       const zip = new JSZip();
       const files = ['manifest.json', 'popup.html', 'popup.js', 'content.js', 'background.js', 'README.md'];
-      const cacheBust = `v=1.5.9&t=${Date.now()}`;
+      const cacheBust = `v=1.6.0&t=${Date.now()}`;
       await Promise.all(
         files.map(async (fname) => {
           const r = await fetch(`/chrome-extension/${fname}?${cacheBust}`, { cache: 'no-store' });
@@ -4480,17 +4482,17 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
       );
       zip.file(
         'COMO-ATUALIZAR.txt',
-        '1. Extraia este ZIP substituindo os arquivos da pasta anterior (ou em uma pasta nova).\n2. Abra chrome://extensions no Google Chrome.\n3. Clique no ícone de Atualizar (↻) da extensão AutoViral AI v1.5.9.\n4. Recarregue (F5) a aba do AutoViral AI.'
+        '1. Extraia este ZIP substituindo os arquivos da pasta anterior (ou em uma pasta nova).\n2. Abra chrome://extensions no Google Chrome.\n3. Clique no ícone de Atualizar (↻) da extensão AutoViral AI v1.6.0.\n4. Recarregue (F5) a aba do AutoViral AI.'
       );
       const blob = await zip.generateAsync({ type: 'blob' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = 'extensao-autoviral-v1.5.9.zip';
+      link.download = 'extensao-autoviral-v1.6.0.zip';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       setBanner({
-        message: 'Extensão v1.5.9 atualizada baixada! Extraia, recarregue (↻) em chrome://extensions e dê F5 nesta página.',
+        message: 'Extensão v1.6.0 atualizada baixada (com Automação Gatilho → Link nos comentários)! Extraia, recarregue (↻) em chrome://extensions e dê F5 nesta página.',
         tone: 'success',
       });
     } catch {
@@ -4964,11 +4966,25 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                 <Camera className="w-3.5 h-3.5" />
                 <span>1B. Foto Real + Comentário (Caminho A · Alta Conversão)</span>
               </button>
+              <button
+                type="button"
+                onClick={() => setOffersInnerTab('comment_triggers')}
+                className={`px-3.5 py-2 rounded-lg text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer ${
+                  offersInnerTab === 'comment_triggers'
+                    ? 'bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow'
+                    : 'bg-amber-950/35 text-amber-200 hover:bg-amber-900/45 border border-amber-500/40'
+                }`}
+              >
+                <Zap className="w-3.5 h-3.5" />
+                <span>1C. Automação Gatilho → Link (Comentários)</span>
+              </button>
             </div>
             <span className="text-[11px] text-slate-400 px-2">
               {offersInnerTab === 'real_photo_comment'
                 ? 'Produtos digitais (Pedagogia/TDAH, Receitas, Artesanato, Planilhas) · PT / EN / ES · Presell Rastreada'
-                : 'Todas as suas ofertas, imagens e links Presell preservados normalmente'}
+                : offersInnerTab === 'comment_triggers'
+                  ? 'Fluxo GATILHO ("eu quero", "link"...) → LINK automático ou semi-automático nos comentários do FB'
+                  : 'Todas as suas ofertas, imagens e links Presell preservados normalmente'}
             </span>
           </div>
 
@@ -4978,8 +4994,21 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
               allOffers={offers}
               onSelectOffer={(id) => setSelectedOfferId(id)}
               onSaveRealPhotoConfig={handleSaveRealPhotoConfig}
+              onUpdatePresellUrl={(nextUrl) => handleUpdateOfferField('presellUrl', nextUrl)}
               onGoToTriage={() => setSubTab('triage')}
+              onGoToTriggerAutomation={() => setOffersInnerTab('comment_triggers')}
               onCopyImageToClipboard={handleCopyAnyImageToClipboard}
+            />
+          )}
+
+          {offersInnerTab === 'comment_triggers' && (
+            <CommentTriggerAutomationTab
+              activeOffer={activeOffer}
+              allOffers={offers}
+              botLogs={botLogs}
+              isDownloadingExt={isDownloadingExt}
+              onDownloadExtensionZip={handleDownloadGlobalExtensionZip}
+              onNotifyBanner={(message, tone) => setBanner({ message, tone })}
             />
           )}
 
@@ -7833,10 +7862,10 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                           onClick={handleDownloadGlobalExtensionZip}
                           disabled={isDownloadingExt}
                           className="px-3 py-1.5 bg-cyan-600/20 hover:bg-cyan-600/35 border border-cyan-500/40 text-cyan-200 text-[11px] font-semibold rounded-md inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
-                          title="Baixar Extensão v1.5.9 (Anti-Falso Limite FB + Foto Automática + Watchdog em 2º Plano)"
+                          title="Baixar Extensão v1.6.0 (Automação Gatilho → Link nos Comentários + Anti-Falso Limite FB + Foto Automática)"
                         >
                           <Download className="w-3 h-3" />
-                          <span>{isDownloadingExt ? 'Gerando ZIP...' : 'Atualizar Extensão v1.5.9 (ZIP)'}</span>
+                          <span>{isDownloadingExt ? 'Gerando ZIP...' : 'Atualizar Extensão v1.6.0 (ZIP)'}</span>
                         </button>
                       </div>
                       <div className="flex flex-wrap gap-2">
@@ -8440,7 +8469,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                                   )}
                                   <div className="min-w-0">
                                     <span className="font-bold text-amber-300">🛡️ Proteção Anti-Caixa Cinza Ativada:</span>{' '}
-                                    Como <span className="font-mono text-amber-100">{getDisplayDomain(previewUrl)}</span> é externo e não gera capa automática, o formato está travado em <strong className="text-white">Foto do Produto + Link Clicável</strong> (baixe/atualize a extensão v1.5.9 para o robô anexar a foto ao lado automaticamente).
+                                    Como <span className="font-mono text-amber-100">{getDisplayDomain(previewUrl)}</span> é externo e não gera capa automática, o formato está travado em <strong className="text-white">Foto do Produto + Link Clicável</strong> (baixe/atualize a extensão v1.6.0 para o robô anexar a foto ao lado automaticamente).
                                   </div>
                                 </div>
                               )}
@@ -8650,7 +8679,7 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5">
                         <div className="text-xs">
                           <div className="font-semibold text-white">
-                            Sistema Automático: Abrir → Entrar / Responder Perguntas → Card Imagem Clicável → Fechar Aba (v1.5.9)
+                            Sistema Automático: Abrir → Entrar / Responder Perguntas → Card Imagem Clicável → Fechar Aba (v1.6.0)
                           </div>
                           <div className="text-[11px] text-slate-400">
                             {autoJoinAndPostEnabled

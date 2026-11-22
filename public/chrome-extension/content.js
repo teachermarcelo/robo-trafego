@@ -1,4 +1,4 @@
-// AutoViral AI Chrome Extension - Content Script V1.5.9
+// AutoViral AI Chrome Extension - Content Script V1.6.0
 // Runs on Facebook, YouTube, Instagram, Pinterest and AutoViral AI Web Platform
 
 (function () {
@@ -486,6 +486,23 @@
           ">
             📡 Sincronizar com Painel AutoViral
           </button>
+          <button id="autoviral-badge-trigger-scan" style="
+            background: linear-gradient(90deg, #f59e0b 0%, #ea580c 100%);
+            color: #ffffff;
+            border: none;
+            border-radius: 8px;
+            padding: 8px 10px;
+            font-weight: 800;
+            font-size: 11px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+          ">
+            ⚡ Responder Gatilhos (1C)
+          </button>
+          <div id="autoviral-trigger-status" style="display: none; font-size: 10px; color: #fde68a; background: rgba(120, 53, 15, 0.35); border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 8px; padding: 6px 8px; line-height: 1.35;"></div>
         </div>
       `;
 
@@ -553,6 +570,15 @@
           hintEl.style.color = '#34d399';
         }
       };
+
+      const triggerScanBtn = document.getElementById('autoviral-badge-trigger-scan');
+      if (triggerScanBtn) {
+        triggerScanBtn.onclick = () => {
+          if (typeof runCommentTriggerScanOnPage === 'function') {
+            runCommentTriggerScanOnPage(null, true);
+          }
+        };
+      }
     }
 
     function updateFloatingBadge() {
@@ -2229,7 +2255,7 @@
                   groupUrl: window.location.href,
                   groupName: pending.groupName,
                   approvalStatus: 'composer_stuck',
-                  note: 'Facebook travou o modal automático (Atualize p/ Extensão v1.5.9 ou pause AdBlock). Texto copiado.'
+                  note: 'Facebook travou o modal automático (Atualize p/ Extensão v1.6.0 ou pause AdBlock). Texto copiado.'
                 });
                 if (msgEl) {
                   msgEl.style.color = '#fbbf24';
@@ -2849,6 +2875,611 @@
     };
     scheduleGroupPostAssistant();
 
+    // =====================================================================
+    // 1C. COMMENT TRIGGER -> LINK AUTOMATION ENGINE (Subaba 1C v1.6.0)
+    // =====================================================================
+    let isCommentTriggerScanRunning = false;
+    const processedTriggerJobIds = new Set();
+
+    function normalizeTriggerStr(input) {
+      return String(input || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    function setTriggerWidgetStatus(text, tone) {
+      try {
+        createFloatingWidget();
+        const el = document.getElementById('autoviral-trigger-status');
+        if (!el) return;
+        el.style.display = 'block';
+        el.textContent = text;
+        if (tone === 'success') {
+          el.style.color = '#a7f3d0';
+          el.style.borderColor = 'rgba(16, 185, 129, 0.55)';
+          el.style.background = 'rgba(6, 78, 59, 0.45)';
+        } else if (tone === 'danger') {
+          el.style.color = '#fecaca';
+          el.style.borderColor = 'rgba(239, 68, 68, 0.55)';
+          el.style.background = 'rgba(127, 29, 29, 0.45)';
+        } else {
+          el.style.color = '#fde68a';
+          el.style.borderColor = 'rgba(245, 158, 11, 0.45)';
+          el.style.background = 'rgba(120, 53, 15, 0.35)';
+        }
+      } catch (e) {}
+    }
+
+    function sendCommentTriggerResultToPlatform(payload) {
+      const msg = {
+        action: 'AUTOVIRAL_COMMENT_TRIGGER_RESULT',
+        ...payload,
+        timestamp: new Date().toISOString()
+      };
+      try {
+        if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
+          chrome.runtime.sendMessage(msg, () => { void chrome.runtime.lastError; });
+        }
+      } catch (e) {}
+      try {
+        const bc = new BroadcastChannel('autoviral_bridge_channel');
+        bc.postMessage(msg);
+        setTimeout(() => bc.close(), 800);
+      } catch (e) {}
+    }
+
+    function buildRuleTrackedLink(rule, groupName) {
+      if (rule && rule.trackedLinkPreview && /^https?:\/\//i.test(String(rule.trackedLinkPreview))) {
+        return String(rule.trackedLinkPreview).trim();
+      }
+      const raw = String((rule && rule.baseLinkUrl) || '').trim();
+      if (!raw) return '';
+      const withProto = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+      if (!rule || !rule.enablePresellTracking) return withProto;
+      try {
+        const url = new URL(withProto);
+        const paramName = rule.trackingParamName || 'sub2';
+        const slug = normalizeTriggerStr(groupName || rule.name || 'comentario')
+          .replace(/[^a-z0-9]+/g, '_')
+          .replace(/^_+|_+$/g, '')
+          .slice(0, 32) || 'comentario';
+        url.searchParams.set(paramName, `fb_trigger_${slug}`);
+        if (!url.searchParams.has('utm_source')) url.searchParams.set('utm_source', 'facebook_comment');
+        if (!url.searchParams.has('utm_medium')) url.searchParams.set('utm_medium', 'trigger_1c');
+        return url.toString();
+      } catch (e) {
+        return withProto;
+      }
+    }
+
+    function renderTriggerReplyForComment(rule, authorFullName, replyIndex, groupName) {
+      const firstName = String(authorFullName || '').trim().split(/\s+/)[0] || '';
+      const templates = Array.isArray(rule.replyTemplates) && rule.replyTemplates.filter(Boolean).length > 0
+        ? rule.replyTemplates.filter(Boolean)
+        : ['Oi [NOME]! Aqui está o link certinho: [LINK]'];
+      const chosen = templates[Math.abs(Number(replyIndex) || 0) % templates.length];
+      const link = buildRuleTrackedLink(rule, groupName);
+      let text = String(chosen)
+        .replace(/\[NOME\]|\{nome\}|\{name\}/gi, firstName || 'oi')
+        .replace(/\[LINK\]|\[PRESELL_LINK\]|\{link\}/gi, link);
+      if (link && !text.includes(link)) {
+        text = `${text.trim()} ${link}`;
+      }
+      return { text: text.trim(), trackedLink: link };
+    }
+
+    function matchCommentWithActiveRules(commentText, activeRules, restrictRuleId) {
+      const norm = normalizeTriggerStr(commentText);
+      if (!norm || norm.length < 2) return null;
+      const padded = ` ${norm.replace(/[^a-z0-9\s]/g, ' ')} `;
+      const eligible = activeRules.filter((r) => {
+        if (!r || r.active === false) return false;
+        if (restrictRuleId && restrictRuleId !== 'all' && r.id !== restrictRuleId) return false;
+        return Array.isArray(r.keywords) && r.keywords.length > 0 && Boolean(r.baseLinkUrl || r.trackedLinkPreview);
+      });
+      for (const rule of eligible) {
+        const sortedKws = [...rule.keywords]
+          .map((k) => normalizeTriggerStr(k))
+          .filter(Boolean)
+          .sort((a, b) => b.length - a.length);
+        for (const kw of sortedKws) {
+          const cleanKw = kw.replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+          if (!cleanKw) continue;
+          if (cleanKw.length <= 3) {
+            if (padded.includes(` ${cleanKw} `)) return { rule, matchedKeyword: kw };
+          } else if (norm.includes(cleanKw) || padded.includes(` ${cleanKw} `)) {
+            return { rule, matchedKeyword: kw };
+          }
+        }
+      }
+      return null;
+    }
+
+    function extractVisibleFacebookComments() {
+      const articles = Array.from(document.querySelectorAll('div[role="article"]'));
+      const results = [];
+      const seenNodes = new Set();
+
+      for (const art of articles) {
+        if (seenNodes.has(art)) continue;
+        const rect = art.getBoundingClientRect();
+        if (rect.width < 120 || rect.height < 28) continue;
+
+        const ariaRaw = (art.getAttribute('aria-label') || '').trim();
+        const ariaLow = normalizeTriggerStr(ariaRaw);
+        const isCommentByAria =
+          ariaLow.startsWith('comentario de ') ||
+          ariaLow.startsWith('comment by ') ||
+          ariaLow.startsWith('resposta de ') ||
+          ariaLow.startsWith('reply by ') ||
+          ariaLow.startsWith('respuesta de ');
+
+        const parentArticle = art.parentElement ? art.parentElement.closest('div[role="article"]') : null;
+        if (!isCommentByAria && !parentArticle) continue;
+
+        // Ignore reply boxes themselves if wrapped in article
+        if (art.querySelector('div[role="textbox"][contenteditable="true"]') && !isCommentByAria) continue;
+
+        // Extract author name
+        let authorName = '';
+        if (ariaRaw) {
+          const m = ariaRaw.match(/^(?:Comentário de|Comentario de|Comment by|Resposta de|Respuesta de|Reply by)\s+(.+?)(?:\s+(?:há|hace|at|on|em|about|\d+\s*(?:min|h|d|s|sem|w|m))\b|$)/i);
+          if (m && m[1]) authorName = m[1].trim();
+        }
+        if (!authorName) {
+          const nameLink = art.querySelector('a[role="link"] span[dir="auto"], span[dir="auto"] > a[role="link"], strong');
+          if (nameLink) authorName = (nameLink.innerText || '').trim();
+        }
+        if (!authorName) authorName = 'Membro';
+
+        // Collect comment text excluding nested child articles & action buttons
+        const textBlocks = Array.from(art.querySelectorAll('div[dir="auto"], span[dir="auto"]')).filter((el) => {
+          if (el.closest('div[role="article"]') !== art) return false;
+          if (el.closest('div[role="button"], button')) return false;
+          const t = (el.innerText || '').trim();
+          if (!t || t.length < 2) return false;
+          if (normalizeTriggerStr(t) === normalizeTriggerStr(authorName)) return false;
+          const low = normalizeTriggerStr(t);
+          if (['curtir', 'responder', 'like', 'reply', 'me gusta', 'compartilhar', 'share', 'editar', 'excluir', 'autor', 'author', 'top fan', 'fa numero 1'].includes(low)) {
+            return false;
+          }
+          // Skip parent wrapper if it contains child dir=auto elements
+          if (el.querySelector('div[dir="auto"]')) return false;
+          return true;
+        });
+
+        const uniqueLines = [];
+        for (const el of textBlocks) {
+          const t = (el.innerText || '').trim();
+          if (t && !uniqueLines.includes(t)) uniqueLines.push(t);
+        }
+        const commentText = uniqueLines.join(' ').trim();
+        if (!commentText || commentText.length < 2) continue;
+
+        // Skip comments that already contain links (likely our own reply or someone else's link)
+        if (/https?:\/\/|www\.|pay\.kiwify|hotmart|eduzz|bit\.ly/i.test(commentText)) continue;
+
+        seenNodes.add(art);
+        results.push({ article: art, authorName, commentText });
+      }
+      return results;
+    }
+
+    function findReplyButtonForComment(commentArticle) {
+      const candidates = Array.from(commentArticle.querySelectorAll('div[role="button"], button, span[role="button"]'));
+      for (const el of candidates) {
+        if (el.closest('div[role="article"]') !== commentArticle) continue;
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) continue;
+        const txt = normalizeTriggerStr(el.innerText || el.getAttribute('aria-label') || '');
+        if (txt === 'responder' || txt === 'reply' || txt === 'contestar') {
+          return el;
+        }
+      }
+      // Fallback: check immediate sibling container right after commentArticle
+      const parent = commentArticle.parentElement;
+      if (parent) {
+        const siblingBtns = Array.from(parent.querySelectorAll('div[role="button"], button'));
+        for (const el of siblingBtns) {
+          if (el.closest('div[role="article"]') && el.closest('div[role="article"]') !== commentArticle) continue;
+          const txt = normalizeTriggerStr(el.innerText || el.getAttribute('aria-label') || '');
+          if (txt === 'responder' || txt === 'reply' || txt === 'contestar') {
+            return el;
+          }
+        }
+      }
+      return null;
+    }
+
+    function findActiveReplyTextboxNear(commentArticle) {
+      const active = document.activeElement;
+      if (active && active.getAttribute && active.getAttribute('contenteditable') === 'true' && active.getAttribute('role') === 'textbox') {
+        return active;
+      }
+      let container = commentArticle.parentElement;
+      for (let depth = 0; depth < 5 && container && container !== document.body; depth++) {
+        const boxes = Array.from(container.querySelectorAll('div[contenteditable="true"][role="textbox"], div[contenteditable="true"][data-lexical-editor="true"]'));
+        const visibleBox = boxes.find((b) => {
+          const r = b.getBoundingClientRect();
+          if (r.width < 60 || r.height < 16) return false;
+          const lbl = normalizeTriggerStr(b.getAttribute('aria-label') || b.getAttribute('aria-placeholder') || '');
+          return lbl.includes('respond') || lbl.includes('reply') || lbl.includes('coment') || lbl.includes('comment') || lbl === '';
+        });
+        if (visibleBox) return visibleBox;
+        container = container.parentElement;
+      }
+      return null;
+    }
+
+    async function insertTextIntoCommentReplyBox(textbox, text) {
+      try {
+        textbox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } catch (e) {}
+      await new Promise((r) => setTimeout(r, 250));
+      try {
+        textbox.focus();
+        textbox.click();
+      } catch (e) {}
+
+      // Place caret at end (preserving Facebook's @Author mention tag if Facebook pre-populated it)
+      try {
+        const sel = window.getSelection();
+        if (sel) {
+          const range = document.createRange();
+          range.selectNodeContents(textbox);
+          range.collapse(false);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+      } catch (e) {}
+
+      const existingLen = (textbox.innerText || '').trim().length;
+      const textToPaste = existingLen > 0 ? ` ${text}` : text;
+
+      try {
+        const dt = new DataTransfer();
+        dt.setData('text/plain', textToPaste);
+        textbox.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+      } catch (e) {}
+
+      await new Promise((r) => setTimeout(r, 280));
+      const afterPaste = (textbox.innerText || textbox.textContent || '').trim();
+      if (!afterPaste.includes(text.slice(0, Math.min(18, text.length)))) {
+        try {
+          textbox.focus();
+          document.execCommand('insertText', false, textToPaste);
+        } catch (e) {}
+        try {
+          textbox.dispatchEvent(new InputEvent('input', { bubbles: true, data: textToPaste, inputType: 'insertText' }));
+        } catch (e) {}
+      }
+      await new Promise((r) => setTimeout(r, 250));
+      const finalTxt = (textbox.innerText || textbox.textContent || '').trim();
+      return finalTxt.length > existingLen + 4;
+    }
+
+    async function submitCommentReplyBox(textbox) {
+      textbox.focus();
+      const enterInit = {
+        key: 'Enter',
+        code: 'Enter',
+        keyCode: 13,
+        which: 13,
+        bubbles: true,
+        cancelable: true
+      };
+      try { textbox.dispatchEvent(new KeyboardEvent('keydown', enterInit)); } catch (e) {}
+      try { textbox.dispatchEvent(new KeyboardEvent('keypress', enterInit)); } catch (e) {}
+      try { textbox.dispatchEvent(new KeyboardEvent('keyup', enterInit)); } catch (e) {}
+
+      await new Promise((r) => setTimeout(r, 650));
+      // Fallback: if text still remains in box, click nearby send/comment icon button
+      const remaining = (textbox.innerText || '').trim();
+      if (remaining.length > 8) {
+        const form = textbox.closest('form') || textbox.parentElement && textbox.parentElement.parentElement;
+        if (form) {
+          const btns = Array.from(form.querySelectorAll('div[role="button"], button'));
+          const sendBtn = btns.find((b) => {
+            const lbl = normalizeTriggerStr(b.getAttribute('aria-label') || b.innerText || '');
+            const disabled = b.getAttribute('aria-disabled') === 'true' || b.disabled;
+            return !disabled && (lbl === 'comentar' || lbl === 'comment' || lbl === 'responder' || lbl === 'enviar' || lbl === 'send');
+          });
+          if (sendBtn) {
+            try { sendBtn.click(); } catch (e) {}
+          }
+        }
+      }
+    }
+
+    async function runCommentTriggerScanOnPage(explicitJob, triggeredManually) {
+      if (isCommentTriggerScanRunning) {
+        setTriggerWidgetStatus('⏳ Varredura de gatilhos já está em andamento nesta aba...', 'info');
+        return;
+      }
+      if (explicitJob && explicitJob.jobId && processedTriggerJobIds.has(explicitJob.jobId)) {
+        return;
+      }
+      if (explicitJob && explicitJob.jobId) {
+        processedTriggerJobIds.add(explicitJob.jobId);
+      }
+
+      isCommentTriggerScanRunning = true;
+      try {
+        const stored = await new Promise((resolve) => {
+          if (!chrome.storage || !chrome.storage.local) {
+            resolve({});
+            return;
+          }
+          chrome.storage.local.get(
+            [
+              'autoviral_comment_trigger_rules',
+              'autoviral_comment_trigger_settings',
+              'autoviral_replied_comment_keys'
+            ],
+            (res) => resolve(res || {})
+          );
+        });
+
+        const rules = (explicitJob && Array.isArray(explicitJob.rules) && explicitJob.rules.length > 0)
+          ? explicitJob.rules
+          : (Array.isArray(stored.autoviral_comment_trigger_rules) ? stored.autoviral_comment_trigger_rules : []);
+
+        const storedSettings = stored.autoviral_comment_trigger_settings || {};
+        const mode = (explicitJob && explicitJob.mode) || storedSettings.mode || 'auto';
+        const minDelaySec = Math.max(10, Number((explicitJob && explicitJob.minDelaySeconds) || storedSettings.minDelaySeconds || 20));
+        const maxDelaySec = Math.max(minDelaySec + 5, Number((explicitJob && explicitJob.maxDelaySeconds) || storedSettings.maxDelaySeconds || 45));
+        const maxReplies = Math.max(1, Math.min(20, Number((explicitJob && explicitJob.maxRepliesPerCheck) || storedSettings.maxRepliesPerCheck || 5)));
+        const restrictRuleId = (explicitJob && explicitJob.restrictRuleId) || 'all';
+        const postUrl = (explicitJob && explicitJob.postUrl) || window.location.href;
+        const groupName = (explicitJob && explicitJob.groupName) || document.title.replace(/\s*\|\s*Facebook$/i, '').trim() || 'Post Facebook';
+
+        const activeRules = rules.filter((r) => r && r.active !== false);
+        if (activeRules.length === 0) {
+          setTriggerWidgetStatus('⚠️ Nenhuma regra Gatilho → Link sincronizada. Abra a aba 1C no painel e clique em "Sincronizar".', 'danger');
+          return;
+        }
+
+        setTriggerWidgetStatus(`🔍 Lendo comentários (${activeRules.length} regra(s) · modo ${mode === 'auto' ? 'Automático Seguro' : 'Semi-Automático'})...`, 'info');
+
+        // Lightly expand "Ver mais comentários" (max 2 clicks) so fresh comments appear
+        try {
+          const expandBtns = Array.from(document.querySelectorAll('div[role="button"], span[role="button"]')).filter((el) => {
+            const t = normalizeTriggerStr(el.innerText || '');
+            return (
+              t.includes('ver mais comentarios') ||
+              t.includes('view more comments') ||
+              t.includes('ver mas comentarios') ||
+              t.includes('todos os comentarios') ||
+              t.includes('all comments')
+            );
+          }).slice(0, 2);
+          for (const eb of expandBtns) {
+            try { eb.click(); } catch (e) {}
+            await new Promise((r) => setTimeout(r, 900));
+          }
+        } catch (e) {}
+
+        const repliedKeysMap = (stored.autoviral_replied_comment_keys && typeof stored.autoviral_replied_comment_keys === 'object')
+          ? { ...stored.autoviral_replied_comment_keys }
+          : {};
+
+        const pageKey = window.location.pathname.replace(/\/+$/, '').toLowerCase();
+        const comments = extractVisibleFacebookComments();
+
+        const matches = [];
+        const localSeenAuthors = new Set();
+
+        for (const c of comments) {
+          const authorKey = normalizeTriggerStr(`${pageKey}::author::${c.authorName}`);
+          const commentKey = normalizeTriggerStr(`${pageKey}::${c.authorName}::${c.commentText.slice(0, 45)}`);
+          if (repliedKeysMap[commentKey] || repliedKeysMap[authorKey] || localSeenAuthors.has(authorKey)) {
+            continue;
+          }
+          const matched = matchCommentWithActiveRules(c.commentText, activeRules, restrictRuleId);
+          if (matched) {
+            localSeenAuthors.add(authorKey);
+            matches.push({
+              ...c,
+              authorKey,
+              commentKey,
+              rule: matched.rule,
+              matchedKeyword: matched.matchedKeyword
+            });
+          }
+        }
+
+        if (matches.length === 0) {
+          setTriggerWidgetStatus(
+            `✅ ${comments.length} comentário(s) analisado(s): nenhum novo gatilho pendente agora.`,
+            'success'
+          );
+          sendCommentTriggerResultToPlatform({
+            status: 'scan_complete',
+            postUrl,
+            groupName,
+            matchedCount: 0,
+            mode
+          });
+          return;
+        }
+
+        const batch = matches.slice(0, maxReplies);
+        let processedCount = 0;
+
+        for (let idx = 0; idx < batch.length; idx++) {
+          const item = batch[idx];
+
+          if (typeof isFacebookRateLimited === 'function' && isFacebookRateLimited()) {
+            setTriggerWidgetStatus('🛡️ FREIO ANTI-BLOQUEIO: Facebook limitou ações. Parando respostas agora!', 'danger');
+            sendCommentTriggerResultToPlatform({
+              status: 'rate_limited',
+              commentKey: item.commentKey,
+              postUrl,
+              groupName,
+              authorName: item.authorName,
+              commentSnippet: item.commentText.slice(0, 140),
+              matchedKeyword: item.matchedKeyword,
+              ruleId: item.rule.id,
+              ruleName: item.rule.name,
+              replySent: '',
+              trackedLink: '',
+              mode
+            });
+            return;
+          }
+
+          setTriggerWidgetStatus(
+            `⚡ Respondendo ${idx + 1}/${batch.length}: "${item.authorName}" (gatilho "${item.matchedKeyword}")...`,
+            'info'
+          );
+
+          try {
+            item.article.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          } catch (e) {}
+          await new Promise((r) => setTimeout(r, 450));
+
+          const replyBtn = findReplyButtonForComment(item.article);
+          if (!replyBtn) {
+            continue;
+          }
+          try { replyBtn.click(); } catch (e) {}
+          await new Promise((r) => setTimeout(r, 950));
+
+          const replyBox = findActiveReplyTextboxNear(item.article);
+          if (!replyBox) {
+            continue;
+          }
+
+          const { text: replyText, trackedLink } = renderTriggerReplyForComment(
+            item.rule,
+            item.authorName,
+            (item.rule.repliesSentCount || 0) + idx,
+            groupName
+          );
+
+          const inserted = await insertTextIntoCommentReplyBox(replyBox, replyText);
+          if (!inserted) {
+            continue;
+          }
+
+          // Save anti-duplicate keys immediately
+          const nowIso = new Date().toISOString();
+          repliedKeysMap[item.commentKey] = nowIso;
+          repliedKeysMap[item.authorKey] = nowIso;
+          // Trim map to last 1500 keys to keep storage lean
+          const allKeys = Object.keys(repliedKeysMap);
+          if (allKeys.length > 1500) {
+            allKeys.slice(0, allKeys.length - 1500).forEach((k) => { delete repliedKeysMap[k]; });
+          }
+          if (chrome.storage && chrome.storage.local) {
+            chrome.storage.local.set({ autoviral_replied_comment_keys: repliedKeysMap });
+          }
+
+          if (mode === 'semi_auto') {
+            try {
+              replyBox.style.outline = '3px solid #10b981';
+              replyBox.style.borderRadius = '10px';
+              replyBox.style.boxShadow = '0 0 18px rgba(16, 185, 129, 0.55)';
+              replyBox.focus();
+            } catch (e) {}
+            processedCount++;
+            setTriggerWidgetStatus(
+              `🖐️ SEMI-AUTO: Resposta preenchida p/ ${item.authorName}! Confira e aperte Enter. (${batch.length - 1} restante(s))`,
+              'success'
+            );
+            sendCommentTriggerResultToPlatform({
+              status: 'prefilled',
+              commentKey: item.commentKey,
+              postUrl,
+              groupName,
+              authorName: item.authorName,
+              commentSnippet: item.commentText.slice(0, 140),
+              matchedKeyword: item.matchedKeyword,
+              ruleId: item.rule.id,
+              ruleName: item.rule.name,
+              replySent: replyText,
+              trackedLink,
+              mode: 'semi_auto'
+            });
+            break;
+          } else {
+            await new Promise((r) => setTimeout(r, 650));
+            await submitCommentReplyBox(replyBox);
+            processedCount++;
+            sendCommentTriggerResultToPlatform({
+              status: 'replied',
+              commentKey: item.commentKey,
+              postUrl,
+              groupName,
+              authorName: item.authorName,
+              commentSnippet: item.commentText.slice(0, 140),
+              matchedKeyword: item.matchedKeyword,
+              ruleId: item.rule.id,
+              ruleName: item.rule.name,
+              replySent: replyText,
+              trackedLink,
+              mode: 'auto'
+            });
+
+            if (idx < batch.length - 1) {
+              const waitSec = Math.floor(minDelaySec + Math.random() * Math.max(1, maxDelaySec - minDelaySec));
+              for (let s = waitSec; s > 0; s--) {
+                setTriggerWidgetStatus(
+                  `✅ Respondido p/ ${item.authorName}! Pausa segura anti-bloqueio: ${s}s p/ próximo (${idx + 2}/${batch.length})...`,
+                  'success'
+                );
+                await new Promise((r) => setTimeout(r, 1000));
+              }
+            }
+          }
+        }
+
+        if (mode === 'auto') {
+          setTriggerWidgetStatus(
+            `✅ Concluído! ${processedCount} comentário(s) respondido(s) com segurança.`,
+            'success'
+          );
+        }
+        sendCommentTriggerResultToPlatform({
+          status: 'scan_complete',
+          postUrl,
+          groupName,
+          matchedCount: processedCount,
+          mode
+        });
+      } catch (err) {
+        setTriggerWidgetStatus('⚠️ Erro ao ler comentários desta página. Role até os comentários e tente novamente.', 'danger');
+      } finally {
+        isCommentTriggerScanRunning = false;
+      }
+    }
+
+    // Check if background queued a Comment Trigger Scan for this newly opened Facebook post tab
+    if (chrome.storage && chrome.storage.local) {
+      setTimeout(() => {
+        chrome.storage.local.get(['autoviral_pending_comment_scan'], (res) => {
+          const pendingScan = res && res.autoviral_pending_comment_scan;
+          if (!pendingScan || !pendingScan.postUrl) return;
+          const ageMs = Date.now() - (Number(pendingScan.createdAt) || 0);
+          if (ageMs > 5 * 60 * 1000) {
+            chrome.storage.local.remove(['autoviral_pending_comment_scan']);
+            return;
+          }
+          const curPath = window.location.pathname.replace(/\/+$/, '').toLowerCase();
+          const targetPath = (() => {
+            try { return new URL(pendingScan.postUrl).pathname.replace(/\/+$/, '').toLowerCase(); } catch (e) { return ''; }
+          })();
+          if (targetPath && (curPath === targetPath || curPath.includes(targetPath) || targetPath.includes(curPath))) {
+            chrome.storage.local.remove(['autoviral_pending_comment_scan']);
+            runCommentTriggerScanOnPage(pendingScan, false);
+          }
+        });
+      }, 3600);
+    }
+
     // Message listener for popup & background watchdog
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (request.action === 'AUTOVIRAL_MAP_GROUPS' || request.action === 'AUTOVIRAL_GET_GROUPS') {
@@ -2867,6 +3498,12 @@
         const oldAssist = document.getElementById('autoviral-post-assistant');
         if (oldAssist) oldAssist.remove();
         setTimeout(initGroupPostAssistant, 200);
+        sendResponse({ ok: true });
+      } else if (request.action === 'AUTOVIRAL_RUN_COMMENT_TRIGGER_SCAN') {
+        if (chrome.storage && chrome.storage.local) {
+          chrome.storage.local.remove(['autoviral_pending_comment_scan']);
+        }
+        runCommentTriggerScanOnPage(request.scanJob || null, false);
         sendResponse({ ok: true });
       }
       return true;
@@ -3725,6 +4362,14 @@
         window.dispatchEvent(new CustomEvent('autoviral_waiting_approvals_synced', {
           detail: data.waitingApprovals || []
         }));
+      } else if (data.action === 'AUTOVIRAL_COMMENT_TRIGGER_RESULT') {
+        window.postMessage({
+          ...data,
+          type: 'AUTOVIRAL_COMMENT_TRIGGER_RESULT'
+        }, '*');
+        window.dispatchEvent(new CustomEvent('autoviral_comment_trigger_result', {
+          detail: data
+        }));
       }
     };
 
@@ -3824,6 +4469,30 @@
             groupSlug: ev.data.groupSlug
           }, () => { void chrome.runtime.lastError; });
         }
+      } else if (ev.data.type === 'AUTOVIRAL_SYNC_COMMENT_TRIGGERS') {
+        if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
+          chrome.runtime.sendMessage({
+            action: 'AUTOVIRAL_SYNC_COMMENT_TRIGGERS',
+            rules: Array.isArray(ev.data.rules) ? ev.data.rules : [],
+            settings: ev.data.settings || {},
+            monitoredPosts: Array.isArray(ev.data.monitoredPosts) ? ev.data.monitoredPosts : []
+          }, () => { void chrome.runtime.lastError; });
+        }
+      } else if (ev.data.type === 'AUTOVIRAL_CHECK_POST_COMMENTS') {
+        if (chrome && chrome.runtime && chrome.runtime.sendMessage) {
+          chrome.runtime.sendMessage({
+            action: 'AUTOVIRAL_CHECK_POST_COMMENTS',
+            postId: ev.data.postId || '',
+            postUrl: ev.data.postUrl || '',
+            groupName: ev.data.groupName || '',
+            restrictRuleId: ev.data.restrictRuleId || 'all',
+            mode: ev.data.mode === 'semi_auto' ? 'semi_auto' : 'auto',
+            minDelaySeconds: ev.data.minDelaySeconds || 20,
+            maxDelaySeconds: ev.data.maxDelaySeconds || 45,
+            maxRepliesPerCheck: ev.data.maxRepliesPerCheck || 5,
+            rules: Array.isArray(ev.data.rules) ? ev.data.rules : []
+          }, () => { void chrome.runtime.lastError; });
+        }
       }
     });
 
@@ -3845,7 +4514,8 @@
         message.action === 'AUTOVIRAL_FB_POST_RESULT' ||
         message.action === 'AUTOVIRAL_GROUP_MEMBERSHIP_RESULT' ||
         message.action === 'AUTOVIRAL_MEMBERSHIP_BATCH_PROGRESS' ||
-        message.action === 'AUTOVIRAL_WAITING_APPROVALS_SYNC'
+        message.action === 'AUTOVIRAL_WAITING_APPROVALS_SYNC' ||
+        message.action === 'AUTOVIRAL_COMMENT_TRIGGER_RESULT'
       ) {
         forwardExtensionEvent(message);
         sendResponse({ received: true });

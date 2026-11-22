@@ -42,6 +42,8 @@ import {
   History,
   Database,
   Flame,
+  Camera,
+  MessageSquare,
 } from 'lucide-react';
 import JSZip from 'jszip';
 import { Campaign, FacebookGroup, FacebookPostLog } from '../types';
@@ -70,6 +72,18 @@ import {
   pullFullCloudSnapshotFromFirebase,
   GlobalWorkspaceSyncData,
 } from '../lib/firebase';
+import {
+  REAL_PHOTO_LANG_META,
+  REAL_PHOTO_NICHES,
+  RealPhotoCommentConfig,
+  analyzeAudienceQualityForRealPhoto,
+  buildRealPhotoTrackedPresellUrl,
+  createDefaultRealPhotoConfig,
+  generateNaturalDeskPhotoSync,
+  hydrateTemplateText,
+  stripAllUrlsFromPostBody,
+} from '../utils/realPhotoCommentTemplates';
+import { RealPhotoCommentStudio } from './RealPhotoCommentStudio';
 
 export interface GlobalOffer {
   id: string;
@@ -87,6 +101,7 @@ export interface GlobalOffer {
   presellUrl: string;
   postImageUrl?: string;
   postImageUpdatedAt?: number;
+  realPhotoCommentConfig?: RealPhotoCommentConfig;
   createdAt: string;
 }
 
@@ -1260,6 +1275,22 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
   onUpdateCampaign,
 }) => {
   const [subTab, setSubTab] = useState<'offers' | 'kit' | 'triage' | 'bot'>('offers');
+  const [offersInnerTab, setOffersInnerTab] = useState<'standard' | 'real_photo_comment'>('standard');
+  const [dispatchPostMode, setDispatchPostMode] = useState<'traditional' | 'real_photo_comment'>(() => {
+    try {
+      const saved = localStorage.getItem('autoviral_global_dispatch_post_mode');
+      return saved === 'real_photo_comment' ? 'real_photo_comment' : 'traditional';
+    } catch {
+      return 'traditional';
+    }
+  });
+
+  const handleSetDispatchPostMode = (mode: 'traditional' | 'real_photo_comment') => {
+    setDispatchPostMode(mode);
+    try {
+      localStorage.setItem('autoviral_global_dispatch_post_mode', mode);
+    } catch {}
+  };
 
   const [hiddenLandingIds, setHiddenLandingIds] = useState<string[]>(() => {
     try {
@@ -2545,6 +2576,72 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
       syncLandingCampaignImageOnServer(activeOffer, value);
       saveGlobalWorkspaceSyncToFirebase({ globalOffers: nextOffers }, { force: true }).catch(() => {});
     }
+  };
+
+  const handleSaveRealPhotoConfig = (
+    nextConfig: RealPhotoCommentConfig,
+    nextPhotoDataUrl?: string,
+    activateInDispatch = false
+  ) => {
+    if (!activeOffer) return;
+    const nowTs = Date.now();
+    const nextOffers = offersRef.current.map((o) => {
+      if (o.id !== activeOffer.id) return o;
+      return {
+        ...o,
+        realPhotoCommentConfig: nextConfig,
+        ...(nextPhotoDataUrl !== undefined
+          ? { postImageUrl: nextPhotoDataUrl, postImageUpdatedAt: nowTs }
+          : {}),
+      };
+    });
+    offersRef.current = nextOffers;
+    setOffers(nextOffers);
+    safeSetLocalStorageJson(STORAGE_KEYS.OFFERS, nextOffers);
+
+    if (nextPhotoDataUrl !== undefined) {
+      localImgLockUntilRef.current[activeOffer.id] = nowTs + 180000;
+      if (nextPhotoDataUrl) {
+        saveOfferImageIdb(activeOffer.id, nextPhotoDataUrl, nowTs);
+      } else {
+        deleteOfferImageIdb(activeOffer.id, nowTs);
+      }
+      syncLandingCampaignImageOnServer(activeOffer, nextPhotoDataUrl);
+    }
+    saveGlobalWorkspaceSyncToFirebase({ globalOffers: nextOffers }, { force: true }).catch(() => {});
+
+    if (activateInDispatch) {
+      handleSetDispatchPostMode('real_photo_comment');
+      setSubTab('bot');
+      setBanner({
+        message:
+          '📸 Modo "Foto Real + Comentário (Post SEM Link)" salvo e ativado na aba 04. Robô Global! Selecione o público do nicho certo e use a resposta pronta com sua Presell rastreada.',
+        tone: 'success',
+      });
+    }
+  };
+
+  const handleCopyAnyImageToClipboard = async (imgUrl: string) => {
+    if (!imgUrl) return;
+    try {
+      const img = new Image();
+      if (!imgUrl.startsWith('data:')) img.crossOrigin = 'anonymous';
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error('load_error'));
+        img.src = imgUrl;
+      });
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth || 1080;
+      canvas.height = img.naturalHeight || 1080;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.drawImage(img, 0, 0);
+      const pngBlob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+      if (pngBlob && navigator.clipboard && typeof ClipboardItem !== 'undefined') {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })]);
+      }
+    } catch {}
   };
 
   const handleSaveOfferChanges = () => {
@@ -3886,24 +3983,59 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
     }
 
     const group = effectiveDispatchGroups[currentPostIndex % effectiveDispatchGroups.length];
+    const isRealPhotoMode = dispatchPostMode === 'real_photo_comment';
+    const activeRpCfg: RealPhotoCommentConfig | null =
+      isRealPhotoMode && activeOffer
+        ? activeOffer.realPhotoCommentConfig ||
+          createDefaultRealPhotoConfig('pedagogia_tdah', 'pt', activeOffer.offerPriceText)
+        : null;
+
     const presellLink = activeOffer
-      ? appendTrackingParam(activeOffer.presellUrl || 'https://global-sell-beta.vercel.app/', 'utm_source', 'facebook_groups')
+      ? isRealPhotoMode && activeRpCfg
+        ? buildRealPhotoTrackedPresellUrl(
+            activeOffer.presellUrl || 'https://global-sell-beta.vercel.app/',
+            activeOffer.trackingParamName || 'sub2',
+            activeRpCfg.nicheId,
+            activeRpCfg.lang,
+            group.name
+          )
+        : appendTrackingParam(
+            activeOffer.presellUrl || 'https://global-sell-beta.vercel.app/',
+            'utm_source',
+            'facebook_groups'
+          )
       : 'https://global-sell-beta.vercel.app/';
 
-    const headline = stripRobotMentionsFromPost(customPostHeadline);
-    const bodyWithLink = stripRobotMentionsFromPost(customPostBody.replace(/\[PRESELL_LINK\]/g, presellLink));
-    const rawFullText = headline ? `${headline}\n\n${bodyWithLink}` : bodyWithLink;
-    const fullText = ensureClickableUrlsInText(rawFullText);
+    let headline = stripRobotMentionsFromPost(customPostHeadline);
+    let bodyWithLink = stripRobotMentionsFromPost(customPostBody.replace(/\[PRESELL_LINK\]/g, presellLink));
+    let fullText = '';
+
+    if (isRealPhotoMode && activeRpCfg) {
+      // Modo Foto Real + Comentário: envia SOMENTE texto curto humano SEM NENHUM LINK (alcance máximo!)
+      const cleanCommentPost = stripAllUrlsFromPostBody(stripRobotMentionsFromPost(activeRpCfg.postText));
+      headline = cleanCommentPost.split('\n')[0] || cleanCommentPost;
+      bodyWithLink = cleanCommentPost;
+      fullText = cleanCommentPost;
+    } else {
+      const rawFullText = headline ? `${headline}\n\n${bodyWithLink}` : bodyWithLink;
+      fullText = ensureClickableUrlsInText(rawFullText);
+    }
 
     // Somente links próprios do painel com og:image dinâmico podem usar Card Clicável sem foto anexa;
-    // links externos (ex: global-sell-beta.vercel.app) SEMPRE anexam a foto real do produto.
+    // links externos (ex: global-sell-beta.vercel.app) ou Modo Foto Real SEMPRE anexam a foto real/natural.
     const isOwnOgLanding =
-      /(\/api\/og)/i.test(presellLink) ||
-      (/(robo-trafego\.vercel\.app|run\.app|localhost)/i.test(presellLink) && /(\/\?camp=|\/\?p=|\/z\/)/i.test(presellLink));
-    const shouldAttachRealPhoto = attachImageInComposer || !isOwnOgLanding;
-    let postImageUrl = activeOffer?.postImageUrl || '';
+      !isRealPhotoMode &&
+      (/(\/api\/og)/i.test(presellLink) ||
+        (/(robo-trafego\.vercel\.app|run\.app|localhost)/i.test(presellLink) &&
+          /(\/\?camp=|\/\?p=|\/z\/)/i.test(presellLink)));
+    const shouldAttachRealPhoto = isRealPhotoMode || attachImageInComposer || !isOwnOgLanding;
+    let postImageUrl =
+      (isRealPhotoMode && activeRpCfg?.customNaturalPhotoUrl) || activeOffer?.postImageUrl || '';
     if (shouldAttachRealPhoto && !postImageUrl && activeOffer) {
-      const autoGeneratedImg = generateOfferPromoImageDataUrl(activeOffer, customPostHeadline, flyerTheme);
+      const autoGeneratedImg =
+        isRealPhotoMode && activeRpCfg
+          ? generateNaturalDeskPhotoSync({ nicheId: activeRpCfg.nicheId, lang: activeRpCfg.lang })
+          : generateOfferPromoImageDataUrl(activeOffer, customPostHeadline, flyerTheme);
       if (autoGeneratedImg) {
         postImageUrl = autoGeneratedImg;
         handleUpdateOfferField('postImageUrl', autoGeneratedImg);
@@ -3957,7 +4089,9 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
       groupUrl: group.url,
       phase: 'opening',
       statusLabel: autoJoinAndPostEnabled
-        ? imageToSend
+        ? isRealPhotoMode
+          ? 'Abrindo aba → Postando Foto Real + Comentário (SEM link no post)...'
+          : imageToSend
           ? 'Abrindo aba → Postando imagem + link clicável...'
           : 'Abrindo aba → Postando com card de link...'
         : 'Aberto para postagem manual',
@@ -3994,7 +4128,9 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
     } else {
       setBanner({
         message: autoJoinAndPostEnabled
-          ? `Grupo Global "${cleanGroupName}" aberto (${dispatchLimitCount > 0 ? `${nextSentCount}/${dispatchLimitCount}` : `#${nextSentCount}`})! Extensão v1.5.9 vai postar ${imageToSend ? 'imagem + link clicável' : 'card de link clicável'} e fechar a aba.`
+          ? isRealPhotoMode
+            ? `📸 Grupo "${cleanGroupName}" aberto no modo FOTO REAL + COMENTÁRIO (${dispatchLimitCount > 0 ? `${nextSentCount}/${dispatchLimitCount}` : `#${nextSentCount}`})! Post vai SEM link para alcance máximo — use o botão de Resposta Presell para responder quem comentar.`
+            : `Grupo Global "${cleanGroupName}" aberto (${dispatchLimitCount > 0 ? `${nextSentCount}/${dispatchLimitCount}` : `#${nextSentCount}`})! Extensão v1.5.9 vai postar ${imageToSend ? 'imagem + link clicável' : 'card de link clicável'} e fechar a aba.`
           : `Grupo Global "${cleanGroupName}" aberto e texto copiado para postagem manual assistida.`,
         tone: 'success',
       });
@@ -4797,9 +4933,57 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
       </div>
 
       {/* ===================================================================== */}
-      {/* TAB 1: OFFERS & UNIVERSAL PRESELL TRACKING                            */}
+      {/* TAB 1: OFFERS & UNIVERSAL PRESELL TRACKING + SUBABA FOTO REAL         */}
       {/* ===================================================================== */}
       {subTab === 'offers' && (
+        <div className="space-y-4">
+          {/* Inner Subtab Bar inside 01. Ofertas & Links Presell */}
+          <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-900/90 border border-slate-800 rounded-xl p-2">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setOffersInnerTab('standard')}
+                className={`px-3.5 py-2 rounded-lg text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer ${
+                  offersInnerTab === 'standard'
+                    ? 'bg-cyan-600 text-white shadow'
+                    : 'bg-slate-950 text-slate-300 hover:text-white border border-slate-800'
+                }`}
+              >
+                <Link2 className="w-3.5 h-3.5" />
+                <span>1A. Ofertas &amp; Links Presell (Atual)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setOffersInnerTab('real_photo_comment')}
+                className={`px-3.5 py-2 rounded-lg text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer ${
+                  offersInnerTab === 'real_photo_comment'
+                    ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow'
+                    : 'bg-emerald-950/35 text-emerald-200 hover:bg-emerald-900/45 border border-emerald-500/40'
+                }`}
+              >
+                <Camera className="w-3.5 h-3.5" />
+                <span>1B. Foto Real + Comentário (Caminho A · Alta Conversão)</span>
+              </button>
+            </div>
+            <span className="text-[11px] text-slate-400 px-2">
+              {offersInnerTab === 'real_photo_comment'
+                ? 'Produtos digitais (Pedagogia/TDAH, Receitas, Artesanato, Planilhas) · PT / EN / ES · Presell Rastreada'
+                : 'Todas as suas ofertas, imagens e links Presell preservados normalmente'}
+            </span>
+          </div>
+
+          {offersInnerTab === 'real_photo_comment' && activeOffer && (
+            <RealPhotoCommentStudio
+              activeOffer={activeOffer}
+              allOffers={offers}
+              onSelectOffer={(id) => setSelectedOfferId(id)}
+              onSaveRealPhotoConfig={handleSaveRealPhotoConfig}
+              onGoToTriage={() => setSubTab('triage')}
+              onCopyImageToClipboard={handleCopyAnyImageToClipboard}
+            />
+          )}
+
+          {offersInnerTab === 'standard' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           {/* Offers List */}
           <div className="lg:col-span-4 bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
@@ -5376,6 +5560,8 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                 </div>
               </div>
             </div>
+          )}
+        </div>
           )}
         </div>
       )}
@@ -7790,6 +7976,241 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                         </div>
                       )}
 
+                      {/* CLEAR DISPATCH MODE SELECTOR (Prevents Any Confusion Between Traditional vs Foto Real + Comentário) */}
+                      {(() => {
+                        const rpCfg =
+                          activeOffer.realPhotoCommentConfig ||
+                          createDefaultRealPhotoConfig('pedagogia_tdah', 'pt', activeOffer.offerPriceText);
+                        const rpNiche = REAL_PHOTO_NICHES[rpCfg.nicheId] || REAL_PHOTO_NICHES.pedagogia_tdah;
+                        const rpPack = rpNiche.packs[rpCfg.lang] || rpNiche.packs.pt;
+                        const nextGroupForTrack = effectiveDispatchGroups[currentPostIndex % Math.max(1, effectiveDispatchGroups.length)];
+                        const rpGroupTrackedPresell = buildRealPhotoTrackedPresellUrl(
+                          activeOffer.presellUrl || 'https://global-sell-beta.vercel.app/',
+                          activeOffer.trackingParamName || 'sub2',
+                          rpCfg.nicheId,
+                          rpCfg.lang,
+                          nextGroupForTrack?.name
+                        );
+                        const rpReplyHydrated = (rpCfg.replyText || rpPack.replyTemplates[0]).includes('[PRESELL_LINK]')
+                          ? (rpCfg.replyText || rpPack.replyTemplates[0]).replace(/\[PRESELL_LINK\]/g, rpGroupTrackedPresell)
+                          : `${(rpCfg.replyText || rpPack.replyTemplates[0]).trim()} ${rpGroupTrackedPresell}`;
+                        const audienceQuality = analyzeAudienceQualityForRealPhoto(
+                          activeAudience?.name || '',
+                          activeAudienceGroups
+                        );
+
+                        return (
+                          <div className="space-y-3">
+                            {/* Unmistakable 2-Mode Switcher */}
+                            <div className="bg-slate-950 border border-slate-700/80 rounded-xl p-3 space-y-2.5">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                                  <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                                  <span>Modo de Postagem neste Disparo (Escolha Claro — Sem Confusão):</span>
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSubTab('offers');
+                                    setOffersInnerTab('real_photo_comment');
+                                  }}
+                                  className="text-[11px] text-emerald-300 hover:text-emerald-200 underline font-semibold cursor-pointer"
+                                >
+                                  Configurar Nicho / Foto / Buscar Grupos (Aba 1B) →
+                                </button>
+                              </div>
+
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleSetDispatchPostMode('traditional')}
+                                  className={`text-left p-3 rounded-lg border transition-all cursor-pointer ${
+                                    dispatchPostMode === 'traditional'
+                                      ? 'bg-cyan-950/50 border-cyan-400 ring-1 ring-cyan-400/40'
+                                      : 'bg-slate-900 border-slate-800 hover:border-slate-600'
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-xs font-bold text-white inline-flex items-center gap-1.5">
+                                      <Link2 className="w-3.5 h-3.5 text-cyan-400" />
+                                      <span>Modo Tradicional (Post COM Link + Foto)</span>
+                                    </span>
+                                    {dispatchPostMode === 'traditional' && (
+                                      <span className="px-1.5 py-0.5 rounded bg-cyan-500/25 text-cyan-200 text-[10px] font-bold">
+                                        ATIVO
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-[11px] text-slate-400 mt-1">
+                                    Mantém seu formato atual: título + texto persuasivo + link Presell clicável direto no post + foto.
+                                  </p>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleSetDispatchPostMode('real_photo_comment')}
+                                  className={`text-left p-3 rounded-lg border transition-all cursor-pointer ${
+                                    dispatchPostMode === 'real_photo_comment'
+                                      ? 'bg-emerald-950/55 border-emerald-400 ring-1 ring-emerald-400/40'
+                                      : 'bg-slate-900 border-slate-800 hover:border-slate-600'
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-xs font-bold text-white inline-flex items-center gap-1.5">
+                                      <Camera className="w-3.5 h-3.5 text-emerald-400" />
+                                      <span>Modo Foto Real + Comentário (Post SEM Link)</span>
+                                    </span>
+                                    {dispatchPostMode === 'real_photo_comment' && (
+                                      <span className="px-1.5 py-0.5 rounded bg-emerald-500/25 text-emerald-200 text-[10px] font-bold">
+                                        ATIVO
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-[11px] text-slate-400 mt-1">
+                                    Alcance máximo em grupos do nicho exato: posta <strong>só foto natural + texto pedindo comentário</strong>, e entrega a Presell rastreada na resposta!
+                                  </p>
+                                </button>
+                              </div>
+
+                              {/* Audience Quality Metric Bar */}
+                              <div
+                                className={`rounded-lg px-3 py-2 border flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px] ${
+                                  audienceQuality.score === 'excellent'
+                                    ? 'bg-emerald-950/25 border-emerald-600/35 text-emerald-200'
+                                    : audienceQuality.score === 'attention'
+                                    ? 'bg-amber-950/30 border-amber-500/40 text-amber-200'
+                                    : 'bg-rose-950/35 border-rose-500/45 text-rose-200'
+                                }`}
+                              >
+                                <div className="space-y-0.5">
+                                  <div className="font-bold">
+                                    🎯 Métrica de Grupos ({activeAudience?.name || 'Todos os Grupos'}): {audienceQuality.headline}
+                                  </div>
+                                  <div className="text-slate-300">{audienceQuality.details}</div>
+                                </div>
+                                {audienceQuality.score !== 'excellent' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSubTab('offers');
+                                      setOffersInnerTab('real_photo_comment');
+                                    }}
+                                    className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-white font-bold rounded-md shrink-0 cursor-pointer"
+                                  >
+                                    🔎 Achar Grupos Certos
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            {dispatchPostMode === 'real_photo_comment' ? (
+                              <div className="bg-emerald-950/20 border border-emerald-500/40 rounded-xl p-3.5 space-y-3">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <div className="space-y-0.5">
+                                    <span className="text-xs font-extrabold text-emerald-300 flex items-center gap-1.5">
+                                      <MessageSquare className="w-3.5 h-3.5" />
+                                      <span>
+                                        MODO ATIVO: FOTO REAL + COMENTÁRIO ({rpNiche.emoji} {rpNiche.shortLabel} · {REAL_PHOTO_LANG_META[rpCfg.lang].flag} {rpCfg.lang.toUpperCase()})
+                                      </span>
+                                    </span>
+                                    <p className="text-[11px] text-slate-300">
+                                      O robô vai postar <strong>apenas este texto curto (ZERO links)</strong> + a foto natural. Menos bloqueio e muito mais alcance!
+                                    </p>
+                                  </div>
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const nextIdx = (rpCfg.variationIndex + 1) % rpPack.postTemplates.length;
+                                        const priceLabel = activeOffer.offerPriceText?.trim() || rpPack.defaultPriceExample;
+                                        handleSaveRealPhotoConfig({
+                                          ...rpCfg,
+                                          variationIndex: nextIdx,
+                                          postText: hydrateTemplateText(rpPack.postTemplates[nextIdx], rpCfg.keyword, priceLabel),
+                                        });
+                                      }}
+                                      className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-cyan-200 text-[11px] font-semibold rounded-md inline-flex items-center gap-1 cursor-pointer"
+                                    >
+                                      <Shuffle className="w-3 h-3" />
+                                      <span>Variar Texto</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const clean = stripAllUrlsFromPostBody(rpCfg.postText);
+                                        try {
+                                          navigator.clipboard?.writeText(clean);
+                                        } catch {}
+                                        setCopiedId('rp-dispatch-post');
+                                        setTimeout(() => setCopiedId((p) => (p === 'rp-dispatch-post' ? null : p)), 2000);
+                                      }}
+                                      className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold rounded-md inline-flex items-center gap-1 cursor-pointer"
+                                    >
+                                      {copiedId === 'rp-dispatch-post' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                                      <span>{copiedId === 'rp-dispatch-post' ? 'Post Copiado!' : 'Copiar Post SEM Link'}</span>
+                                    </button>
+                                  </div>
+                                </div>
+
+                                <textarea
+                                  rows={5}
+                                  value={rpCfg.postText}
+                                  onChange={(e) =>
+                                    handleSaveRealPhotoConfig({
+                                      ...rpCfg,
+                                      postText: e.target.value,
+                                    })
+                                  }
+                                  className="w-full bg-slate-950 border border-emerald-600/40 rounded-lg p-3 text-xs text-slate-100 leading-relaxed"
+                                />
+
+                                {/* Quick Reply Box with Group-Specific Tracked Presell Link */}
+                                <div className="bg-slate-950 border border-cyan-500/40 rounded-lg p-3 space-y-2">
+                                  <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <span className="text-xs font-bold text-cyan-300 flex items-center gap-1.5">
+                                      <Link2 className="w-3.5 h-3.5" />
+                                      <span>
+                                        Resposta Pronta p/ Quem Comentar “{rpCfg.keyword}” (Presell Rastreada{nextGroupForTrack ? ` · ${sanitizeGlobalGroupName(nextGroupForTrack.name).slice(0, 26)}` : ''})
+                                      </span>
+                                    </span>
+                                    <div className="flex flex-wrap items-center gap-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const nextIdx = (rpCfg.replyVariationIndex + 1) % rpPack.replyTemplates.length;
+                                          handleSaveRealPhotoConfig({
+                                            ...rpCfg,
+                                            replyVariationIndex: nextIdx,
+                                            replyText: rpPack.replyTemplates[nextIdx],
+                                          });
+                                        }}
+                                        className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-semibold rounded cursor-pointer"
+                                      >
+                                        Outra Frase
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          try {
+                                            navigator.clipboard?.writeText(rpReplyHydrated);
+                                          } catch {}
+                                          setCopiedId('rp-dispatch-reply');
+                                          setTimeout(() => setCopiedId((p) => (p === 'rp-dispatch-reply' ? null : p)), 2000);
+                                        }}
+                                        className="px-2.5 py-1 bg-cyan-600 hover:bg-cyan-500 text-white text-[11px] font-bold rounded inline-flex items-center gap-1 cursor-pointer"
+                                      >
+                                        {copiedId === 'rp-dispatch-reply' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                                        <span>{copiedId === 'rp-dispatch-reply' ? 'Resposta Copiada!' : 'Copiar Resposta + Presell'}</span>
+                                      </button>
+                                    </div>
+                                  </div>
+                                  <div className="text-xs text-emerald-100 bg-emerald-950/30 border border-emerald-500/25 rounded p-2 break-words">
+                                    {rpReplyHydrated}
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              <>
                       {/* 1-Click Postagem Chamativa Style Bar */}
                       <div className="space-y-2">
                         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -7867,6 +8288,11 @@ export const GlobalMediaScalersTab: React.FC<GlobalMediaScalersTabProps> = ({
                           className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-xs text-slate-100 leading-relaxed"
                         />
                       </label>
+                              </>
+                            )}
+                          </div>
+                        );
+                      })()}
 
                       {/* Post Image & OG Link Card Guarantee Bar */}
                       <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 space-y-2.5">
